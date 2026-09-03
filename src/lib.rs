@@ -1,7 +1,7 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
-
+//! # psync
+//! An `async` runtime for RP2350 (for now) with support for task priority and dependency
+//! enumeration.
+#![no_std]
 #[cfg(test)]
 mod tests {
     use super::*;
