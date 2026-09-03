@@ -1,11 +1,7 @@
 // Sairam.
 use crate::TaskControlBlock;
-
-#[no_mangle]
-pub static mut CURRENT_TCB: *mut TaskControlBlock = core::ptr::null_mut();
-
-#[no_mangle]
-pub static mut NEXT_TCB: *mut TaskControlBlock = core::ptr::null_mut();
+use crate::CURRENT_TCB;
+use crate::NEXT_TCB;
 
 /// Handles context switching. Activated by setting PendSV bit using
 /// [`cortex_m::peripherals::SCB`](https://docs.rs/cortex-m/latest/cortex_m/peripheral/struct.SCB.html)
