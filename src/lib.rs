@@ -2,6 +2,7 @@
 //! An `async` runtime for RP2350 (for now) with support for task priority and dependency
 //! enumeration.
 #![no_std]
+
 #[cfg(test)]
 mod tests {
     use super::*;

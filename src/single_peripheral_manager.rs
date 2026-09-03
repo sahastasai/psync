@@ -5,7 +5,8 @@ use rp235x_hal::gpio::{DynFunction, DynSioConfig, InputOverride, SioInput, SioOu
 use cortex_m::interrupt::{self, Mutex};
 use once_cell::race::OnceBox;
 use alloc::boxed::Box;
-
+// TODO: Rustdoc comments across this file.
+// TODO: Write a version of this file without using the heap?
 // Updated to be fully concurrent using alloc Arcs, cortex_m Mutexes, and once_cell racing boxes
 // Inits
 const XOSC_CRYSTAL_FREQ: u32 = 12_000_000;
