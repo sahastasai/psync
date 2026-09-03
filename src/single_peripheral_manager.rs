@@ -9,11 +9,16 @@ use alloc::boxed::Box;
 // TODO: Write a version of this file without using the heap?
 // Updated to be fully concurrent using alloc Arcs, cortex_m Mutexes, and once_cell racing boxes
 // Inits
+/// The crystal oscillation frequency.
 const XOSC_CRYSTAL_FREQ: u32 = 12_000_000;
+/// The abstraction of RP235x Single Cycle I/O.
 static sio: OnceBox<Arc<Mutex<Sio>>> = OnceBox::new();
+/// The RP235x abstraction for the Watchdog timer.
 static watchdog: OnceBox<Arc<Mutex<Watchdog>>> = OnceBox::new();
+/// The RP235x abstraction for the ClockManager.
 static clocks: OnceBox<Arc<Mutex<ClocksManager>>> = OnceBox::new();
 // System initer helper method
+/// Initializes the RP235x into appropriate abstractions.
 fn init_systems() -> (Watchdog, hal::gpio::Pins, ClocksManager) {
 // Inits
     let mut peripherals = hal::pac::Peripherals::take().unwrap();
@@ -24,13 +29,16 @@ fn init_systems() -> (Watchdog, hal::gpio::Pins, ClocksManager) {
     let pinsx = rp235x_hal::gpio::Pins::new(peripherals.IO_BANK0, peripherals.PADS_BANK0, siox.gpio_bank0, &mut peripherals.RESETS);
     (watchdogx, pinsx, clocksx)
 }
+/// A variable selector for [`get_variable`].
 pub enum VariableSelect {
     PINS, WATCHDOG, CLOCKS
 }
-
+/// A variable emitter for [`get_variable`].
 pub enum VariableFulfilled<'a> {
     PINS(hal::gpio::Pins), WATCHDOG(&'a Arc<Mutex<Watchdog>>), CLOCKS(&'a Arc<Mutex<ClocksManager>>)
 }
+/// Extends [`init_systems`] by setting global variables as well.
+// TODO: add SIO to global variables.
 pub fn system_initer() {
     let a = init_systems();
     watchdog.get_or_init(|| {
@@ -41,6 +49,8 @@ pub fn system_initer() {
     });
 }
 // Panics without a proper call to system_initer prior
+/// Getting a variable from the variables that we initialize.
+// This implementation is erroneous due to the potential for multiple usage of `init_systems`.
 pub fn get_variable(v: VariableSelect) -> VariableFulfilled<'static> {
     match(v) {
         VariableSelect::PINS => { return VariableFulfilled::PINS(init_systems().1) },
