@@ -4,7 +4,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 fn main() {
-    let out = &PathBuf::from(env::var_dir("OUT_DIR").unwrap());
+    let out = &PathBuf::from(env::var("OUT_DIR").unwrap());
     
     // Read the local memory.x file from project root
     let memory_x = std::fs::read("memory.x")
