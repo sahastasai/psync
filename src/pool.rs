@@ -1,8 +1,9 @@
 // Sairam.
 use crate::{Park, Task, TaskControlBlock, LocalBoxedFuture};
 
-/// Represents the default [`Pool::Item`] element that should be used in [`Pool`]s.
-struct DefaultItem(TaskControlBlock<&dyn Trait>, u16);
+/// Represents the default [`Pool::Item`] element that is used in [`Pool`]s. It is a `tuple struct`,
+/// with a [`TaskControlBlock`] as the 0th element and a `u16` priority as the 1st element. 
+struct DefaultItem(TaskControlBlock<&dyn Task>, u16);
 /// A trait that holds a series of tasks to be executed.
 pub trait Pool {
     /// See [`Park`]. This handles the sleeping and waking of the executor.
