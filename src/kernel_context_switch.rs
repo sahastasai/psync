@@ -4,8 +4,8 @@ use crate::CURRENT_TCB;
 use crate::NEXT_TCB;
 
 /// Handles context switching. Activated by setting PendSV bit using
-/// [`cortex_m::peripherals::SCB`](https://docs.rs/cortex-m/latest/cortex_m/peripheral/struct.SCB.html)
-/// and is not mangled by the compiler.
+/// [`cortex_m::peripherals::SCB`] and is not mangled by the compiler.
+#[cfg(feature = "rp235x")]
 #[no_mangle]
 #[naked]
 pub unsafe extern "C" fn PendSV() {
