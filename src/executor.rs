@@ -16,5 +16,4 @@ impl<P: Pool> Executor<P> {
     pub fn new(pool: P) -> Self {
         Self(Arc::new(pool));
     }
-
 }
