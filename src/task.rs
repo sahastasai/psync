@@ -1,60 +1,78 @@
-// Sairam.
-use core::future::IntoFuture;
-use crate::{BoxedFuture, LocalBoxedFuture};
-use fxhash::FxHasher;
-/// A pointer to the current [`TaskControlBlock`]. Used when kernel context switching. It is
-/// currently considered unsafe to write to this value. Restrict usage to the scheduler 
-/// thread, and ensure that nothing else mutates this.
-#[no_mangle]
-pub(crate) static mut CURRENT_TCB: *mut TaskControlBlock = core::ptr::null_mut();
-/// A pointer to the next [`TaskControlBlock`]. Used when kernel context switching. See notes on
-/// safety in the string for [`CURRENT_TCB`].
-#[no_mangle]
-pub(crate) static mut NEXT_TCB: *mut TaskControlBlock = core::ptr::null_mut();
+use crate::{LocalBoxFuture, Park};
+use alloc::{sync::Arc, task::Wake};
+use core::{
+    sync::atomic::{AtomicBool, AtomicU16, Ordering},
+    task::{Context, Poll, Waker},
+};
 
-/// The trait for a Task.
-pub trait Task: IntoFuture + Sized {
-    /// The result of this task.
-    type Result;
-    /// The [`async`] function that controls the running of this [`Task`].
-    async fn run(&mut self) -> Self::Result;
-    /// A synchronous function that gives this function's priority. This must call
-    /// [`Pool::priority_trigger`] if it changes its own priority at any point.
-    fn priority(self) -> u16;
-    /// A synchronous function that allows other functions to change the priority of this function.
-    /// If the priority change is approved within this function, it must call
-    /// [`Pool::priority_trigger`].
-    fn priority_suggestion(&mut self, identifier: u32, suggested_priority: u16) -> bool;
-    /// A synchronous function that returns the fingerprint of this [`Task`]. This is
-    /// useful in cases where this [`Task`] must be uniquely identified. Use the default
-    /// implementation unless you have a really good reason not to do so.
-    fn fingerprint(self) -> u64 {
-        let mut hasher = FxHasher::default();
-        hasher.write_usize(self.run as usize);
-        hasher.write_usize(self.priority as usize);
-        hasher.write_usize(self.fingerprint as usize);
-        hasher.finish()
+pub(crate) struct Signal {
+    ready: AtomicBool,
+    priority: AtomicU16,
+    park: Arc<dyn ParkSignal>,
+}
+trait ParkSignal: Send + Sync {
+    fn unpark(&self);
+}
+impl<P: Park> ParkSignal for P {
+    fn unpark(&self) {
+        Park::unpark(self);
     }
-
 }
-/// Blocks that control tasks as wrappers for Futures for the sole purpose of
-/// allowing context switching from the main thread (or main core in the case
-/// of RP235x controllers).
-#[repr(C)]
-pub struct TaskControlBlock<T: Task> {
-    stack_ptr: u32,
-    task: T
+impl Wake for Signal {
+    fn wake(self: Arc<Self>) {
+        self.wake_by_ref();
+    }
+    fn wake_by_ref(self: &Arc<Self>) {
+        self.ready.store(true, Ordering::Release);
+        self.park.unpark();
+    }
 }
 
-/// Controls how a [`TaskControlBlock`] is cast into a [`LocalBoxedFuture`].
-impl IntoFuture for TaskControlBlock<T: Task> {
-    /// See [`Task::Result`]; the `Result`ant type of the [`Task`] being performed.
-    type Output = T::Result;
-    /// The returned `Future` type.  
-    type IntoFuture = LocalBoxedFuture;
+/// Changes priority and wakes a task. Handles never contain the task's local future.
+#[derive(Clone)]
+pub struct TaskHandle(Arc<Signal>);
+impl TaskHandle {
+    pub fn priority(&self) -> u16 {
+        self.0.priority.load(Ordering::Acquire)
+    }
+    pub fn set_priority(&self, priority: u16) {
+        self.0.priority.store(priority, Ordering::Release);
+        self.wake();
+    }
+    pub fn wake(&self) {
+        self.0.wake_by_ref();
+    }
+}
 
-    /// A conversion from [`TaskControlBlock`] to [`LocalBoxedFuture`].
-    fn into_future(self) -> Self::IntoFuture {
-        self.task.into_future();
+/// A scheduled future, owned by its executor's pool.
+pub struct Task {
+    future: LocalBoxFuture<'static>,
+    signal: Arc<Signal>,
+}
+impl Task {
+    pub(crate) fn new<P: Park>(
+        future: LocalBoxFuture<'static>,
+        priority: u16,
+        park: Arc<P>,
+    ) -> (Self, TaskHandle) {
+        let signal = Arc::new(Signal {
+            ready: AtomicBool::new(true),
+            priority: AtomicU16::new(priority),
+            park,
+        });
+        let handle = TaskHandle(signal.clone());
+        (Self { future, signal }, handle)
+    }
+    pub fn is_ready(&self) -> bool {
+        self.signal.ready.load(Ordering::Acquire)
+    }
+    pub fn priority(&self) -> u16 {
+        self.signal.priority.load(Ordering::Acquire)
+    }
+    pub(crate) fn poll(&mut self) -> Poll<()> {
+        // Clear before polling so a wake during poll is retained.
+        self.signal.ready.store(false, Ordering::Release);
+        let waker = Waker::from(self.signal.clone());
+        self.future.as_mut().poll(&mut Context::from_waker(&waker))
     }
 }

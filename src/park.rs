@@ -1,9 +1,17 @@
-// Sairam.
-
-/// A trait for the implementation of parking and unparking threads. See [`pasts::Park`].
+/// Parking must preserve an unpark notification delivered just before park.
 pub trait Park: Default + Send + Sync + 'static {
-    /// Parks a thread (that is, puts it to sleep to save power and CPU compute).
     fn park(&self);
-    /// Wakes a thread from its state of being parked.
     fn unpark(&self);
+}
+
+/// Uses WFE/SEV on RP2350 ARM, and spins on other targets.
+#[derive(Debug, Default)]
+pub struct DefaultPark;
+impl Park for DefaultPark {
+    fn park(&self) {
+        crate::os::park();
+    }
+    fn unpark(&self) {
+        crate::os::unpark();
+    }
 }

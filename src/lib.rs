@@ -1,42 +1,37 @@
-//! # psync
-//! An `async` runtime for RP2350 (for now) with support for task priority and dependency
-//! enumeration.
+//! A cooperative, single-core async executor. Larger priorities run first.
 #![no_std]
-#![no_main]
 
-#[cfg(feature = "rp235x")]
 extern crate alloc;
-#[cfg(feature = "rp235x")]
-use embedded_alloc::LlffHeap as Heap;
-    
-#[cfg(feature = "rp235x")]    
+
+mod executor;
+mod future;
+mod os;
+mod park;
+mod pool;
+mod task;
+
+pub use executor::Executor;
+pub use future::{BoxFuture, LocalBoxFuture};
+pub use park::{DefaultPark, Park};
+pub use pool::{DefaultPool, Pool};
+pub use task::{Task, TaskHandle};
+
+#[cfg(all(feature = "rp235x", target_os = "none", target_arch = "arm"))]
 #[global_allocator]
-static HEAP: Heap = Heap::empty();
+static HEAP: embedded_alloc::LlffHeap = embedded_alloc::LlffHeap::empty();
 
-#[cfg(feature = "rp235x")]
-unsafe extern "C" {
-    static mut _heap_start: u8;
-    static mut _heap_end: u8;
-}
-
-#[cfg(feature = "rp235x")]
-pub fn init_heap() {
-    unsafe {
-        let start = &raw mut _heap_start as usize;
-        let end = &raw mut _heap_end as usize;
-        let size = end - start;
-        HEAP.init(start, size);
+/// Initialize the firmware heap before creating an executor.
+///
+/// # Safety
+/// Call exactly once, before any allocation, with no concurrent heap access.
+/// The application's linker script must provide valid heap boundaries.
+#[cfg(all(feature = "rp235x", target_os = "none", target_arch = "arm"))]
+pub unsafe fn init_heap() {
+    unsafe extern "C" {
+        static mut _heap_start: u8;
+        static mut _heap_end: u8;
     }
-}
-
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
+    let start = &raw mut _heap_start as usize;
+    let end = &raw mut _heap_end as usize;
+    unsafe { HEAP.init(start, end - start) };
 }

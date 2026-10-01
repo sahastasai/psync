@@ -1,28 +1,13 @@
-MEMORY
-{
-  /* Standard RP2350 Flash boot slot (XIP cache window) assuming a 4MB flash chip */
+MEMORY {
   FLASH : ORIGIN = 0x10000000, LENGTH = 4M
-
-  /* Total 520 KB contiguous SRAM available on the RP2350 */
-  RAM   : ORIGIN = 0x20000000, LENGTH = 520K
+  RAM : ORIGIN = 0x20000000, LENGTH = 520K
 }
-
-/* Specify where the execution stack ends (grows downwards from high memory to low memory) */
-_stack_start = ORIGIN(RAM) + LENGTH(RAM);
-
-/* Define heap boundaries dynamically based on remaining free memory */
-SECTIONS
-{
-  .heap (NOLOAD) :
-  {
-    . = ALIGN(8);
-    _heap_start = .;
-    
-    /* Allocates all remaining RAM up to 32KB below the stack pointer to prevent collision */
-    . = ORIGIN(RAM) + LENGTH(RAM) - 32K;
-    
-    . = ALIGN(8);
-    _heap_end = .;
-  } > RAM
-}
-
+/* cortex-m-rt places this block immediately after the vector table. */
+SECTIONS {
+  .start_block : ALIGN(4) { KEEP(*(.start_block)); } > FLASH
+} INSERT AFTER .vector_table;
+_stext = ADDR(.start_block) + SIZEOF(.start_block);
+/* Heap follows all statics; reserve the upper 32 KiB for the stack. */
+_heap_start = ALIGN(__euninit, 8);
+_heap_end = ORIGIN(RAM) + LENGTH(RAM) - 32K;
+ASSERT(_heap_end > _heap_start, "Not enough RAM for heap and stack");

@@ -663,6 +663,8 @@ dependencies = [
 name = "psync"
 version = "0.1.0"
 dependencies = [
+ "cortex-m",
+ "cortex-m-rt",
  "embedded-alloc",
  "rp235x-hal",
 ]
