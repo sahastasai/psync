@@ -1,0 +1,21 @@
+[package]
+name = "psync-graph"
+version = "0.1.0"
+edition = "2024"
+description = "Dependency analysis and code generation behind #[psync::graph]"
+
+[features]
+# Command-line expander (`psync-expand`): line numbers, pretty printing and JSON reports.
+cli = ["dep:prettyplease", "dep:serde", "dep:serde_json", "proc-macro2/span-locations"]
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full", "visit", "visit-mut", "extra-traits"] }
+prettyplease = { version = "0.2", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+
+[[bin]]
+name = "psync-expand"
+required-features = ["cli"]

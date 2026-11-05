@@ -1,8 +1,12 @@
 //! A cooperative, single-core async executor. Larger priorities run first.
+//! `#[psync::graph]` runs the independent awaits of an async function concurrently.
 #![no_std]
 
 extern crate alloc;
 
+#[doc(hidden)]
+#[path = "graph_rt.rs"]
+pub mod __private;
 mod executor;
 mod future;
 mod os;
@@ -14,6 +18,7 @@ pub use executor::Executor;
 pub use future::{BoxFuture, LocalBoxFuture};
 pub use park::{DefaultPark, Park};
 pub use pool::{DefaultPool, Pool};
+pub use psync_macros::{fresh, graph, independent, seq};
 pub use task::{Task, TaskHandle};
 
 #[cfg(all(feature = "rp235x", target_os = "none", target_arch = "arm"))]

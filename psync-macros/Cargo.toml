@@ -1,0 +1,12 @@
+[package]
+name = "psync-macros"
+version = "0.1.0"
+edition = "2024"
+description = "Procedural macros for psync"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+psync-graph = { path = "../psync-graph", version = "0.1.0" }
+proc-macro2 = "1"
