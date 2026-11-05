@@ -438,6 +438,16 @@ fn label_for(defs: &[(Ident, bool)], stmt: &Stmt, x: &Exits) -> String {
         Some(c) => format!("{c}()"),
         None => match stmt {
             Stmt::Macro(m) => format!("{}!", macro_name(&m.mac)),
+            // A binding of a computed value: show the value, not the whole statement.
+            Stmt::Local(Local {
+                init: Some(init), ..
+            }) => {
+                let text = init.expr.to_token_stream().to_string();
+                match text.char_indices().nth(23) {
+                    Some((cut, _)) => format!("{}…", &text[..cut]),
+                    None => text,
+                }
+            }
             _ => stmt
                 .to_token_stream()
                 .to_string()
