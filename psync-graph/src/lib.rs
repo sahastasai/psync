@@ -44,7 +44,8 @@
 //! - `#[psync::independent]` on a loop asserts that iterations do not depend on each other
 //!   (needed for `while` loops, whose condition psync cannot reason about).
 //!
-//! `#[psync::graph(off)]` compiles the function as written, for comparisons.
+//! `#[psync::graph(off)]` compiles the function as written, for comparisons; building with the
+//! environment variable `PSYNC_GRAPH=off` does the same for every annotated function.
 
 mod access;
 mod classify;
@@ -193,8 +194,13 @@ pub struct LoopReport {
 
 /// Expand `#[psync::graph(attr)] item`.
 pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
-    let options = Options::parse(attr)?;
+    let mut options = Options::parse(attr)?;
     let mut function: ItemFn = syn::parse2(item)?;
+    // `PSYNC_GRAPH=off` at build time compiles every annotated function as written, so one
+    // source tree can be built both ways for comparison.
+    if std::env::var("PSYNC_GRAPH").is_ok_and(|v| v == "off") {
+        options.off = true;
+    }
     if options.off {
         function.attrs.retain(|a| !is_psync_attr(a, "graph"));
         schedule::StripHints.visit_block_mut(&mut function.block);

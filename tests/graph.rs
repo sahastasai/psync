@@ -598,3 +598,25 @@ fn exit_guards_let_later_awaits_run_ahead() {
     );
     assert_eq!(run(guard_then_search(vec![1, 98])).0, Err(Error("leaf")));
 }
+
+// `kubectl get all`: groups, then each group's resources.
+#[graph]
+async fn nested(groups: Vec<Vec<u32>>) -> Result<Vec<u32>, Error> {
+    let mut listed = Vec::new();
+    for group in &groups {
+        for resource in group {
+            if *resource == 0 {
+                continue;
+            }
+            let items = io(T, Ok::<_, Error>(*resource * 10)).await?;
+            listed.push(items);
+        }
+    }
+    Ok(listed)
+}
+
+#[test]
+fn nested_loops_run_ahead_across_outer_items() {
+    let (out, _, peak) = run(nested(vec![vec![1, 0, 2], vec![3], vec![4, 5]]));
+    assert_eq!((out, peak), (Ok(vec![10, 20, 30, 40, 50]), 5));
+}

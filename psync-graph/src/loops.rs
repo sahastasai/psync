@@ -90,6 +90,66 @@ fn is_local(local: &Set, path: &str) -> bool {
     local.contains(root(path)) || root(path).starts_with("__psync")
 }
 
+/// `for a in xs { for b in f(a) { body } }` as `for (a, b) in <pairs> { body }`, when that is the
+/// same loop: the outer body is only the inner loop, neither loop is labeled, `body` has no
+/// `break` (which would end only the inner loop), and the outer item is a plain binding (it is
+/// paired with every inner item, so it must be `Copy`, such as a reference; otherwise the
+/// generated code does not compile rather than changing meaning).
+fn flatten(f: &ExprForLoop) -> Option<ExprForLoop> {
+    let [Stmt::Expr(Expr::ForLoop(inner), _)] = &f.body.stmts[..] else {
+        return None;
+    };
+    let syn::Pat::Ident(outer) = &*f.pat else {
+        return None;
+    };
+    if f.label.is_some() || inner.label.is_some() || outer.by_ref.is_some() || breaks(&inner.body) {
+        return None;
+    }
+    let (a, xs, b, ys, body) = (&outer.ident, &f.expr, &inner.pat, &inner.expr, &inner.body);
+    let attrs = &f.attrs;
+    let pairs: Expr = syn::parse_quote! {
+        ::core::iter::IntoIterator::into_iter(#xs).flat_map(move |#a| {
+            ::core::iter::IntoIterator::into_iter(#ys).map(move |__psync_inner| (#a, __psync_inner))
+        })
+    };
+    // Bind the outer item only if the body uses it.
+    let outer_pat = if mentions(body.to_token_stream()).contains(&a.to_string()) {
+        quote!(#a)
+    } else {
+        quote!(_)
+    };
+    Some(syn::parse_quote!(#(#attrs)* for (#outer_pat, #b) in #pairs #body))
+}
+
+/// True when `body` contains a `break` that would leave it (not one inside a nested loop).
+fn breaks(body: &Block) -> bool {
+    struct V(usize, bool);
+    impl<'ast> syn::visit::Visit<'ast> for V {
+        fn visit_expr_break(&mut self, _: &'ast syn::ExprBreak) {
+            self.1 |= self.0 == 0;
+        }
+        fn visit_expr_for_loop(&mut self, e: &'ast ExprForLoop) {
+            self.0 += 1;
+            syn::visit::visit_expr_for_loop(self, e);
+            self.0 -= 1;
+        }
+        fn visit_expr_while(&mut self, e: &'ast syn::ExprWhile) {
+            self.0 += 1;
+            syn::visit::visit_expr_while(self, e);
+            self.0 -= 1;
+        }
+        fn visit_expr_loop(&mut self, e: &'ast syn::ExprLoop) {
+            self.0 += 1;
+            syn::visit::visit_expr_loop(self, e);
+            self.0 -= 1;
+        }
+        fn visit_expr_closure(&mut self, _: &'ast syn::ExprClosure) {}
+    }
+    let mut v = V(0, false);
+    syn::visit::Visit::visit_block(&mut v, body);
+    v.1
+}
+
 /// The condition of `if c { ..; continue | break | return .. }` (no `else`) when `c` is pure.
 fn exit_guard(stmt: &Stmt) -> Option<&Expr> {
     let Stmt::Expr(Expr::If(i), _) = stmt else {
@@ -129,6 +189,10 @@ impl Rewriter<'_> {
             line_of(f.for_token.span()),
             crate::classify::end_line_of(f.span()),
         );
+        // A loop whose body is only another loop is treated as one loop over the pairs, so the
+        // awaited work of later outer items can run ahead too.
+        let flat = flatten(f);
+        let f = flat.as_ref().unwrap_or(f);
         let outcome = self.prefetch(f).or_else(|why| self.fission(f).ok_or(why));
         match outcome {
             Ok((expr, prefetched)) => {
