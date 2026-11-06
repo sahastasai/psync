@@ -1,7 +1,9 @@
 //! Runtime support for `#[psync::graph]` expansions. Not a public API: the macro's
 //! generated code is the only intended caller, and these items may change freely.
 
-use alloc::{boxed::Box, vec::Vec};
+use alloc::boxed::Box;
+/// For generated code, which cannot name `alloc` itself.
+pub use alloc::vec::Vec;
 use core::{
     future::Future,
     pin::Pin,
@@ -43,11 +45,11 @@ impl<F: Future + Unpin> MaybeDone<F> {
 /// Run the futures yielded by `iter`, at most `bound` at a time, returning outputs in input order.
 pub fn join_all_bounded<I>(iter: I, bound: usize) -> JoinAllBounded<I>
 where
-    I: Iterator + Unpin,
+    I: Iterator,
     I::Item: Future,
 {
     JoinAllBounded {
-        iter: Some(iter),
+        iter: Some(Box::new(iter)),
         active: Vec::new(),
         results: Vec::new(),
         bound: bound.max(1),
@@ -58,18 +60,19 @@ pub struct JoinAllBounded<I: Iterator>
 where
     I::Item: Future,
 {
-    iter: Option<I>,
+    // Boxed: the iterator is never pinned, so it need not be `Unpin`.
+    iter: Option<Box<I>>,
     active: Vec<(usize, Pin<Box<I::Item>>)>,
     results: Vec<Option<<I::Item as Future>::Output>>,
     bound: usize,
 }
 
 // Futures are boxed and outputs are never pinned, so moving the combinator is fine.
-impl<I: Iterator + Unpin> Unpin for JoinAllBounded<I> where I::Item: Future {}
+impl<I: Iterator> Unpin for JoinAllBounded<I> where I::Item: Future {}
 
 impl<I> Future for JoinAllBounded<I>
 where
-    I: Iterator + Unpin,
+    I: Iterator,
     I::Item: Future,
 {
     type Output = Vec<<I::Item as Future>::Output>;
@@ -150,14 +153,12 @@ impl Rethrow for OptionResidual {
     }
 }
 
-/// Run `f` on every item of `iter`, at most `bound` at a time, returning outputs in input order.
-/// Taking the async closure as an argument lets its parameter type come from the iterator.
-pub async fn prefetch<I, F, T>(iter: I, bound: usize, f: F) -> Vec<T>
+/// Returns `f` unchanged. Passing the async closure through this function gives its parameter
+/// the item type of `iter` (a closure defined on its own cannot have it inferred from later use).
+pub fn over<I, F, T>(_iter: &I, f: F) -> F
 where
     I: IntoIterator,
-    I::IntoIter: Unpin,
     F: AsyncFn(I::Item) -> T,
 {
-    let f = &f;
-    join_all_bounded(iter.into_iter().map(move |item| f(item)), bound).await
+    f
 }

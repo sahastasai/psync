@@ -7,7 +7,7 @@
 //! records them and re-raises them in program order (see [`crate::exits`]).
 
 use crate::access::{Access, PURE_METHODS, Set, scan};
-use proc_macro2::{Ident, Span, TokenStream, TokenTree};
+use proc_macro2::{Delimiter, Ident, Span, TokenStream, TokenTree};
 use quote::ToTokens;
 use syn::{Attribute, Expr, Local, LocalInit, Pat, Stmt, spanned::Spanned, visit::Visit};
 
@@ -68,6 +68,30 @@ const GUARD_AWAITS: &[&str] = &[
 
 /// Deliberate delays: their position is the point. Statements awaiting these are barriers.
 const DELAY_AWAITS: &[&str] = &["sleep", "sleep_until", "tick", "yield_now", "delay_for"];
+
+/// Clock reads (`Instant::now()`, `started.elapsed()`): when they run relative to the waits
+/// around them is what they measure, so statements making them are barriers.
+const CLOCK_CALLS: &[&str] = &["now", "elapsed", "duration_since"];
+
+/// Whether `tokens` call a clock function outside closures and async blocks (`f(..)`, `x.f(..)`).
+fn reads_clock(tokens: TokenStream) -> bool {
+    let tokens: Vec<TokenTree> = tokens.into_iter().collect();
+    tokens.iter().enumerate().any(|(i, t)| match t {
+        TokenTree::Ident(id) => {
+            CLOCK_CALLS.contains(&id.to_string().as_str())
+                && matches!(tokens.get(i + 1), Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Parenthesis)
+        }
+        // A closure or async block decides for itself when it runs.
+        TokenTree::Group(g) => {
+            let deferred = tokens[..i].iter().rev().take(2).any(|p| {
+                matches!(p, TokenTree::Punct(c) if c.as_char() == '|')
+                    || matches!(p, TokenTree::Ident(k) if k == "async" || k == "move")
+            });
+            !deferred && reads_clock(g.stream())
+        }
+        _ => false,
+    })
+}
 
 /// Logging statements: treated as pure so they do not split regions.
 const LOG_MACROS: &[&str] = &["trace", "debug", "info", "warn", "error", "log"];
@@ -521,6 +545,9 @@ pub(crate) fn classify(stmt: &Stmt, scope: &Scope, relaxed: bool) -> Class {
     }
     if let Some(why) = &x.blocker {
         return Class::Barrier(describe(why));
+    }
+    if reads_clock(stmt.to_token_stream()) {
+        return Class::Barrier(describe("reads the clock, whose position is meaningful"));
     }
     if pat.is_some_and(pat_has_ref) {
         return Class::Barrier(describe("`ref` binding"));

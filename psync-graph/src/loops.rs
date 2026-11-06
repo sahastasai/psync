@@ -7,7 +7,8 @@
 //! ```text
 //! for x in xs { let y = fetch(x).await?; out.push(y); }
 //! // becomes
-//! let items = prefetch(xs, bound, async |x| { <prefix, exits recorded> }).await;
+//! let each = over(&xs, async |x| { <prefix, exits recorded> });
+//! let items = join_all_bounded(xs.into_iter().map(|x| each(x)).collect::<Vec<_>>(), bound).await;
 //! for (exits.., bindings) in items { <re-raise exits>; let (x, y) = bindings; out.push(y); }
 //! ```
 //!
@@ -328,7 +329,16 @@ impl Rewriter<'_> {
         let reraise = code.slots.iter().map(|s| s.reraise(&krate));
         let rest_stmts = &rest_block.stmts;
         let tokens = quote! {{
-            let __psync_items = #krate::__private::prefetch(#iter, #bound, async |#pat| { #chain }).await;
+            let __psync_iter = #iter;
+            let __psync_each = #krate::__private::over(&__psync_iter, async |#pat| { #chain });
+            // The futures are created here, not in a generic helper, and before the await: rustc
+            // can then prove the state held across the await `Send` even when items carry
+            // lifetimes (`Box<dyn Trait + Send>`), which it cannot for an iterator adapter or a
+            // helper's future.
+            let __psync_futures: #krate::__private::Vec<_> = ::core::iter::IntoIterator::into_iter(__psync_iter)
+                .map(|__psync_item| __psync_each(__psync_item))
+                .collect();
+            let __psync_items = #krate::__private::join_all_bounded(__psync_futures.into_iter(), #bound).await;
             #(#attrs)* #loop_label for (#(#slot_idents,)* __psync_out) in __psync_items {
                 #(#reraise)*
                 #[allow(unused_mut)] let #bindings = __psync_out.unwrap();

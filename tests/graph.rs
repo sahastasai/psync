@@ -12,6 +12,12 @@ use std::{
 thread_local! {
     static ACTIVE: Cell<usize> = const { Cell::new(0) };
     static PEAK: Cell<usize> = const { Cell::new(0) };
+    static TICKS: Cell<u32> = const { Cell::new(0) };
+}
+
+/// A clock for the tests: counts polls of simulated I/O.
+fn now() -> u32 {
+    TICKS.get()
 }
 
 /// Pending for `ticks` polls, then returns `value`. Tracks how many are in flight.
@@ -30,6 +36,7 @@ async fn io<T>(ticks: u32, value: T) -> T {
             return Poll::Ready(value.take().expect("polled after completion"));
         }
         left -= 1;
+        TICKS.set(TICKS.get() + 1);
         cx.waker().wake_by_ref();
         Poll::Pending
     })
@@ -669,4 +676,62 @@ fn guarded_branch_work_overlaps_and_borrows_end_before_moves() {
         run(d(true).run(true)).0.map(|d| d.groups),
         Err(Error("core"))
     );
+}
+
+// Timing code: a clock read measures the waits before it, so it must not move ahead of them.
+#[graph]
+async fn timed() -> (u32, u32) {
+    let started = now();
+    let a = io(T, 1).await;
+    let waited = now() - started;
+    let b = io(T, 2).await;
+    (a + b, waited)
+}
+
+#[test]
+fn clock_reads_stay_in_place() {
+    let ((sum, waited), _, _) = run(timed());
+    assert_eq!(sum, 3);
+    assert!(
+        waited >= T,
+        "the clock was read before the wait finished: {waited}"
+    );
+}
+
+// DataFusion's writer shutdown: a prefetched loop over boxed trait objects inside a future that
+// must be `Send` (it is spawned). rustc cannot prove `Send` for an iterator adapter or a generic
+// helper's future over such items, so psync creates the futures inline before awaiting them.
+trait Finish {
+    fn finish(&mut self)
+    -> std::pin::Pin<Box<dyn Future<Output = Result<u32, Error>> + Send + '_>>;
+}
+struct Part(u32);
+impl Finish for Part {
+    fn finish(
+        &mut self,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<u32, Error>> + Send + '_>> {
+        let v = self.0;
+        Box::pin(async move { Ok(v) })
+    }
+}
+
+#[graph]
+async fn finish_all(parts: Vec<Box<dyn Finish + Send + Unpin>>, tag: String) -> Result<u32, Error> {
+    let mut total = 0;
+    for mut part in parts.into_iter() {
+        let v = part.finish().await.map_err(|_| Error("finish"))?;
+        assert!(!tag.is_empty());
+        total += v;
+    }
+    Ok(total)
+}
+
+#[test]
+fn prefetched_trait_objects_stay_send() {
+    fn spawnable<F: Future + Send>(f: F) -> F {
+        f
+    }
+    let parts: Vec<Box<dyn Finish + Send + Unpin>> = vec![Box::new(Part(1)), Box::new(Part(2))];
+    let (out, _, _) = run(spawnable(finish_all(parts, "t".into())));
+    assert_eq!(out, Ok(3));
 }
