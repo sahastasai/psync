@@ -73,6 +73,16 @@ impl LoopScope {
         }
     }
 
+    /// The scope of straight-line code: there are no earlier iterations to run ahead of, so only
+    /// the order within the block (which the scheduler and `take_prefix` keep) matters.
+    fn straight() -> Self {
+        Self {
+            local: Set::new(),
+            carried: Set::new(),
+            independent: true,
+        }
+    }
+
     /// Why `n` cannot run ahead of earlier iterations, if it cannot.
     fn refuses(&self, n: &Node) -> Option<String> {
         if self.independent {
@@ -83,6 +93,17 @@ impl LoopScope {
         }
         conflict(&self.carried, &n.acc.rpaths)
             .map(|c| format!("reads `{c}`, which the loop body writes"))
+    }
+}
+
+/// Whether a branch ends in a value (`if c { f().await } else { x }`), which cannot be moved into
+/// a hoisted chain. Loops and `if`s without `else` at the end are statements of type `()`.
+fn yields_value(branch: &Block) -> bool {
+    match branch.stmts.last() {
+        Some(Stmt::Expr(Expr::ForLoop(_) | Expr::While(_), None)) => false,
+        Some(Stmt::Expr(Expr::If(i), None)) => i.else_branch.is_some(),
+        Some(Stmt::Expr(_, None)) => true,
+        _ => false,
     }
 }
 
@@ -623,12 +644,19 @@ impl Rewriter<'_> {
     /// `if c { <awaited prefix>; rest } else { .. }` becomes a prefix binding
     /// `let g = if c { Some(<prefix chain>) } else { None };` and the statement
     /// `if let Some(..) = g { <re-raise exits>; rest } else { .. }`.
+    /// Outside loops: split `if c { let x = f.await?; rest }` into a guarded statement running the
+    /// branch's leading awaited work (`let g = if c { Some(..) } else { None };`) and the branch's
+    /// remainder, so that work can overlap with the statements before the `if`.
+    pub(crate) fn hoist_branch(&mut self, stmt: &Stmt) -> Option<(Stmt, Stmt)> {
+        self.hoist_guard(stmt, &LoopScope::straight())
+    }
+
     fn hoist_guard(&mut self, stmt: &Stmt, scope: &LoopScope) -> Option<(Stmt, Stmt)> {
         let Stmt::Expr(Expr::If(i), semi) = stmt else {
             return None;
         };
         let cond = Exits::of(&i.cond);
-        if cond.awaits || cond.exits || cond.blocker.is_some() {
+        if cond.awaits || cond.exits || cond.blocker.is_some() || yields_value(&i.then_branch) {
             return None;
         }
         let (inner, inner_rest) = self.take_prefix(i.then_branch.stmts.clone(), false, scope);

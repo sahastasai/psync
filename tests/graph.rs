@@ -620,3 +620,53 @@ fn nested_loops_run_ahead_across_outer_items() {
     let (out, _, peak) = run(nested(vec![vec![1, 0, 2], vec![3], vec![4, 5]]));
     assert_eq!((out, peak), (Ok(vec![10, 20, 30, 40, 50]), 5));
 }
+
+// kube's `Discovery::run_aggregated`: two independent requests, the second inside a guard whose
+// body writes the map the first request's loop also writes; `self` is moved out at the end.
+struct Aggregated {
+    client: u32,
+    queryable: bool,
+    groups: Vec<u32>,
+}
+impl Aggregated {
+    #[graph]
+    async fn run(mut self, fail_core: bool) -> Result<Self, Error> {
+        self.groups.clear();
+        let apis = io(T, Ok::<_, Error>(vec![self.client, self.client + 1])).await?;
+        for g in apis {
+            self.groups.push(g);
+        }
+        let core_key = self.client - 7;
+        if self.queryable {
+            let core = io(
+                T,
+                if fail_core {
+                    Err(Error("core"))
+                } else {
+                    Ok(core_key)
+                },
+            )
+            .await?;
+            self.groups.push(core + core_key);
+        }
+        Ok(self)
+    }
+}
+
+#[test]
+fn guarded_branch_work_overlaps_and_borrows_end_before_moves() {
+    let d = |queryable| Aggregated {
+        client: 7,
+        queryable,
+        groups: vec![99],
+    };
+    let (out, polls, peak) = run(d(true).run(false));
+    assert_eq!(out.map(|d| d.groups), Ok(vec![7, 8, 0]));
+    assert_eq!(peak, 2);
+    assert!(polls <= T as usize + 2, "one wait deep, got {polls} polls");
+    assert_eq!(run(d(false).run(false)).0.map(|d| d.groups), Ok(vec![7, 8]));
+    assert_eq!(
+        run(d(true).run(true)).0.map(|d| d.groups),
+        Err(Error("core"))
+    );
+}

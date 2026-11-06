@@ -70,12 +70,19 @@ pub(crate) fn plan(nodes: &[Node]) -> Plan {
             }
         }
     }
-    // Fuse `u -> v` when that edge is the only way into `v` and the only way out of `u`.
+    // Fuse `u -> v` when that edge is the only way into `v` and either the only way out of `u`,
+    // or `u` does not wait and everything else after `u` waits for `v` anyway (`let key = ..;`
+    // read by a request and by what uses its response): fusing then delays nothing.
     let mut chain_of = vec![usize::MAX; n];
     let mut chains: Vec<Vec<usize>> = Vec::new();
     for v in 0..n {
         if let [u] = preds[v][..]
-            && succs[u].len() == 1
+            && chains[chain_of[u]].last() == Some(&u)
+            && (succs[u].len() == 1
+                || !nodes[u].awaits && {
+                    let after_v = reachable(&succs, v);
+                    succs[u].iter().all(|w| *w == v || after_v[*w])
+                })
         {
             let c = chain_of[u];
             chains[c].push(v);
@@ -112,6 +119,19 @@ pub(crate) fn plan(nodes: &[Node]) -> Plan {
         levels,
         report,
     }
+}
+
+/// The nodes that (transitively) depend on `from`; nodes are in program order, so edges go forward.
+fn reachable(succs: &[Vec<usize>], from: usize) -> Vec<bool> {
+    let mut seen = vec![false; succs.len()];
+    for v in from..succs.len() {
+        if v == from || seen[v] {
+            for &w in &succs[v] {
+                seen[w] = true;
+            }
+        }
+    }
+    seen
 }
 
 /// Generated code for one chain.
@@ -255,7 +275,8 @@ pub(crate) fn emit(
             let body = &code.body;
             futures.push(quote!(let mut #f = #krate::__private::maybe_done(async { #body });));
             let slot_idents = code.slot_idents();
-            takes.push(quote!(let (#(#slot_idents,)* #out_k) = #f.take();));
+            let taken = format_ident!("__psync_taken{}", k);
+            takes.push(quote!(let (#(#slot_idents,)* #out_k) = #taken;));
             for (slots, pos) in code.slots.iter().zip(chain_positions) {
                 reraises.push((pos, slots.reraise(krate)));
             }
@@ -269,12 +290,19 @@ pub(crate) fn emit(
         let done: Vec<Ident> = (0..level.len())
             .map(|k| format_ident!("__psync_done{}", k))
             .collect();
+        let fs: Vec<Ident> = fs.collect();
+        let taken = (0..level.len()).map(|k| format_ident!("__psync_taken{}", k));
+        // The futures live in an inner block: they (and whatever they borrow) are dropped as soon
+        // as their outputs are taken, so later statements may move what the branches borrowed.
         let tokens = quote! {{
-            #(#futures)*
-            ::core::future::poll_fn(|__psync_cx| {
-                #(let #done = #fs.poll_step(__psync_cx);)*
-                if true #(&& #done)* { ::core::task::Poll::Ready(()) } else { ::core::task::Poll::Pending }
-            }).await;
+            let (#(#taken,)*) = {
+                #(#futures)*
+                ::core::future::poll_fn(|__psync_cx| {
+                    #(let #done = #fs.poll_step(__psync_cx);)*
+                    if true #(&& #done)* { ::core::task::Poll::Ready(()) } else { ::core::task::Poll::Pending }
+                }).await;
+                (#(#fs.take(),)*)
+            };
             #(#takes)*
             #(#reraises)*
             #(#binds)*

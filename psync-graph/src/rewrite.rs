@@ -122,8 +122,9 @@ impl Rewriter<'_> {
     }
 
     /// Split statements that hide an await inside other work (a `match` scrutinee, a call
-    /// argument, a method receiver) into a binding of the awaited value and the rest of the
-    /// statement, repeatedly, since a hoisted value may itself hide an await.
+    /// argument, a method receiver, the leading work of an `if` branch) into a binding of the
+    /// awaited value and the rest of the statement, repeatedly, since a hoisted value may itself
+    /// hide an await.
     fn expose_awaits(&mut self, stmts: Vec<Stmt>) -> Vec<Stmt> {
         let mut out = Vec::with_capacity(stmts.len());
         let mut work: Vec<(Stmt, usize)> = stmts.into_iter().rev().map(|s| (s, 0)).collect();
@@ -136,7 +137,8 @@ impl Rewriter<'_> {
                 let n = self.next();
                 let split = hoist::scrutinee(&stmt, n)
                     .map(|(value, rest)| (vec![value], rest))
-                    .or_else(|| hoist::operands(&stmt, &mut self.fresh));
+                    .or_else(|| hoist::operands(&stmt, &mut self.fresh))
+                    .or_else(|| self.hoist_branch(&stmt).map(|(g, rest)| (vec![g], rest)));
                 if let Some((values, rest)) = split {
                     work.push((rest, depth + 1));
                     work.extend(values.into_iter().rev().map(|v| (v, depth + 1)));
