@@ -1,0 +1,13 @@
+{
+  // The psync book: a static-assets Worker serving mdBook's output.
+  // Build with `mdbook build` (from this directory), then `wrangler deploy`.
+  "$schema": "https://unpkg.com/wrangler@4.168.0/config-schema.json",
+  "name": "psync-book",
+  "compatibility_date": "2026-11-20",
+  "assets": {
+    "directory": "./book",
+    "not_found_handling": "404-page",
+    "html_handling": "auto-trailing-slash"
+  },
+  "routes": [{ "pattern": "psync.sahasta.com", "custom_domain": true }]
+}

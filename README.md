@@ -139,3 +139,8 @@ and the `priority_demo` terminal demo are not checked into this branch yet. `car
 | `tests/graph.rs` | behaviour tests on simulated I/O |
 | `examples/graph_suite/` | the 16 real-world shapes |
 | `book/` | the psync book |
+
+## Publishing
+
+The book is served at <https://psync.sahasta.com> by a Cloudflare Worker with static assets
+(`book/wrangler.jsonc`). To update it: `cd book && mdbook build && npx wrangler@4 deploy`.
