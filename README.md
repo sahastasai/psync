@@ -68,7 +68,18 @@ psync recognizes operations on the outside world from the call: `fs::write(path)
 - **Unclassified calls are reported.** `explain` lists awaited calls psync could not classify.
   `#[psync::graph(strict)]` treats them as writes.
 
-See the book's [Side effects](book/src/safety/effects.md) chapter, and its
+- **`cargo psync check` reads the callees.** The macro sees only names. `cargo psync check`
+  (in `psync-check/`, a rustc driver like clippy's) computes from MIR what every function in the
+  build actually does, across crates. It warns where a rewrite runs conflicting effects at once or
+  writes before an earlier exit:
+
+  ```sh
+  cd psync-check && cargo install --path .   # pinned nightly, installed by rustup
+  cargo psync check                            # in your project; --deny for CI
+  ```
+
+See the book's [Side effects](book/src/safety/effects.md) and
+[Checking rewrites](book/src/safety/check.md) chapters, and its
 [roadmap](book/src/safety/roadmap.md) for stronger guarantees: runtime target checks,
 type-checked effect contracts, and an effect sanitizer for tests.
 
@@ -138,6 +149,7 @@ and the `priority_demo` terminal demo are not checked into this branch yet. `car
 | `psync-graph/` | the analysis and code generation (`classify`, `access`, `effects`, `hoist`, `schedule`, `loops`, `exits`, `rewrite`) |
 | `tests/graph.rs` | behaviour tests on simulated I/O |
 | `examples/graph_suite/` | the 16 real-world shapes |
+| `psync-check/` | `cargo psync check`: the rustc driver that verifies rewrites (pinned nightly; not in the workspace) |
 | `book/` | the psync book |
 
 ## Publishing

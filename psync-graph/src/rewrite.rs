@@ -205,6 +205,7 @@ impl Rewriter<'_> {
             &plan,
             &positions,
             mentions,
+            &mut self.fresh,
         )
     }
 }

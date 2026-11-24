@@ -38,7 +38,7 @@ This is the real generated code, shortened:
 
 ```rust,ignore
 let __psync_iter = keys;
-let __psync_each = ::psync::__private::over(&__psync_iter, async |key| {
+let __psync_each = ::psync::__private::over_at::<2, true, false, false, _, _, _>(&__psync_iter, async |key| {
     // the prefix, with `?` recorded instead of taken
     let meta = match Branch::branch(store.head(key).await) { Ok(v) => v, Err(r) => { /* record r */ } };
     Some((meta,))

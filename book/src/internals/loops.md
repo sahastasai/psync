@@ -45,7 +45,7 @@ prefix's bindings are handed to the rest of the body:
 
 ```rust,ignore
 let __psync_iter = <iter>;
-let __psync_each = ::psync::__private::over(&__psync_iter, async |<pat>| { <prefix chain> });
+let __psync_each = ::psync::__private::over_at::<2, true, false, false, _, _, _>(&__psync_iter, async |<pat>| { <prefix chain> });
 let __psync_futures: ::psync::__private::Vec<_> = IntoIterator::into_iter(__psync_iter)
     .map(|__psync_item| __psync_each(__psync_item))
     .collect();

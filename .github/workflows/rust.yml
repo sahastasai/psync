@@ -20,3 +20,13 @@ jobs:
       run: cargo build --verbose
     - name: Run tests
       run: cargo test --verbose
+
+  psync-check:
+    # `cargo psync check` links rustc's internals; rustup installs the nightly pinned in
+    # psync-check/rust-toolchain.toml.
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Test the checker on its fixture
+      working-directory: psync-check
+      run: cargo test --verbose

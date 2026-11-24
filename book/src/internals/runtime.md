@@ -11,6 +11,7 @@ here uses only `core` and `alloc`.
 | `MaybeDone::take()` | take the output (panics if called before completion, which generated code never does) |
 | `join_all_bounded(iter, bound)` | a prefetched loop: run at most `bound` futures, outputs in input order |
 | `over(&iter, f)` | type the async closure's parameter from the iterator |
+| `maybe_done_at::<LEVEL, ORDER, EXITS, SPEC, INDEP, _>`, `over_at::<LOOP, TERMINATES, SPEC, INDEP, ..>` | what generated code calls: the same helpers, tagged with the macro's assumptions for [`cargo psync check`](../safety/check.md); free at run time |
 | `Branch`, `Rethrow`, `ResultResidual`, `OptionResidual` | record `?` and replay it through the caller's `?` |
 | `Vec` | re-exported so generated code can name `alloc::vec::Vec` |
 

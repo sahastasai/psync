@@ -404,6 +404,32 @@ const FS_READS: &[&str] = &[
 /// Network functions that write (send data); the rest of `net` only connects or reads.
 const NET_WRITES: &[&str] = &["send_to", "send", "write", "write_all"];
 
+/// What a function or method name says about the operation, for tools outside the macro
+/// (`cargo psync check` classifies calls into other crates with the same lists).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Verb {
+    Read,
+    Write,
+    /// A write whose order relative to others on the same resource is observable.
+    Ordered,
+}
+
+/// The verb a name starts with, if psync knows it.
+pub fn verb_of(name: &str) -> Option<Verb> {
+    Config::default()
+        .verb(name)
+        .map(|(kind, ordered)| match (kind, ordered) {
+            (Kind::Read, _) => Verb::Read,
+            (Kind::Write, true) => Verb::Ordered,
+            (Kind::Write, false) => Verb::Write,
+        })
+}
+
+/// True for file-system functions that only read (`read_to_string`, `metadata`, `open`, ...).
+pub fn fs_reads(name: &str) -> bool {
+    FS_READS.contains(&name)
+}
+
 fn first_word(name: &str) -> &str {
     let name = name.trim_start_matches("try_").trim_start_matches("async_");
     name.split('_').next().unwrap_or(name)

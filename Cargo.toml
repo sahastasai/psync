@@ -5,6 +5,8 @@ edition = "2024"
 
 [workspace]
 members = ["psync-graph", "psync-macros"]
+# Built with its own pinned nightly toolchain (it links rustc's internals).
+exclude = ["psync-check"]
 
 [dependencies]
 psync-macros = { path = "psync-macros", version = "0.1.0" }

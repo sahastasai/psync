@@ -167,6 +167,12 @@ MIR) would know:
 psync would keep the macro as the user interface and the code generator. The driver would refine
 the graph and fail the build when the macro's token-level guess was too optimistic.
 
+**Status: the checker is built.** [`cargo psync check`](./check.md) is this driver, in checking
+mode. It resolves callees, summarizes effects through function bodies and across crates, and
+reports conflicts, speculative writes and shared interior-mutable state in the generated code. Still
+open: feeding the summaries back into the macro, so that it schedules with them instead of only
+being checked, and `&mut`-precise argument effects.
+
 ## 9. A machine-checked argument
 
 The correctness argument is small enough to formalize. Model a region as statements with
@@ -192,4 +198,5 @@ theorem.
 | 4. HTTP semantics | coarse service conflicts | small |
 | 7. processes and cwd | over-conservative processes; cwd hazard | small |
 | 5. staged writes, 6. cancellation | wasted work, writes waiting on exits | medium to large |
-| 8. compiler driver, 9. Lean model | the token-level foundation | large |
+| 8. compiler driver (checker built: `cargo psync check`) | the token-level foundation | large; next: feed summaries back into scheduling |
+| 9. Lean model | the token-level foundation | large |

@@ -42,6 +42,23 @@ impl<F: Future + Unpin> MaybeDone<F> {
     }
 }
 
+/// [`maybe_done`], tagged for `cargo psync check`: the chain belongs to level `LEVEL` of the
+/// enclosing function, starts at statement `ORDER`, may exit early (`EXITS`), and carries the
+/// `speculate` (`SPEC`) and `independent` (`INDEP`) hints. The tags cost nothing at run time.
+#[inline(always)]
+pub fn maybe_done_at<
+    const LEVEL: usize,
+    const ORDER: usize,
+    const EXITS: bool,
+    const SPEC: bool,
+    const INDEP: bool,
+    F: Future,
+>(
+    future: F,
+) -> MaybeDone<Pin<Box<F>>> {
+    maybe_done(future)
+}
+
 /// Run the futures yielded by `iter`, at most `bound` at a time, returning outputs in input order.
 pub fn join_all_bounded<I>(iter: I, bound: usize) -> JoinAllBounded<I>
 where
@@ -161,4 +178,26 @@ where
     F: AsyncFn(I::Item) -> T,
 {
     f
+}
+
+/// [`over`], tagged for `cargo psync check`: the prefetched prefix of loop `LOOP`, in a body that
+/// may end the loop early (`TERMINATES`), with the `speculate` and `independent` hints.
+#[inline(always)]
+pub fn over_at<
+    const LOOP: usize,
+    const TERMINATES: bool,
+    const SPEC: bool,
+    const INDEP: bool,
+    I,
+    F,
+    T,
+>(
+    iter: &I,
+    f: F,
+) -> F
+where
+    I: IntoIterator,
+    F: AsyncFn(I::Item) -> T,
+{
+    over(iter, f)
 }

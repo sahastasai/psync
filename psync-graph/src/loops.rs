@@ -459,9 +459,12 @@ impl Rewriter<'_> {
             (&code.body, code.slot_idents(), code.binding_pattern());
         let reraise = code.slots.iter().map(|s| s.reraise(&krate));
         let rest_stmts = &rest_block.stmts;
+        let loop_id = proc_macro2::Literal::usize_unsuffixed(self.next());
+        let (terminates, speculate, independent) =
+            (scope.terminates, scope.speculate, scope.independent);
         let tokens = quote! {{
             let __psync_iter = #iter;
-            let __psync_each = #krate::__private::over(&__psync_iter, async |#pat| { #chain });
+            let __psync_each = #krate::__private::over_at::<#loop_id, #terminates, #speculate, #independent, _, _, _>(&__psync_iter, async |#pat| { #chain });
             // The futures are created here, not in a generic helper, and before the await: rustc
             // can then prove the state held across the await `Send` even when items carry
             // lifetimes (`Box<dyn Trait + Send>`), which it cannot for an iterator adapter or a

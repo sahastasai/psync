@@ -200,6 +200,7 @@ This is still a token-level analysis:
   [roadmap](./roadmap.md)).
 - **Aliasing outside the program is invisible.** Two receivers that reach the same server, a
   symlink, or two paths to one file are treated as different.
-- **Callees are opaque.** An awaited call to your own helper is classified by the helper's name,
-  not by what its body does.
+- **Callees are opaque to the macro.** An awaited call to your own helper is classified by the
+  helper's name, not by what its body does. [`cargo psync check`](./check.md) reads the bodies and
+  reports where that guess was wrong.
 - **Panics are not exits.** A write may still run ahead of an earlier `unwrap()` that panics.

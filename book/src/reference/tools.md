@@ -11,6 +11,24 @@ The variable is read when the macro expands. Cargo does not track it, so touch t
 files, or use a separate `CARGO_TARGET_DIR`, whenever you change it. See
 [Comparing builds](../guide/comparing.md).
 
+## `cargo psync`
+
+```sh
+cargo psync check [--deny] [--notes] [CARGO CHECK ARGS...]
+cargo psync summaries [CRATE] [--all]
+```
+
+Checks `#[psync::graph]` rewrites against the compiled bodies of callees. Built from `psync-check/`
+with a pinned nightly (`cd psync-check && cargo install --path .`). See
+[Checking rewrites](../safety/check.md).
+
+| Variable | Set by `cargo psync` | Meaning |
+|---|---|---|
+| `PSYNC_SUMMARY_DIR` | `target/psync/summaries` | where the driver writes and reads per-crate effect summaries |
+| `PSYNC_FINDINGS_DIR` | `target/psync/findings` | where the driver writes per-crate findings (JSON) |
+| `PSYNC_CHECK_DENY` | `--deny` | `1`: findings are errors |
+| `PSYNC_CHECK_NOTES` | `--notes` | `1`: also report output order and interior mutability |
+
 ## `psync-expand`
 
 ```sh

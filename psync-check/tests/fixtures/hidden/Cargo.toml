@@ -1,0 +1,4 @@
+# A workspace whose #[psync::graph] rewrites hide effects in callees, for `cargo psync check`.
+[workspace]
+members = ["helpers", "app"]
+resolver = "3"

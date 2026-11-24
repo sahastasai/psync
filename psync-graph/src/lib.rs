@@ -69,6 +69,7 @@ mod schedule;
 
 use classify::{Scope, is_psync_attr, pat_idents};
 pub use effects::Config as EffectConfig;
+pub use effects::{Verb, fs_reads, verb_of};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 use syn::{

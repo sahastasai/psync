@@ -262,6 +262,7 @@ pub(crate) fn emit(
     plan: &Plan,
     positions: &[usize],
     mentions: &[Set],
+    ids: &mut usize,
 ) -> Vec<Stmt> {
     let mut out = Vec::new();
     for level in &plan.levels {
@@ -274,6 +275,8 @@ pub(crate) fn emit(
         let mut takes = Vec::new();
         let mut binds = Vec::new();
         let mut reraises: Vec<(usize, TokenStream)> = Vec::new();
+        *ids += 1;
+        let level_id = proc_macro2::Literal::usize_unsuffixed(*ids);
         for (k, &c) in level.iter().enumerate() {
             let members: Vec<&Node> = plan.chains[c].iter().map(|&v| &nodes[v]).collect();
             let chain_positions: Vec<usize> =
@@ -291,7 +294,13 @@ pub(crate) fn emit(
                 format_ident!("__psync_out{}", k),
             );
             let body = &code.body;
-            futures.push(quote!(let mut #f = #krate::__private::maybe_done(async { #body });));
+            // `maybe_done_at` is `maybe_done` plus what the analysis assumed, as const generics,
+            // for `cargo psync check` to verify against the compiled callees.
+            let order = proc_macro2::Literal::usize_unsuffixed(chain_positions[0]);
+            let exits = members.iter().any(|n| n.exits);
+            let spec = members.iter().any(|n| n.speculate);
+            let indep = members.iter().any(|n| n.independent);
+            futures.push(quote!(let mut #f = #krate::__private::maybe_done_at::<#level_id, #order, #exits, #spec, #indep, _>(async { #body });));
             let slot_idents = code.slot_idents();
             let taken = format_ident!("__psync_taken{}", k);
             takes.push(quote!(let (#(#slot_idents,)* #out_k) = #taken;));
