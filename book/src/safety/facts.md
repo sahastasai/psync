@@ -54,6 +54,29 @@ facts, the macro produces a schedule with none. Four functions are kept in order
 `login`, `snapshot` and the `sync_dirs` loop. One gains concurrency: `views`, whose
 `create_view` only reads.
 
+## On real code
+
+| Function | Names only | Compiler facts |
+|---|---|---|
+| DataFusion `ListingSchemaProvider::refresh` | loop not prefetched (`create` reads as a write) | **loop prefetched**: the `dyn TableProviderFactory::create` resolves to implementations that only read |
+| DataFusion writer `shutdown` loop | sequential | sequential: `AsyncWrite::shutdown` on a real writer writes |
+| kube-rs `dynamic_api` `main` | client setup overlaps `tracing` init | in order: client setup may run a credential process, and `tracing` init may print |
+| the other 8 annotated functions | | unchanged |
+
+Both benchmark branches report 0 warnings with and without facts. A from-scratch check takes 74 s
+(kube-rs) and 95 s (DataFusion) on 16 cores. An incremental `check --facts` recompiles only the
+annotated crates: 3.4 s on kube-rs and 26 s on DataFusion.
+
+Two lessons from getting there:
+
+- An early version marked `writer.shutdown()` as having no effects. It resolves to tokio's generic
+  `AsyncWriteExt::shutdown`, which writes through a `dyn AsyncWrite` the driver never sees. The
+  driver now classifies the I/O traits themselves (`AsyncWrite`, `io::Write`, `AsyncRead`,
+  `io::Read`) on real readers and writers. It marks any call through another crate's trait object
+  as opaque.
+- A crate built twice with different features contributes two facts for one site. They are merged
+  conservatively: every effect from either, and panicking or opaque if either says so.
+
 ## `dyn` calls: link-time class-hierarchy analysis
 
 The compiler can only resolve a trait-object call to its implementations when it sees all of them.

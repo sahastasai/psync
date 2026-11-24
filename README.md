@@ -76,7 +76,14 @@ psync recognizes operations on the outside world from the call: `fs::write(path)
   ```sh
   cd psync-check && cargo install --path .   # pinned nightly, installed by rustup
   cargo psync check                            # in your project; --deny for CI
+  cargo psync build                            # schedule with the compiler's facts, then build
+  cargo psync fix                              # insert #[psync::seq] where a plain build is wrong
   ```
+
+  With `cargo psync build`, the macro schedules from what the compiler found instead of from
+  names. Trait-object calls are resolved over every implementation in the build at a link step.
+- **The argument is machine-checked.** `verify/Schedule.lean` proves in Lean that any interleaving
+  of psync's schedule ends in the sequential program's state, given correct footprints.
 
 See the book's [Side effects](book/src/safety/effects.md) and
 [Checking rewrites](book/src/safety/check.md) chapters, and its
@@ -92,6 +99,7 @@ type-checked effect contracts, and an effect sanitizer for tests.
 | `#[psync::graph(off)]`, `PSYNC_GRAPH=off` | compile as written, for comparisons |
 | `#[psync::graph(strict)]` | unclassified awaited calls are writes |
 | `#[psync::graph(effects(read(..), write(..), ordered(..)))]` | name your API's verbs |
+| `#[psync::graph(yield_every = N)]` | yield to the executor every N iterations of each loop |
 | `#[psync::seq]` | keep a statement in place |
 | `#[psync::fresh]` | each branch evaluates this `let` again (a pooled connection) |
 | `#[psync::independent]` | a loop's iterations, or a statement's effects, do not interfere |
@@ -119,7 +127,7 @@ nix-shell -p mdbook --run 'mdbook build book'   # or: cargo install mdbook; mdbo
 # open book/book/index.html
 ```
 
-## The executor
+## The executors
 
 ```rust
 let executor = psync::Executor::default();
@@ -127,6 +135,11 @@ let handle = executor.spawn(10, async { /* work */ });
 handle.set_priority(20);
 executor.run_until_stalled(); // or executor.run() to park and wait forever
 ```
+
+With the `std` feature, `MultiExecutor::new(n)` runs `Send` futures on `n` worker threads with the
+same priority rules. `MultiExecutor::with_fairness(n, k)` bounds starvation: every `k`-th pick is
+the longest-waiting task. `#[psync::graph(yield_every = N)]` inserts preemption points into long
+loops.
 
 Larger `u16` priorities run first, with FIFO rotation among ready tasks of equal priority. Sleeping
 tasks are polled only after a wake. There is no preemption, so a continuously ready high-priority
@@ -150,6 +163,7 @@ and the `priority_demo` terminal demo are not checked into this branch yet. `car
 | `tests/graph.rs` | behaviour tests on simulated I/O |
 | `examples/graph_suite/` | the 16 real-world shapes |
 | `psync-check/` | `cargo psync check`: the rustc driver that verifies rewrites (pinned nightly; not in the workspace) |
+| `verify/` | Lean proof of the scheduling argument |
 | `book/` | the psync book |
 
 ## Publishing

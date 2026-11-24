@@ -32,6 +32,15 @@ impl rustc_driver::Callbacks for Psync {
         // Recheck a crate when the linked resolution of `dyn` calls changes: cargo reruns a crate
         // whose recorded environment dependencies changed.
         config.track_state = Some(Box::new(|sess| {
+            // Only the user's crates use the linked resolution; crates.io and git crates do not
+            // need recompiling when it changes.
+            let source = sess
+                .local_crate_source_file()
+                .and_then(|f| f.local_path().map(|p| p.display().to_string()))
+                .unwrap_or_default();
+            if source.contains("/.cargo/registry/") || source.contains("/.cargo/git/") {
+                return;
+            }
             let value = std::env::var("PSYNC_LINKED_STAMP").ok();
             sess.env_depinfo.borrow_mut().insert((
                 rustc_span::Symbol::intern("PSYNC_LINKED_STAMP"),
