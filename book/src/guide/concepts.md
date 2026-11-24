@@ -14,6 +14,11 @@ psync looks at each block of async code one statement at a time. A statement it 
 - an ordinary statement with possible side effects, which psync calls an **effect**
   (`out.push(x);`, `total += n;`).
 
+(Two words to keep apart. An *effect* node is a statement of your function, and the JSON report
+marks it `"effect": true`. A *side effect*, in the [Safety](../safety/effects.md) part, is what a
+call does outside the program, such as writing a file, and the report lists those under
+`"effects"`. An effect node may have side effects, and so may an await.)
+
 An **edge** `a -> b` means `b` must wait for `a`. psync adds an edge when one of these holds:
 
 | Reason in the report | Meaning |
@@ -22,6 +27,8 @@ An **edge** `a -> b` means `b` must wait for `a`. psync adds an edge when one of
 | ``rebinds `x` `` / ``shadows `x` `` | the two statements bind the same name, or `b` rebinds a name `a` still reads |
 | ``writes `p` `` | one writes a variable or field (`self.groups`) that the other reads or writes |
 | `effect order` | both are ordinary statements, which never change order relative to each other |
+| ``write file "a" (fs::write) vs read file "a" (fs::read)`` | both touch the same file, service or other outside resource, and one writes ([Side effects](../safety/effects.md)) |
+| ``may exit before `op` runs`` | `a` may exit early, and `b` writes something outside the program, which sequential code would then never have done ([Side effects](../safety/effects.md#writes-are-not-speculated)) |
 
 Here is the example from the introduction:
 
@@ -44,6 +51,7 @@ async fn profile_page(api: &Api, user_id: u64) -> Result<Page, Error> {
     n3: friends = friends()? [await]
     n0 -> n2 (reads `user`)
     level 0: n0->n2 || n1 || n3
+  unclassified (assumed to read; `strict` treats them as writes): user, posts, avatar, friends
 ```
 
 There is one edge: `avatar` reads `user`. Everything else is free. The final `Ok(Page { .. })` is
@@ -53,7 +61,8 @@ the block's value, so it stays last.
 
 A node with exactly one predecessor, whose predecessor has exactly one successor, joins that
 predecessor's **chain**. In the example, `n0 -> n2` is a chain: `avatar` starts the moment `user`
-arrives. It does not wait for `posts` or `friends`.
+arrives. It does not wait for `posts` or `friends`. (There is one more case, for a cheap binding
+read by a request and by what uses the response; [Scheduling](../internals/schedule.md) has it.)
 
 Chains are then grouped into **levels**. A chain's level is one past the deepest chain it waits for.
 All chains in a level run at the same time, joined together. When the level is done, its bindings
@@ -107,6 +116,7 @@ async fn hoisted(api: &Api, names: Vec<String>) -> Vec<usize> {
     level 0: n0 || n1 || n3
     level 1: n2
     level 2: n4
+  unclassified (assumed to read; `strict` treats them as writes): len, kind
 ```
 
 psync first moved both awaits into their own bindings (`__psync_h2`, `__psync_s3`). This step
@@ -192,6 +202,7 @@ async fn twice(&mut self) -> (u32, u32) {
     n1: b = hit() [await]
     n0 -> n1 (writes `self`)
     level 0: n0->n1
+  unclassified (assumed to read; `strict` treats them as writes): hit
 ```
 
 `(unchanged)` means psync found nothing to overlap, so it emits the region exactly as written.

@@ -32,7 +32,8 @@ Two effects **conflict**, and must keep their order, when all of these hold (`ps
 
 1. at least one of them writes;
 2. they are in the same domain. A child process may touch anything, so it conflicts with
-   everything except a *read* of the environment;
+   everything except a *read* of the environment (the macro, with less to go on, does not make
+   even that exception);
 3. their targets may be the same. Unknown targets may be anything. File paths overlap when they
    are equal or one is a directory containing the other. Two ordered writes on one domain
    always conflict, whatever their targets.

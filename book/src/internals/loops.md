@@ -13,14 +13,28 @@ Either way it records a `LoopReport`.
 
 ```rust,ignore
 struct LoopScope {
-    local: Set,        // the loop pattern and everything bound inside the body
-    carried: Set,      // places the body writes that outlive an iteration
-    independent: bool, // #[psync::independent]
+    local: Set,                   // the loop pattern and everything bound inside the body
+    carried: Set,                 // places the body writes that outlive an iteration
+    independent: bool,            // #[psync::independent]
+    terminates: bool,             // the body may end the loop (`?`, `return`, `break`)
+    speculate: bool,              // #[psync::speculate] on the loop or the function
+    carried_effects: Vec<Effect>, // side effects whose target is the same in every iteration
 }
 ```
 
-A candidate prefix node is refused when it writes a non-local path, or reads a path in `carried`.
-`independent` skips both checks.
+`LoopScope::refuses` refuses a candidate prefix node, in this order, when:
+
+1. the loop `terminates`, the node writes something outside the program, and neither the loop nor
+   the node is marked `speculate`. Later items' writes would happen before an earlier item ends
+   the loop;
+2. it writes a file or service whose target does not mention a per-iteration name, so every
+   iteration writes the same thing;
+3. its side effects conflict with `carried_effects`;
+4. it writes a non-local path;
+5. it reads a path in `carried`.
+
+`independent` skips checks 2 to 5, but not 1: knowing that iterations do not depend on each other
+says nothing about work done after the loop should have ended.
 
 ## Taking the prefix
 

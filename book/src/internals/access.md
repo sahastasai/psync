@@ -68,7 +68,12 @@ Uses of `#[psync::fresh]` bindings are removed entirely, because each branch mak
 3. **shadowing**: `b` defines a name that `a` uses;
 4. **conflict**: `a` writes a path that overlaps something `b` reads or writes, or `b` writes a path
    that `a` reads;
-5. **effect order**: both are ordinary statements.
+5. **side-effect conflict**: their effects on files, services or other outside resources conflict
+   (`effects::conflicts`, see [Side effects](../safety/effects.md)), unless either is marked
+   `#[psync::independent]`. The reason names both effects;
+6. **exit before a write**: `a` may exit or panic and `b` writes something outside the program,
+   unless `b` is marked `#[psync::speculate]`. The reason is ``may exit before `op` runs``;
+7. **effect order**: both are ordinary statements.
 
 Two reads of the same path never conflict.
 

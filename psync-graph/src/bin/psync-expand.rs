@@ -1,6 +1,7 @@
 //! `psync-expand FILE LINE [BOUND]`: apply `#[psync::graph]` to the innermost function containing
 //! LINE of an existing Rust file and print the generated code and dependency graph as JSON.
-//! Lets you see what psync would generate for code you have not annotated yet.
+//! Lets you see what psync would generate for code you have not annotated yet. A function that
+//! already has `#[psync::graph(..)]` is analyzed with those options; BOUND overrides `bound`.
 use psync_graph::{Options, transform_fn};
 use syn::{ItemFn, spanned::Spanned, visit::Visit};
 
@@ -66,7 +67,22 @@ fn main() {
         std::process::exit(1);
     };
     let (start, end) = (function.span().start().line, function.span().end().line);
-    let mut options = Options::default();
+    // The function's own `#[psync::graph(..)]` (or `#[graph(..)]`) options, if it has them.
+    let mut options = match function
+        .attrs
+        .iter()
+        .find(|a| a.path().segments.last().is_some_and(|s| s.ident == "graph"))
+        .map(|a| match &a.meta {
+            syn::Meta::List(l) => Options::parse(l.tokens.clone()),
+            _ => Ok(Options::default()),
+        }) {
+        Some(Ok(o)) => o,
+        Some(Err(e)) => {
+            eprintln!("bad #[psync::graph] options: {e}");
+            std::process::exit(1);
+        }
+        None => Options::default(),
+    };
     if let Some(b) = rest.first() {
         options.bound = b.parse().expect("BOUND");
     }

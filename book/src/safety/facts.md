@@ -10,7 +10,7 @@ cargo psync check --facts    # the same, without the final build
 cargo psync fix              # insert #[psync::seq] wherever a plain build would be wrong
 ```
 
-This closes the loop the proposal's Phase I, step 3 describes. The compiler (HIR and MIR, with
+This closes the loop that step 3 of Phase I ([Where psync is going](../introduction.md#where-psync-is-going)) describes. The compiler (HIR and MIR, with
 types and calls resolved) refines the graph the macro builds from tokens, and separately validates
 the schedule that comes out.
 

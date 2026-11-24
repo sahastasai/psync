@@ -41,7 +41,7 @@ names:
 | file | a path through `fs` (`std::fs::write`, `tokio::fs::read_to_string`), `File::create`/`File::open`, `OpenOptions`, `DirBuilder` | `read`, `read_to_string`, `read_dir`, `metadata`, `canonicalize`, `open`, ... | everything else (`write`, `create_dir_all`, `remove_file`, `rename`, `copy`, ...) | the path argument; `rename`/`copy` also the second |
 | network | `TcpStream`, `UdpSocket`, `TcpListener`, `UnixStream`, `net::` | `connect`, `bind`, ... | `send_to`, `send`, `write`, `write_all` | the address |
 | environment | `env::` | `env::var`, ... | `set_var`, `remove_var`, `set_current_dir` | the variable name |
-| process | `Command::new`, `process::` | | always a write | conflicts with *every* domain |
+| process | `Command::new`, `process::` | | always a write | conflicts with *every* domain (`cargo psync check`, which knows more, exempts a read of the environment) |
 | service | any other **awaited** call | its name starts with a read verb: `get`, `list`, `head`, `fetch`, `query`, `describe`, ... | its name starts with a write verb: `create`, `put`, `post`, `patch`, `delete`, `upload`, `insert`, `update`, `commit`, ... | the receiver path (`api`, `self.s3`) is the domain; the verb's first argument is the target |
 
 Some details:
@@ -203,4 +203,7 @@ This is still a token-level analysis:
 - **Callees are opaque to the macro.** An awaited call to your own helper is classified by the
   helper's name, not by what its body does. [`cargo psync check`](./check.md) reads the bodies and
   reports where that guess was wrong.
-- **Panics are not exits.** A write may still run ahead of an earlier `unwrap()` that panics.
+- **Panics are not exits, from tokens alone.** The macro cannot tell which calls may panic, so
+  a write may still run ahead of an earlier call that panics. The compiler can:
+  [`cargo psync check`](./check.md) reports such a write, and with
+  [compiler facts](./facts.md) the macro keeps it in order.

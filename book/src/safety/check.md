@@ -58,7 +58,8 @@ note: the conflicting effect
    = note: in the code `#[psync::graph]` generated for `start`
 ```
 
-The same run finds three more:
+The fixture has eleven annotated functions, each hiding something different. The same run finds
+seven more findings. The first three:
 
 - `session.get_token()` writes a file although its name reads. psync starts it before `check()?`
   has succeeded (`speculative-write`):
@@ -89,7 +90,18 @@ The same run finds three more:
 - With `--notes`, two concurrent chains that both use one `&RefCell<Vec<u32>>`: their updates now
   interleave (`interior-mutability`).
 
-The fifth rewritten function, which reads two different files, gets no finding.
+The other four come from cases explained elsewhere in the book:
+
+| Function | Finding | Explained in |
+|---|---|---|
+| `snapshot` | `conflict`: a `dyn Store` call writes `store.db`, which the next call reads | [Dynamic dispatch](../foundations/dispatch.md) |
+| `tour` | `conflict`: `visit` writes `walk.log` through mutual recursion with `walk` | [Effects and summaries](../foundations/effects.md) |
+| `release` | `conflict`: `fs::copy` writes its second path, `site.html` | [Adding an effect rule](../contributing/effect-rule.md) |
+| `boot` | `speculative-write`: a write starts before a call that may panic (`unwrap`) | [Adding a check](../contributing/check.md) |
+
+That is eight in all, counting the `--notes` one. Functions with nothing to report get no finding:
+`sizes` and `walk_then_read` read files nobody writes. The test
+(`psync-check/tests/fixture.rs`) checks each finding and the total.
 
 ## How it works
 
@@ -99,8 +111,9 @@ The macro now tags what it made concurrent. Each chain of a concurrent level is 
 `maybe_done_at::<LEVEL, ORDER, EXITS, SPEC, INDEP, _>(async { .. })` instead of `maybe_done`, and
 each prefetched loop prefix in `over_at::<LOOP, TERMINATES, SPEC, INDEP, ..>`. The const
 generics record what the macro assumed:
-- which level the chain belongs to;
-- where it starts in program order;
+- `LEVEL`: which join the chain belongs to. It is numbered from 1 within each annotated function, in
+  the order the macro emits joins, so it is not an index into the report's `levels`. The driver only compares it: chains with the same `LEVEL` run concurrently;
+- `ORDER`: the chain's first statement's position in its block, which orders exits;
 - whether it may exit early;
 - whether it carries `#[psync::speculate]` or `#[psync::independent]`;
 - for loops, whether the body can end the loop.
@@ -149,7 +162,7 @@ program order:
 | Finding | When |
 |---|---|
 | `conflict` | two chains of one level have conflicting effects: same domain, one writes, targets may be the same, and neither is `independent` |
-| `speculative-write` | a chain writes, an earlier chain of the same level may exit (a `?`, `return`, `break` or `continue`, or a callee that panics explicitly: `unwrap`, `expect`, `panic!`), and the writer is not `speculate` |
+| `speculative-write` | a chain writes, an earlier chain of the same level may exit (a `?`, `return`, `break` or `continue`, or a callee that panics explicitly: `unwrap`, `expect`, `panic!`, `assert!`, `unreachable!`, `todo!`), and the writer is not `speculate` |
 | `loop-speculative-write` | a prefetched prefix writes, the body can end the loop, and the loop is not `speculate` |
 | `interior-mutability` (note) | two chains capture the same variable whose type, behind references, `Rc`, `Arc` or `Box`, is a `Cell`, `RefCell`, `OnceCell`, `Mutex`, `RwLock` or atomic |
 | `output-order` (note) | two chains both print |
@@ -203,4 +216,4 @@ warnings. The findings summary covers only crates recompiled in this run.
 - **Verbs of other crates' APIs are still names.** `kube::Api::list` reads because its name says
   so. The driver classifies other crates' I/O by name, not by following them down to the socket:
   at that level, every HTTP request is a write.
-- **Panics** count as exits only when they are explicit and in your own code (`unwrap`, `expect`, `panic!`, `assert!`). Panics inside libraries, and bounds and overflow checks, are not counted.
+- **Panics** count as exits only when they are explicit and in your own code (`unwrap`, `expect`, `panic!`, `assert!`, `unreachable!`, `todo!`). Panics inside libraries, and bounds and overflow checks, are not counted.

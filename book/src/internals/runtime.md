@@ -14,6 +14,7 @@ here uses only `core` and `alloc`.
 | `maybe_done_at::<LEVEL, ORDER, EXITS, SPEC, INDEP, _>`, `over_at::<LOOP, TERMINATES, SPEC, INDEP, ..>` | what generated code calls: the same helpers, tagged with the macro's assumptions for [`cargo psync check`](../safety/check.md); free at run time |
 | `Branch`, `Rethrow`, `ResultResidual`, `OptionResidual` | record `?` and replay it through the caller's `?` |
 | `Vec` | re-exported so generated code can name `alloc::vec::Vec` |
+| `tick(&counter, every) -> bool`, `yield_now()` | `yield_every = N`: count a loop's iterations in a counter static to that loop, and yield to the executor on every Nth |
 
 ## `MaybeDone`
 
@@ -43,8 +44,6 @@ It does not stop early on errors. Errors are values recorded in exit slots, and 
 replays them in order. Every item's future is therefore run to completion. This is the speculation
 described in [Loops](../guide/loops.md).
 
-## Known gap
-
-Fission's first loop collects into `::std::vec::Vec`, not the re-exported `alloc` `Vec`. So a
-function whose loop is split by fission currently needs `std`. Straight-line regions and plain
-prefetch need only `alloc`.
+All generated code names `core` or `#krate::__private`, never `std`, so it compiles in `no_std`
+crates that have `alloc` (the RP2350 build is one). Fission's first loop collects into the
+re-exported `Vec`.

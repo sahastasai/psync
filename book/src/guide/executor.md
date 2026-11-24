@@ -174,4 +174,5 @@ urgent task runs before step 4 instead of after step 6.
 - **Parallel iterations.** The code `#[psync::graph]` generates joins its branches in one task.
   After the I/O overlaps, CPU work in the branches runs on one core (see
   [Patterns and pitfalls](./patterns.md)). Spawning branches onto workers needs `'static` futures
-  or scoped tasks. That is part of Phase II's "execute across threads".
+  or scoped tasks. That belongs to Phase II, which runs independent work on parallel workers
+([Where psync is going](../introduction.md#where-psync-is-going)).

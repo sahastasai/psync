@@ -656,7 +656,7 @@ impl Rewriter<'_> {
         let tokens = quote! {{
             #(let mut #slot_idents = ::core::option::Option::None;)*
             let #items = {
-                let mut __psync_v = ::std::vec::Vec::new();
+                let mut __psync_v = #krate::__private::Vec::new();
                 #pre_label: #head {
                     #(#first)*
                     __psync_v.push((#(#names,)*));

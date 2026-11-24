@@ -83,10 +83,15 @@ process effects and keeps them from running speculatively.
 | **2.59×** | geometric mean over all applications and network profiles, end to end |
 | **0 failures in 320 runs** | both builds printed the same output and sent the same API requests |
 | **7 and 11 lines** | the whole patch to kube-rs and to DataFusion: attributes, no rewrites |
-| **84 of 90** | confirmed real-world findings that psync rewrites from the code as written; 5 more need one hint line |
+| **79 of 90** | confirmed real-world findings that psync rewrites from the code as written; 10 more need one hint line |
 | **3.79×** | geometric mean over the 16 real-world shapes in `graph_suite` |
 
-These come from measured runs against a real Kubernetes 1.36 control plane and an S3 store over TLS.
+The "findings" are from **the audit** that motivated psync: a search of 35 popular async Rust
+repositories, at pinned commits, for awaits that ran one after another but did not need to. It found
+193 verified examples, 90 of them confirmed unconditionally. Each has an id such as `web-16` (a
+Lemmy handler) or `tools-13`, which the book uses to cite it. 99 of the 193 were awaits in a loop.
+
+The end-to-end numbers come from measured runs against a real Kubernetes 1.36 control plane and an S3 store over TLS.
 The [case studies](./case-studies/kube-datafusion.md) cover them, including the cases where psync
 did not help or made things slower.
 
@@ -94,10 +99,10 @@ did not help or made things slower.
 
 psync started from a research proposal with two phases:
 
-- **Phase I, asynchronous concurrency.** Extend the executor to several cores. Build the
-  token-level dependency graph in a procedural macro. Then refine it with compiler information
-  (HIR, THIR, MIR: types, resolved calls, aliasing, effects). The macro described in this book is
-  Phase I step 2.
+- **Phase I, asynchronous concurrency.** In three steps: (1) extend the executor to several
+  cores; (2) build the token-level dependency graph in a procedural macro; (3) refine it with
+  compiler information (HIR, THIR, MIR: types, resolved calls, aliasing, effects). The macro
+  described in this book is step 2, and [`cargo psync`](./safety/check.md) is step 3.
 - **Phase II, synchronous concurrency.** Apply the same analyses to ordinary synchronous code.
   Split independent regions into tasks, and run them on parallel workers.
 

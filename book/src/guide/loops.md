@@ -73,14 +73,18 @@ the body. If it reads something an earlier iteration writes, the iterations depe
 
 ```rust,ignore
 for item in items {
-    let next = add(total, item).await;    // reads `total`, which the previous iteration wrote
+    let next = combine(total, item).await;    // reads `total`, which the previous iteration wrote
     total = next;
 }
 ```
 
 ```text
-  loop `for item in items`: no awaited statement can run ahead
+  loop `for item in items`: reads `total`, which the loop body writes
 ```
+
+The prefix may not have outside effects that later iterations would see either. A prefix that
+writes the same file or service in every iteration, or writes anything at all when an earlier item
+might end the loop, stays in order.
 
 The reasons a loop is left alone are:
 
@@ -88,8 +92,13 @@ The reasons a loop is left alone are:
 |---|---|
 | ``writes `x`, which outlives the iteration`` | the prefix writes loop-carried state |
 | ``reads `x`, which the loop body writes`` | the prefix reads loop-carried state |
+| `would <effect> in every iteration at once` | the prefix writes a file or service whose target does not depend on the item, so every iteration would write the same thing |
+| `<effect> vs <effect>, which every iteration performs` | the prefix's effect conflicts with one the rest of the body has |
+| `would <effect> for later items before knowing whether an earlier item ends the loop` | the body can `?`, `return` or `break`, and the prefix writes; `#[psync::speculate]` allows it (see [Fission](#fission-loop-carried-state-first)) |
 | `no awaited statement can run ahead` | nothing awaited is left once the above are excluded |
 | `` `ref` in the loop pattern `` | `ref` bindings cannot be moved into a closure |
+
+`<effect>` is written as in [`explain`](./explain.md), for example ``write `store` `d` (upload)``.
 
 Read-modify-write caches are a common case:
 
@@ -166,13 +175,28 @@ for d in digests {
 }
 ```
 
+As written, this loop stays sequential, for a reason that has nothing to do with the dedupe set:
+
+```text
+  loop `for d in digests`: would write `store` `d` (upload) for later items before knowing whether an earlier item ends the loop (`#[psync::speculate]` allows it)
+```
+
+`upload` writes, and its `?` can end the loop. If item 3's upload fails, sequential code never
+uploads item 4, but a prefetching loop already has. Here that is harmless: uploads are
+content-addressed, so uploading a blob nobody records is a no-op. Say so on the loop:
+
+```rust,ignore
+#[psync::speculate]
+for d in digests { /* same body */ }
+```
+
 ```text
   loop `for d in digests`: prefetch [__psync_g8 = upload()], 8 at a time
 ```
 
 The generated code first builds `[(d, published.insert(d)) for each d]` in a plain loop. Then it
 prefetches `upload` for the entries whose flag is true. This is jdx/mise's remote task cache. It is
-the `tools-13` shape in `graph_suite`, at 3.46×.
+the `tools-13` shape in `graph_suite`, with the same hint, at about 3.5×.
 
 Exits in the first loop that would end the whole loop are deferred until the items before them are
 done. These are `return`, `?`, or a `break` to an outer loop. Sequential code performs them at that

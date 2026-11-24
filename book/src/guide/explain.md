@@ -22,6 +22,7 @@ psync::graph `profile_page`:
     n3: friends = friends()? [await]
     n0 -> n2 (reads `user`)
     level 0: n0->n2 || n1 || n3
+  unclassified (assumed to read; `strict` treats them as writes): user, posts, avatar, friends
 ```
 
 Line by line:
@@ -30,8 +31,17 @@ Line by line:
   analyzed and listed. `(unchanged)` means nothing overlapped, so the region is emitted as written.
 - **`nK: label`** is one node. A binding shows `names = callee()`. A computed value shows its
   first characters. `?` marks a node that can exit early, and `[await]` marks one that awaits.
+  A node with side effects outside the program ends with them in braces:
+  `{read service "user" (fetch)}` is a read, by the call `fetch`, of the service named by the
+  string `"user"`. `{write file "cfg.toml" (fs::write)}` writes that file. The rules that produce
+  these are in [Side effects](../safety/effects.md).
 - **`nA -> nB (reason)`**: `nB` waits for `nA`. The reasons are listed in
   [Basic concepts](./concepts.md#nodes-and-edges).
+- **`unclassified (..): names`** lists the awaited calls whose names say nothing about what they
+  do (`user`, not `get_user`). psync assumes they only read, so they may run concurrently. Check
+  that list: a call in it that really writes is the one place a token-level analysis can be wrong.
+  `#[psync::graph(strict)]` treats them as writes instead, and `cargo psync check` checks them
+  against the compiled callees.
 - **`level L: chain || chain`** lists chains (`n0->n2`) that run concurrently in level `L`.
 - **`loop `for x in xs`: prefetch [labels], N at a time`** names a rewritten loop. A loop that was
   left alone shows the reason instead.
@@ -66,12 +76,14 @@ default bodies all work. The output is one JSON object:
     "regions": [
       {
         "nodes": [
-          { "label": "user = user()?", "awaits": true, "effect": false, "exits": true, "line": 2 },
+          { "label": "user = user()?", "awaits": true, "effect": false, "effects": [],
+            "exits": true, "line": 2, "speculate": false },
           ...
         ],
         "edges": [[0, 2, "reads `user`"]],
         "chains": [[0, 2], [1], [3]],
         "levels": [[0, 1, 2]],
+        "unclassified": [[2, "user"], [3, "posts"], [4, "avatar"], [5, "friends"]],
         "changed": true
       }
     ],

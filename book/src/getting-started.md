@@ -12,14 +12,20 @@ shows how to see what psync did, and how to turn it off.
 
 ## Add the dependency
 
-psync is not on crates.io yet. Depend on the Git repository. `#[psync::graph]` currently lives on
-the `claude/initial_psync_graph` branch:
+psync is not on crates.io yet. Depend on a checkout of the repository:
 
 ```toml
 [dependencies]
-psync = { git = "https://github.com/sahastasai/psync", branch = "claude/initial_psync_graph", default-features = false }
+psync = { path = "../psync", default-features = false }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 ```
+
+> **Which version.** This book describes the development branch, which is not published yet.
+> The branch `claude/initial_psync_graph` on GitHub
+> (`psync = { git = "https://github.com/sahastasai/psync", branch = "claude/initial_psync_graph" }`)
+> has an earlier `#[psync::graph]`, with the scheduling of the Guide but without side effects,
+> `#[psync::speculate]`, `strict`, `effects(..)`, the `MultiExecutor` or `cargo psync`. Everything
+> in [Safety](./safety/effects.md) needs the development branch.
 
 On a desktop or server, use `default-features = false`. The default feature, `rp235x`, adds the
 RP2350 heap and hardware support, and you only want that for firmware.
@@ -58,9 +64,9 @@ async fn main() {
 ```text
 psync::graph `dashboard`:
   region 0:
-    n0: user = fetch()? [await]
-    n1: orders = fetch()? [await]
-    n2: weather = fetch()? [await]
+    n0: user = fetch()? [await] {read service "user" (fetch)}
+    n1: orders = fetch()? [await] {read service "orders" (fetch)}
+    n2: weather = fetch()? [await] {read service "weather" (fetch)}
     level 0: n0 || n1 || n2
 ```
 

@@ -48,8 +48,13 @@ Concurrency comes from nodes with no path between them. psync groups them in two
 
 1. **Chains.** If `u → v` is the only edge into `v` and the only edge out of `u`, nothing else
    can happen between them that matters. Fuse them into one **chain** and run it as one task.
+   (psync also fuses when `u` does not await and everything else that waits for `u` waits for
+   `v` too, as with `let key = ..;` feeding a request; see
+   [Scheduling](../internals/schedule.md).)
 2. **Levels.** A chain's level is one past the deepest chain it waits for. All chains of a level
-   run concurrently. The next level starts when they are all done.
+   run concurrently. The next level starts when they are all done. (One refinement for early
+   exits, in [Early exits](../guide/exits.md): a chain whose exit must wait for an earlier
+   statement in a later level hands its results on only after that level.)
 
 The example runs this on the function `hoisted` from [Basic concepts](../guide/concepts.md),
 after psync has moved its two awaits into their own bindings (`h2`, `s3`). It runs it on the

@@ -1,6 +1,6 @@
 # Hints
 
-psync reads tokens, and some things you know cannot be seen in tokens. Three hint attributes tell
+psync reads tokens, and some things you know cannot be seen in tokens. Four hint attributes tell
 psync what you know. Inside a `#[psync::graph]` function, psync reads them and removes them from
 its output. Outside one, they do nothing.
 
@@ -8,7 +8,8 @@ its output. Outside one, they do nothing.
 |---|---|---|
 | `#[psync::seq]` | a statement | keep this statement exactly where it is |
 | `#[psync::fresh]` | a `let` | each concurrent branch evaluates the initializer again, instead of sharing the value |
-| `#[psync::independent]` | a `for` or `while` loop | iterations do not depend on each other, even where psync cannot prove it |
+| `#[psync::independent]` | a `for` or `while` loop, or a statement | on a loop: iterations do not depend on each other, even where psync cannot prove it. On a statement: its outside effects commute with the others' |
+| `#[psync::speculate]` | a statement, a loop, or the function (`#[psync::graph(speculate)]`) | its writes may run before an earlier statement that might exit, because doing them anyway is harmless |
 
 ## `#[psync::seq]`
 
@@ -47,15 +48,17 @@ async fn fresh_pool(context: &Context) -> Result<u32, Error> {
 
 ```text
   region 0:
-    n0: a = read_row()? [await]
-    n1: b = read_row()? [await]
+    n0: a = read_row()? [await] {read service `pool` (read_row)}
+    n1: b = read_row()? [await] {read service `pool` (read_row)}
     level 0: n0 || n1
 ```
 
 Each chain begins with its own `let pool = &mut context.pool();`. Uses of `pool` do not count as
 conflicts. Without the hint, both reads would go through the same `&mut` and stay sequential. In the audit,
-this hint was needed once, for a Lemmy handler (`web-16`). The other four hinted findings needed
-`independent`.
+this hint was needed once, for a Lemmy handler (`web-16`). Four other findings needed `independent` on a
+loop. Five more have needed a hint since psync started tracking side effects: `speculate` where a
+loop writes behind a `?`, or `independent` (or `effects(..)`) where two calls on one resource
+really commute. [Side effects](../safety/effects.md#what-the-audit-found) lists them.
 
 Only use `fresh` when evaluating the initializer again is correct. It is wrong if the branches must
 share one transaction, or must see each other's writes.

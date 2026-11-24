@@ -5,7 +5,7 @@ crates:
 
 | Crate | Role |
 |---|---|
-| `psync-macros` | the proc-macro entry points (`graph`, `seq`, `fresh`, `independent`); `graph` calls `psync_graph::expand` |
+| `psync-macros` | the proc-macro entry points (`graph`, `seq`, `fresh`, `independent`, `speculate`); `graph` calls `psync_graph::expand` |
 | `psync-graph` | the analysis and code generation, an ordinary library (also used by `psync-expand`) |
 | `psync` (`src/graph_rt.rs`, exported as `psync::__private`) | the small runtime the generated code calls |
 
@@ -16,15 +16,21 @@ The proc macro is a thin wrapper, so the whole analysis can be tested and run ou
 
 `psync_graph::expand(attr, item)`:
 
-1. Parses the options (`bound`, `explain`, `off`, `crate`). If `off` is set, or `PSYNC_GRAPH=off`,
-   it only strips hint attributes and returns the function.
+1. Parses the options (`bound`, `explain`, `off`, `strict`, `speculate`, `effects(..)`,
+   `yield_every`, `crate`; see [Attribute options](../reference/attributes.md)). If `off` is set, or
+   `PSYNC_GRAPH=off`, it only strips hint attributes and returns the function.
 2. Builds a **`Scope`** of mutability facts for the whole function. These are the `mut` bindings,
    the bindings that hold `&mut` values (including `&mut self` and `&mut T` parameters), and the
    `#[psync::fresh]` bindings with their initializers.
 3. Runs the **`Rewriter`** (`rewrite.rs`) over the body. It is a `syn::visit_mut::VisitMut` that
    handles blocks innermost first. It only rewrites code inside `async fn`s, async blocks and async
    closures, and it skips nested items.
-4. Strips the hints, and prints the report if `explain` was given.
+4. With `yield_every = N`, inserts a yield to the executor at the start of every Nth iteration of each
+   loop (`YieldInjector`), so a long loop cannot hold back other tasks.
+5. Inserts `const __PSYNC_GRAPH: Option<&str> = option_env!("PSYNC_FACTS_STAMP");` at the top of
+   the body. It marks the function for `cargo psync`'s driver, and makes cargo rebuild the
+   function when its compiler facts change. It has no effect at run time.
+6. Strips the hints, and prints the report if `explain` was given.
 
 For each block of async code, the rewriter does five steps:
 
@@ -42,7 +48,8 @@ For each block of async code, the rewriter does five steps:
 ```
 
 A block whose regions all stay sequential is emitted **exactly as written**. Hoisting is undone
-too. So psync never changes code it cannot speed up.
+too. So psync never changes a block it cannot speed up. (The function as a whole still gains the
+`__PSYNC_GRAPH` constant of step 5.)
 
 ## The modules
 

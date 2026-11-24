@@ -14,6 +14,11 @@ pub(crate) struct Node {
     pub awaits: bool,             // awaits outside nested closures and async blocks
     pub effect: bool,             // an ordinary statement: keeps its order with other effects
     pub exits: bool,              // contains ?, return, break or continue that leave it
+    pub effects: Vec<Effect>,     // what it does to files, services, processes, the environment
+    pub unclassified: Vec<String>,// awaited calls whose names say nothing (assumed to read)
+    pub speculate: bool,          // #[psync::speculate]: its writes may run ahead of exits
+    pub panics: bool,             // compiler facts: it may panic on purpose (an exit for speculation)
+    pub independent: bool,        // #[psync::independent]: its effects commute with the region's
     pub label: String,            // for reports
     pub line: usize,
 }
