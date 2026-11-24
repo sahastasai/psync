@@ -32,6 +32,16 @@ pub struct Summary {
 }
 
 impl Summary {
+    /// Grows whenever an absorb adds anything (effects, opaque callees, panics, deferred calls).
+    fn size(&self) -> (usize, usize, bool, usize) {
+        (
+            self.effects.len(),
+            self.opaque.len(),
+            self.panics,
+            self.deferred.len(),
+        )
+    }
+
     fn absorb(&mut self, other: &Summary, span: Span, via: Option<&str>) {
         for l in &other.effects {
             let mut effect = l.effect.clone();
@@ -59,6 +69,32 @@ impl Summary {
             self.effects.push(Located { effect, span });
         }
     }
+}
+
+/// A call from one body to a local body: a function, or a closure or coroutine it creates.
+#[derive(Clone, Debug)]
+pub struct Edge {
+    callee: DefId,
+    span: Span,
+    /// The callee's path, recorded in the effects' call chains (`None` for nested bodies).
+    via: Option<String>,
+}
+
+/// One body's own effects (everything but its calls of local bodies), and those calls.
+#[derive(Debug)]
+pub struct Local {
+    own: Summary,
+    calls: Vec<Edge>,
+}
+
+/// The state of Tarjan's algorithm.
+#[derive(Default)]
+struct Tarjan {
+    next: usize,
+    index: HashMap<DefId, usize>,
+    low: HashMap<DefId, usize>,
+    stack: Vec<DefId>,
+    on_stack: HashSet<DefId>,
 }
 
 /// A definition's path for people: `load` rather than `load::{closure#0}`.
@@ -123,7 +159,8 @@ const IO_CRATES: &[&str] = &[
 pub struct Analyzer<'tcx> {
     tcx: TyCtxt<'tcx>,
     memo: HashMap<DefId, Rc<Summary>>,
-    in_progress: HashSet<DefId>,
+    /// Each body's own effects and its calls of local bodies, read from MIR once.
+    locals: HashMap<DefId, Rc<Local>>,
     external: Option<HashMap<String, FnSummary>>,
     /// Stable ids of crates the driver summarized.
     summarized: HashSet<String>,
@@ -140,7 +177,7 @@ impl<'tcx> Analyzer<'tcx> {
         Self {
             tcx,
             memo: HashMap::new(),
-            in_progress: HashSet::new(),
+            locals: HashMap::new(),
             external: None,
             summarized: HashSet::new(),
             summary_dir: std::env::var_os(env::SUMMARIES).map(PathBuf::from),
@@ -162,19 +199,105 @@ impl<'tcx> Analyzer<'tcx> {
     }
 
     /// The effects of a local function, closure or coroutine, including the closures and
-    /// coroutines it creates (an `async fn`'s body is a coroutine it returns).
+    /// coroutines it creates (an `async fn`'s body is a coroutine it returns), through every
+    /// local callee.
+    ///
+    /// A summary is the least fixed point of `S(f) = own(f) ∪ ⋃ S(g)` over the local calls
+    /// `f → g`. Recursive functions make the call graph cyclic, so the bodies are grouped into
+    /// strongly connected components (Tarjan's algorithm, callees before callers), and each
+    /// component is iterated until its summaries stop growing. Every member of a cycle then gets
+    /// the effects of the whole cycle, whichever member is asked for first.
     pub fn summarize(&mut self, def_id: DefId) -> Rc<Summary> {
         if let Some(s) = self.memo.get(&def_id) {
             return s.clone();
         }
-        if !self.has_body(def_id) || !self.in_progress.insert(def_id) {
-            // Recursion: the cycle's own effects are found from its other members.
+        if !self.has_body(def_id) {
             return Rc::new(Summary::default());
+        }
+        let mut walk = Tarjan::default();
+        self.component(def_id, &mut walk);
+        self.memo[&def_id].clone()
+    }
+
+    /// Tarjan's strongly connected components over local calls, from `v`. When `v` closes a
+    /// component, its members' summaries are computed together and memoized.
+    fn component(&mut self, v: DefId, t: &mut Tarjan) {
+        let index = t.next;
+        t.next += 1;
+        t.index.insert(v, index);
+        t.low.insert(v, index);
+        t.stack.push(v);
+        t.on_stack.insert(v);
+        let local = self.local(v);
+        for edge in &local.calls {
+            let w = edge.callee;
+            if self.memo.contains_key(&w) || !self.has_body(w) {
+                continue;
+            }
+            if !t.index.contains_key(&w) {
+                self.component(w, t);
+                let low = t.low[&v].min(t.low[&w]);
+                t.low.insert(v, low);
+            } else if t.on_stack.contains(&w) {
+                let low = t.low[&v].min(t.index[&w]);
+                t.low.insert(v, low);
+            }
+        }
+        if t.low[&v] != index {
+            return;
+        }
+        // `v` is the root of a component: its members are on the stack above it.
+        let mut members = Vec::new();
+        while let Some(w) = t.stack.pop() {
+            t.on_stack.remove(&w);
+            members.push(w);
+            if w == v {
+                break;
+            }
+        }
+        let locals: Vec<Rc<Local>> = members.iter().map(|m| self.local(*m)).collect();
+        let mut current: HashMap<DefId, Summary> = members
+            .iter()
+            .zip(&locals)
+            .map(|(m, l)| (*m, l.own.clone()))
+            .collect();
+        // Summaries only grow, and there are finitely many distinct effects: this terminates.
+        // A component without a cycle (one member, not calling itself) takes one round.
+        loop {
+            let mut changed = false;
+            for (m, local) in members.iter().zip(&locals) {
+                for edge in &local.calls {
+                    let callee = match self.memo.get(&edge.callee) {
+                        Some(done) => (**done).clone(),
+                        None => current.get(&edge.callee).cloned().unwrap_or_default(),
+                    };
+                    let summary = current.get_mut(m).expect("member");
+                    let before = summary.size();
+                    summary.absorb(&callee, edge.span, edge.via.as_deref());
+                    summary.opaque.sort();
+                    summary.opaque.dedup();
+                    changed |= summary.size() != before;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        for (m, summary) in current {
+            self.memo.insert(m, Rc::new(summary));
+        }
+    }
+
+    /// What one body does by itself, and which local bodies it calls, read from its MIR.
+    fn local(&mut self, def_id: DefId) -> Rc<Local> {
+        if let Some(l) = self.locals.get(&def_id) {
+            return l.clone();
         }
         let tcx = self.tcx;
         let body = tcx.optimized_mir(def_id);
         let typing_env = TypingEnv::post_analysis(tcx, def_id);
-        let mut summary = Summary::default();
+        let mut own = Summary::default();
+        let mut calls = Vec::new();
         for data in body.basic_blocks.iter() {
             for stmt in &data.statements {
                 if let StatementKind::Assign(assign) = &stmt.kind
@@ -183,8 +306,11 @@ impl<'tcx> Analyzer<'tcx> {
                     | AggregateKind::Coroutine(nested, _)
                     | AggregateKind::CoroutineClosure(nested, _) = **kind
                 {
-                    let inner = self.summarize(nested);
-                    summary.absorb(&inner, stmt.source_info.span, None);
+                    calls.push(Edge {
+                        callee: nested,
+                        span: stmt.source_info.span,
+                        via: None,
+                    });
                 }
             }
             let terminator = data.terminator();
@@ -193,26 +319,34 @@ impl<'tcx> Analyzer<'tcx> {
                 match func.const_fn_def() {
                     Some((callee, gargs)) => {
                         let args: Vec<&Operand<'tcx>> = args.iter().map(|a| &a.node).collect();
-                        self.call(&mut summary, typing_env, callee, gargs, &args, span);
+                        self.call(
+                            &mut own,
+                            Some(&mut calls),
+                            typing_env,
+                            callee,
+                            gargs,
+                            &args,
+                            span,
+                        );
                     }
-                    None => summary
-                        .opaque
-                        .push("call through a function pointer".into()),
+                    None => own.opaque.push("call through a function pointer".into()),
                 }
             }
         }
-        summary.opaque.sort();
-        summary.opaque.dedup();
-        self.in_progress.remove(&def_id);
-        let summary = Rc::new(summary);
-        self.memo.insert(def_id, summary.clone());
-        summary
+        own.opaque.sort();
+        own.opaque.dedup();
+        let local = Rc::new(Local { own, calls });
+        self.locals.insert(def_id, local.clone());
+        local
     }
 
-    /// Add the effects of calling `callee` to `summary`.
+    /// Add the effects of calling `callee` to `summary`. With `calls`, a call of a local body is
+    /// recorded there instead of followed (for [`Self::component`]).
+    #[allow(clippy::too_many_arguments)]
     fn call(
         &mut self,
         summary: &mut Summary,
+        calls: Option<&mut Vec<Edge>>,
         typing_env: TypingEnv<'tcx>,
         callee: DefId,
         gargs: GenericArgs<'tcx>,
@@ -309,13 +443,35 @@ impl<'tcx> Analyzer<'tcx> {
                 // writes to a socket.
                 && !(library && domain == Domain::Net)
             {
-                add(domain, access, if keeps_target { target } else { None });
+                // `copy(from, to)`, `rename(from, to)`, `hard_link(original, link)`,
+                // `symlink(original, link)`: the second path is written too. `copy` only reads
+                // its source.
+                let second = (domain == Domain::Fs && keeps_target)
+                    .then(|| two_path_fs(&name))
+                    .flatten();
+                match second {
+                    Some(first_access) => {
+                        let to = args.get(1).and_then(|a| self.string_constant(a));
+                        add(Domain::Fs, first_access, target);
+                        add(Domain::Fs, Access::Write, to);
+                    }
+                    None => add(domain, access, if keeps_target { target } else { None }),
+                }
             }
             return;
         }
         if resolved.is_local() {
-            let inner = self.summarize(resolved);
-            summary.absorb(&inner, span, Some(&path));
+            match calls {
+                Some(calls) if self.has_body(resolved) => calls.push(Edge {
+                    callee: resolved,
+                    span,
+                    via: Some(path.clone()),
+                }),
+                _ => {
+                    let inner = self.summarize(resolved);
+                    summary.absorb(&inner, span, Some(&path));
+                }
+            }
             if !self.has_body(resolved) && !library {
                 self.by_name(summary, &path, &name, target, span);
             }
@@ -482,7 +638,7 @@ impl<'tcx> Analyzer<'tcx> {
                 };
                 let args: Vec<&Operand<'tcx>> = args.iter().map(|a| &a.node).collect();
                 let mut one = Summary::default();
-                self.call(&mut one, typing_env, callee, gargs, &args, *fn_span);
+                self.call(&mut one, None, typing_env, callee, gargs, &args, *fn_span);
                 let name = tcx
                     .opt_item_name(callee)
                     .map(|n| n.to_string())
@@ -765,6 +921,17 @@ fn io_trait_effect(path: &str, name: &str, self_ty: Option<&str>) -> Option<(Dom
     }
 }
 
+/// File operations on two paths, which write the second: the access to the first.
+fn two_path_fs(name: &str) -> Option<Access> {
+    match name {
+        "copy" => Some(Access::Read),
+        "rename" | "hard_link" | "symlink" | "soft_link" | "symlink_file" | "symlink_dir" => {
+            Some(Access::Write)
+        }
+        _ => None,
+    }
+}
+
 /// File, socket, process, environment and output operations of std and the async runtimes,
 /// recognized by path: `(domain, access, whether the first argument is the target)`.
 fn io_effect(path: &str, name: &str) -> Option<(Domain, Access, bool)> {
@@ -1033,24 +1200,32 @@ impl<'a, 'tcx> Checker<'a, 'tcx> {
                         );
                     }
                 }
-                // A write runs before an earlier statement that may exit is known not to.
-                if earlier.exits
+                // A write runs before an earlier statement that may exit is known not to. A
+                // panic in the earlier chain's callees (`unwrap`, `expect`, `panic!` in the user's
+                // code) is an exit too, although the macro's tokens do not show it.
+                let panics = !earlier.exits && summaries[i].panics;
+                if (earlier.exits || panics)
                     && !later.spec
                     && let Some(w) = summaries[j]
                         .effects
                         .iter()
                         .find(|l| l.effect.writes() && l.effect.domain != Domain::Output)
                 {
+                    let how = if panics {
+                        "may panic"
+                    } else {
+                        "exits early"
+                    };
                     self.report(
                         Severity::Warning,
                         "speculative-write",
                         function,
                         w.span,
                         format!(
-                            "psync starts this before knowing whether an earlier statement exits \
-                             early, and it does `{}` (via {}); sequential code would not have \
-                             done it after that exit. Mark it `#[psync::speculate]` if that is \
-                             harmless, or `#[psync::seq]`",
+                            "psync starts this before knowing whether an earlier statement {how}, \
+                             and it does `{}` (via {}); sequential code would not have done it \
+                             after that exit. Mark it `#[psync::speculate]` if that is harmless, \
+                             or `#[psync::seq]`",
                             w.effect.describe(),
                             w.effect.path()
                         ),

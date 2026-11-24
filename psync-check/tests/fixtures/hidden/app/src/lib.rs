@@ -111,3 +111,73 @@ pub async fn snapshot(store: &dyn Store) -> Result<usize, Error> {
     let n = inspect_db().await?;
     Ok(n)
 }
+
+/// Mutual recursion: `walk` writes `walk.log` and calls `visit`, which calls `walk` back. The
+/// summary of `visit` must include `walk`'s write, whichever of the two is summarized first.
+async fn walk(n: u32) -> std::io::Result<()> {
+    std::fs::write("walk.log", b"x")?;
+    if n > 0 {
+        Box::pin(visit(n - 1)).await?;
+    }
+    Ok(())
+}
+async fn visit(n: u32) -> std::io::Result<()> {
+    if n > 0 {
+        Box::pin(walk(n - 1)).await?;
+    }
+    Ok(())
+}
+async fn read_log() -> std::io::Result<usize> {
+    Ok(std::fs::read("walk.log")?.len())
+}
+async fn read_notes() -> std::io::Result<usize> {
+    Ok(std::fs::read("notes.txt")?.len())
+}
+
+/// Checked first, without findings (`read_notes` reads another file, after `walk`'s exit):
+/// summarizes `walk`, and inside the cycle `visit`, before `tour` asks for `visit`.
+#[graph]
+pub async fn walk_then_read() -> Result<usize, Error> {
+    walk(1).await?;
+    let a = read_notes().await?;
+    Ok(a)
+}
+
+/// `visit` writes `walk.log` through `walk`: `read_log` conflicts with it.
+#[graph]
+pub async fn tour() -> Result<usize, Error> {
+    visit(2).await?;
+    let n = read_log().await?;
+    Ok(n)
+}
+
+/// `fs::copy` writes its *second* path: `promote` writes `site.html`, which `read_site` reads.
+async fn promote() -> std::io::Result<()> {
+    std::fs::copy("draft.html", "site.html").map(|_| ())
+}
+async fn read_site() -> std::io::Result<usize> {
+    Ok(std::fs::read("site.html")?.len())
+}
+
+#[graph]
+pub async fn release() -> Result<usize, Error> {
+    promote().await?;
+    let n = read_site().await?;
+    Ok(n)
+}
+
+/// `parse_config` panics if `app.toml` is missing (`unwrap`): sequential code never writes the
+/// stamp then, but psync starts `stamp_run` alongside it. Nothing in `boot`'s tokens shows an exit.
+async fn parse_config() -> usize {
+    std::fs::read_to_string("app.toml").unwrap().len()
+}
+async fn stamp_run() -> std::io::Result<()> {
+    std::fs::write("run.stamp", b"1")
+}
+
+#[graph]
+pub async fn boot() -> Result<usize, Error> {
+    let n = parse_config().await;
+    stamp_run().await?;
+    Ok(n)
+}

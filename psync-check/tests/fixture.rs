@@ -49,9 +49,36 @@ fn finds_effects_hidden_in_callees() {
     // A `dyn Store` whose implementation writes the file the next call reads: resolved by the
     // link step over every implementation in the build, then checked in a second pass.
     assert!(at("conflict", "lib.rs:111"), "{:#?}", app.findings);
-    // `sizes` reads two files: nothing to report.
+    // `visit` writes `walk.log` through the mutual recursion with `walk`, although `walk` was
+    // summarized first (for `walk_then_read`): summaries are fixed points over call cycles.
+    assert!(
+        app.findings.iter().any(|f| f.kind == "conflict"
+            && f.function == "tour"
+            && f.message.contains("visit -> walk -> std::fs::write")),
+        "{:#?}",
+        app.findings
+    );
+    // `fs::copy` writes its second path, which the next statement reads.
+    assert!(
+        app.findings.iter().any(|f| f.kind == "conflict"
+            && f.function == "release"
+            && f.message.contains("write file \"site.html\"")),
+        "{:#?}",
+        app.findings
+    );
+    // A callee that may panic is an exit: the write after it is speculative.
+    assert!(
+        app.findings.iter().any(|f| f.kind == "speculative-write"
+            && f.function == "boot"
+            && f.message.contains("may panic")),
+        "{:#?}",
+        app.findings
+    );
+    // `sizes` reads two files, `walk_then_read` reads another file after a write: nothing to
+    // report.
     assert!(!app.findings.iter().any(|f| f.function == "sizes"));
-    assert_eq!(app.findings.len(), 5, "{:#?}", app.findings);
+    assert!(!app.findings.iter().any(|f| f.function == "walk_then_read"));
+    assert_eq!(app.findings.len(), 8, "{:#?}", app.findings);
     assert!(stderr.contains("concurrent level(s)"));
 
     // With the compiler's facts, the macro schedules safely by itself and gains concurrency
@@ -76,7 +103,7 @@ fn finds_effects_hidden_in_callees() {
     );
     // `warm`/`load`, `check`/`get_token` and `checkpoint`/`inspect_db` now run in order; the
     // loop whose prefix writes is no longer prefetched.
-    for sequential in ["start", "login", "snapshot", "sync_dirs"] {
+    for sequential in ["start", "login", "snapshot", "sync_dirs", "tour", "release", "boot"] {
         assert!(
             !app.functions.contains_key(sequential),
             "{:?}",
@@ -137,11 +164,11 @@ fn fix_inserts_seq_hints_until_clean() {
     };
     let fixed = run("fix");
     assert!(
-        fixed.contains("inserted 4 `#[psync::seq]` hint(s)"),
+        fixed.contains("inserted 7 `#[psync::seq]` hint(s)"),
         "{fixed}"
     );
     let source = std::fs::read_to_string(work.join("app/src/lib.rs")).expect("source");
-    assert_eq!(source.matches("#[psync::seq]").count(), 4);
+    assert_eq!(source.matches("#[psync::seq]").count(), 7);
     assert!(
         source.contains("#[psync::seq]\n    for d in dirs"),
         "{source}"

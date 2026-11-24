@@ -114,8 +114,8 @@ walks the optimized MIR and classifies every call:
 
 | Callee | How it is classified |
 |---|---|
-| `std`, `core`, `alloc`, `tokio`, `async-std`, `smol`, `fs-err` | by path: `fs::write`, `File::create` and `<File as Write>::write_all` write files; `fs::read_to_string` reads; `net` sends and receives; `process::Command::output` runs a process; `env::set_var` writes the environment; `println!` writes standard output (in order) |
-| a function in the same crate | its body, recursively, including the closures and coroutines it creates (an `async fn`'s body is a coroutine) |
+| `std`, `core`, `alloc`, `tokio`, `async-std`, `smol`, `fs-err` | by path: `fs::write`, `File::create` and `<File as Write>::write_all` write files; `fs::read_to_string` reads; `fs::copy(from, to)` reads `from` and writes `to`, and `rename`, `hard_link` and `symlink` write both paths; `net` sends and receives; `process::Command::output` runs a process; `env::set_var` writes the environment; `println!` writes standard output (in order) |
+| a function in the same crate | its body, recursively, including the closures and coroutines it creates (an `async fn`'s body is a coroutine). Recursive functions are solved together: each strongly connected component of the call graph is iterated to a fixed point, so every member of a cycle gets the effects of the whole cycle ([Effects and summaries](../foundations/effects.md)) |
 | an `async` function (or one returning a future) in a crates.io or git crate, named with a verb (`delete_object`, `list`), called from your workspace | the verb, as the macro does for awaited calls. The domain is the type or module the function belongs to (`kube::Api::<K>`), not a variable name |
 | any other function of another crate | that crate's summary, written when the driver compiled it (no entry: no effects) |
 | a function pointer, or `dyn` without a summary | *opaque*: listed by `cargo psync summaries --all` |
@@ -149,7 +149,7 @@ program order:
 | Finding | When |
 |---|---|
 | `conflict` | two chains of one level have conflicting effects: same domain, one writes, targets may be the same, and neither is `independent` |
-| `speculative-write` | a chain writes, an earlier chain of the same level may exit, and the writer is not `speculate` |
+| `speculative-write` | a chain writes, an earlier chain of the same level may exit (a `?`, `return`, `break` or `continue`, or a callee that panics explicitly: `unwrap`, `expect`, `panic!`), and the writer is not `speculate` |
 | `loop-speculative-write` | a prefetched prefix writes, the body can end the loop, and the loop is not `speculate` |
 | `interior-mutability` (note) | two chains capture the same variable whose type, behind references, `Rc`, `Arc` or `Box`, is a `Cell`, `RefCell`, `OnceCell`, `Mutex`, `RwLock` or atomic |
 | `output-order` (note) | two chains both print |
@@ -203,5 +203,4 @@ warnings. The findings summary covers only crates recompiled in this run.
 - **Verbs of other crates' APIs are still names.** `kube::Api::list` reads because its name says
   so. The driver classifies other crates' I/O by name, not by following them down to the socket:
   at that level, every HTTP request is a write.
-- **Recursion.** A cycle of local functions is summarized from its members' other calls.
-- **Panics** are not exits.
+- **Panics** count as exits only when they are explicit and in your own code (`unwrap`, `expect`, `panic!`, `assert!`). Panics inside libraries, and bounds and overflow checks, are not counted.

@@ -49,9 +49,11 @@ For each call with a fact, the macro uses the compiler's effects instead of the 
   function pointer, or a trait with no implementation in the build. The macro then applies the
   compiler's effects *and* the name's guess.
 
-The test fixture shows all of it. Without facts, `cargo psync check` reports 5 warnings. With
-facts, the macro produces a schedule with none. Four functions are kept in order: `start`,
-`login`, `snapshot` and the `sync_dirs` loop. One gains concurrency: `views`, whose
+The test fixture shows all of it. Without facts, `cargo psync check` reports 7 warnings and a
+note. With facts, the macro produces a schedule with none. Seven functions are kept in order:
+`start`, `login`, `snapshot`, `tour` (whose `visit` writes a file through a mutual recursion),
+`release` (whose `fs::copy` writes its second path), `boot` (whose `parse_config` may panic before
+a write) and the `sync_dirs` loop. One gains concurrency: `views`, whose
 `create_view` only reads.
 
 ## On real code
@@ -116,6 +118,6 @@ warning, or before the loop for a loop warning, with the statement's indentation
     }
 ```
 
-On a copy of the fixture it inserts 4 hints, after which `cargo psync check` reports 0 warnings.
+On a copy of the fixture it inserts 7 hints, after which `cargo psync check` reports 0 warnings.
 `#[psync::seq]` is the safe fix, not always the best one. For idempotent writes,
 `#[psync::speculate]` keeps the concurrency. With `cargo psync build`, no hint is needed at all.
