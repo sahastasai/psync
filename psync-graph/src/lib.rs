@@ -92,6 +92,8 @@ pub struct Options {
     pub krate: TokenStream,
     /// `strict`, `speculate` and `effects(read(..), write(..), ordered(..))`.
     pub effects: EffectConfig,
+    /// `yield_every = N`: every loop of async code yields to the executor every `N` iterations.
+    pub yield_every: Option<u32>,
 }
 
 impl Default for Options {
@@ -102,6 +104,7 @@ impl Default for Options {
             explain: false,
             krate: quote!(::psync),
             effects: EffectConfig::default(),
+            yield_every: None,
         }
     }
 }
@@ -156,13 +159,34 @@ impl Options {
                         return Err(syn::Error::new_spanned(n, "bound must be at least 1"));
                     }
                 }
+                syn::Meta::NameValue(nv) if nv.path.is_ident("yield_every") => {
+                    let Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Int(n),
+                        ..
+                    }) = &nv.value
+                    else {
+                        return Err(syn::Error::new_spanned(
+                            &nv.value,
+                            "yield_every must be an integer",
+                        ));
+                    };
+                    let n: u32 = n.base10_parse()?;
+                    if n == 0 {
+                        return Err(syn::Error::new_spanned(
+                            nv,
+                            "yield_every must be at least 1",
+                        ));
+                    }
+                    options.yield_every = Some(n);
+                }
                 syn::Meta::NameValue(nv) if nv.path.is_ident("crate") => {
                     options.krate = nv.value.to_token_stream();
                 }
                 _ => {
                     return Err(syn::Error::new_spanned(
                         meta,
-                        "expected `bound = N`, `explain`, `off`, `strict`, `speculate`, `effects(..)` or `crate = path`",
+                        "expected `bound = N`, `explain`, `off`, `strict`, `speculate`, `effects(..)`, \
+                         `yield_every = N` or `crate = path`",
                     ));
                 }
             }
@@ -316,6 +340,14 @@ pub fn transform_fn(function: &mut ItemFn, options: &Options) -> Report {
         refusal: None,
     };
     rewriter.visit_block_mut(&mut function.block);
+    if let Some(every) = options.yield_every {
+        YieldInjector {
+            krate: &options.krate,
+            every,
+            in_async: function.sig.asyncness.is_some(),
+        }
+        .visit_block_mut(&mut function.block);
+    }
     // Marks the function for `cargo psync`'s driver (which records facts about its calls), and
     // makes cargo rebuild it when the facts change (`option_env!` is tracked).
     function.block.stmts.insert(
@@ -329,6 +361,69 @@ pub fn transform_fn(function: &mut ItemFn, options: &Options) -> Report {
     function.attrs.retain(|a| !is_psync_attr(a, "graph"));
     schedule::StripHints.visit_block_mut(&mut function.block);
     rewriter.report
+}
+
+/// `yield_every = N`: at the start of every loop body in async code, yield to the executor on
+/// every `N`-th iteration. A cooperative executor cannot interrupt a task that does not await;
+/// these yields are preemption points the compiler inserts, so a long loop no longer holds
+/// back higher-priority tasks. They change timing only, never results.
+struct YieldInjector<'a> {
+    krate: &'a TokenStream,
+    every: u32,
+    in_async: bool,
+}
+
+impl YieldInjector<'_> {
+    fn inject(&self, body: &mut syn::Block) {
+        let (krate, every) = (self.krate, self.every);
+        body.stmts.insert(
+            0,
+            syn::parse_quote! {
+                if #krate::__private::tick(
+                    {
+                        static __PSYNC_TICKS: ::core::sync::atomic::AtomicU32 =
+                            ::core::sync::atomic::AtomicU32::new(0);
+                        &__PSYNC_TICKS
+                    },
+                    #every,
+                ) {
+                    #krate::__private::yield_now().await;
+                }
+            },
+        );
+    }
+}
+
+impl VisitMut for YieldInjector<'_> {
+    fn visit_expr_async_mut(&mut self, e: &mut syn::ExprAsync) {
+        let outer = std::mem::replace(&mut self.in_async, true);
+        syn::visit_mut::visit_expr_async_mut(self, e);
+        self.in_async = outer;
+    }
+    fn visit_expr_closure_mut(&mut self, e: &mut syn::ExprClosure) {
+        let outer = std::mem::replace(&mut self.in_async, e.asyncness.is_some());
+        syn::visit_mut::visit_expr_closure_mut(self, e);
+        self.in_async = outer;
+    }
+    fn visit_item_mut(&mut self, _: &mut syn::Item) {}
+    fn visit_expr_for_loop_mut(&mut self, e: &mut syn::ExprForLoop) {
+        syn::visit_mut::visit_expr_for_loop_mut(self, e);
+        if self.in_async {
+            self.inject(&mut e.body);
+        }
+    }
+    fn visit_expr_while_mut(&mut self, e: &mut syn::ExprWhile) {
+        syn::visit_mut::visit_expr_while_mut(self, e);
+        if self.in_async {
+            self.inject(&mut e.body);
+        }
+    }
+    fn visit_expr_loop_mut(&mut self, e: &mut syn::ExprLoop) {
+        syn::visit_mut::visit_expr_loop_mut(self, e);
+        if self.in_async {
+            self.inject(&mut e.body);
+        }
+    }
 }
 
 /// Collects `let mut` bindings, bindings to `&mut` expressions, and `#[psync::fresh]` bindings

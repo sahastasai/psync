@@ -544,14 +544,23 @@ struct Finder<'a> {
 }
 
 impl Finder<'_> {
-    /// Use the compiler's facts for the call of `ident` at `span`, if there are any.
+    /// Use the compiler's facts for the call of `ident` at `span`, if there are any. Returns
+    /// true when they are complete (the compiler saw through every callee), so the name's guess
+    /// is not needed.
     fn fact(&mut self, span: proc_macro2::Span, ident: &str) -> bool {
         let Some(fact) = crate::facts::at(span, ident) else {
             return false;
         };
         self.found.effects.extend(fact.effects.iter().cloned());
         self.found.panics |= fact.panics;
-        true
+        !fact.opaque
+    }
+
+    /// Like [`Self::fact`], but distinguishes "no fact" (`None`) from "opaque fact"
+    /// (`Some(false)`).
+    fn fact_full(&mut self, span: proc_macro2::Span, ident: &str) -> Option<bool> {
+        crate::facts::at(span, ident)?;
+        Some(self.fact(span, ident))
     }
 
     /// The last identifier of a called path (`stamp` in `helpers::stamp(..)`).
@@ -688,16 +697,24 @@ impl Finder<'_> {
             }
         }
         // Facts from the compiler for any call of the chain replace the names' guesses.
-        let mut known = false;
+        // A chain counts as known when at least one call has a fact and none is opaque.
+        let mut any = false;
+        let mut complete = true;
+        let mut note = |found: Option<bool>| {
+            if let Some(full) = found {
+                any = true;
+                complete &= full;
+            }
+        };
         for m in &calls {
-            known |= self.fact(m.method.span(), &m.method.to_string());
+            note(self.fact_full(m.method.span(), &m.method.to_string()));
         }
         if let Expr::Call(c) = e
             && let Some(name) = Self::callee_name(c)
         {
-            known |= self.fact(c.func.span(), &name);
+            note(self.fact_full(c.func.span(), &name));
         }
-        if known {
+        if any && complete {
             return;
         }
         // `e` is the chain's root; a root that is itself a call (`Command::new(..)`,

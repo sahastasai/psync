@@ -878,3 +878,45 @@ fn seq_on_a_loop_keeps_it_sequential() {
     let (out, _, peak) = run(upload_all_in_order(Store::new(""), vec!["a", "bb", "c"]));
     assert_eq!((out, peak), (Ok(4), 1));
 }
+
+// ---- yield injection ----
+
+/// A CPU-bound loop that wakes a higher-priority task midway.
+#[graph(yield_every = 2)]
+async fn crunch(log: Rc<RefCell<Vec<&'static str>>>, urgent: psync::TaskHandle) {
+    for i in 0..6 {
+        if i == 1 {
+            urgent.wake();
+        }
+        log.borrow_mut().push("step");
+    }
+}
+
+#[test]
+fn injected_yields_let_urgent_work_run_inside_long_loops() {
+    let executor = Executor::default();
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let l = log.clone();
+    let mut started = false;
+    // Sleeps until woken, then logs.
+    let urgent = executor.spawn(
+        9,
+        poll_fn(move |_| {
+            if !started {
+                started = true;
+                return Poll::Pending;
+            }
+            l.borrow_mut().push("urgent");
+            Poll::Ready(())
+        }),
+    );
+    executor.poll_once(); // the urgent task runs first and sleeps
+    executor.spawn(1, crunch(log.clone(), urgent));
+    executor.run_until_stalled();
+    // Woken in step 2, the urgent task runs at the next yield point (the start of step 4, as
+    // iterations 2, 4 and 6 begin with one), not after all 6 steps.
+    assert_eq!(
+        *log.borrow(),
+        ["step", "step", "step", "urgent", "step", "step", "step"]
+    );
+}

@@ -251,6 +251,15 @@ impl<'tcx> Analyzer<'tcx> {
             }
             return;
         }
+        // Through `dyn` or a generic, a trait of another published crate (`AsyncWrite`,
+        // `tower::Service`) may be implemented by anything: unknown, not "no effects".
+        if unresolved
+            && !self.library
+            && let Some(trait_id) = tcx.trait_of_assoc(callee)
+            && !OPAQUE_STD.contains(&tcx.crate_name(trait_id.krate).as_str())
+        {
+            summary.opaque.push(format!("dyn {}", display_path(tcx, callee)));
+        }
         let path = display_path(tcx, resolved);
         let krate = tcx.crate_name(resolved.krate);
         let krate = krate.as_str();

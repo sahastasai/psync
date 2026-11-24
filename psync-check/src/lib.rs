@@ -243,10 +243,16 @@ fn same_effect(a: &Effect, b: &Effect) -> bool {
 
 /// The final effects of a call site: its own, and those of the trait methods it reaches
 /// through `dyn`.
-pub fn resolve_call(fact: &CallFact, linked: &BTreeMap<String, Resolved>) -> (Vec<Effect>, bool) {
+pub fn resolve_call(
+    fact: &CallFact,
+    linked: &BTreeMap<String, Resolved>,
+) -> (Vec<Effect>, bool, bool) {
     let mut effects = fact.effects.clone();
     let mut panics = fact.panics;
+    let mut opaque = fact.opaque;
     for t in &fact.deferred {
+        // No implementation in the build: one may exist outside it.
+        opaque |= linked.get(t).is_none_or(|r| r.impls == 0);
         if let Some(r) = linked.get(t) {
             panics |= r.panics;
             for e in &r.effects {
@@ -258,11 +264,11 @@ pub fn resolve_call(fact: &CallFact, linked: &BTreeMap<String, Resolved>) -> (Ve
             }
         }
     }
-    (effects, panics)
+    (effects, panics, opaque)
 }
 
 /// The facts file the macro reads (`PSYNC_FACTS`): one call site per line,
-/// `site \t name \t panics \t effects`, effects separated by `\x1e`, each
+/// `site \t name \t panics \t opaque \t effects` (`opaque`: some callee could not be seen through), effects separated by `\x1e`, each
 /// `domain \x1f access \x1f target`. Domains: `fs`, `net`, `env`, `process`, `output`,
 /// `svc:<owner>`; accesses `r`, `w`, `o`. A line-based format keeps the macro free of a JSON
 /// dependency.
@@ -270,7 +276,7 @@ pub fn facts_text(crates: &[CrateSummaries], linked: &BTreeMap<String, Resolved>
     let mut out = String::new();
     for c in crates {
         for (site, fact) in &c.calls {
-            let (effects, panics) = resolve_call(fact, linked);
+            let (effects, panics, opaque) = resolve_call(fact, linked);
             let effects: Vec<String> = effects
                 .iter()
                 .map(|e| {
@@ -294,9 +300,10 @@ pub fn facts_text(crates: &[CrateSummaries], linked: &BTreeMap<String, Resolved>
                 })
                 .collect();
             out += &format!(
-                "{site}\t{}\t{}\t{}\n",
+                "{site}\t{}\t{}\t{}\t{}\n",
                 fact.name,
                 u8::from(panics),
+                u8::from(opaque),
                 effects.join("\x1e")
             );
         }

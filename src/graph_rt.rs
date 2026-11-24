@@ -201,3 +201,12 @@ where
 {
     over(iter, f)
 }
+
+/// For `#[psync::graph(yield_every = N)]`: true on every `N`-th call from one loop (`ticks` is a
+/// counter static to that loop), when the loop should yield to the executor.
+#[inline(always)]
+pub fn tick(ticks: &core::sync::atomic::AtomicU32, every: u32) -> bool {
+    ticks.fetch_add(1, core::sync::atomic::Ordering::Relaxed) % every == every - 1
+}
+
+pub use crate::future::yield_now;

@@ -27,6 +27,9 @@ pub(crate) struct Fact {
     /// The callee's name as written, to detect stale facts.
     pub name: String,
     pub panics: bool,
+    /// Some callee could not be seen through: the effects are a lower bound, so the name's guess
+    /// still applies too.
+    pub opaque: bool,
     pub effects: Vec<Effect>,
 }
 
@@ -44,10 +47,14 @@ fn table() -> &'static HashMap<String, Fact> {
 pub(crate) fn parse(text: &str) -> HashMap<String, Fact> {
     let mut out = HashMap::new();
     for line in text.lines() {
-        let mut fields = line.splitn(4, '\t');
-        let (Some(site), Some(name), Some(panics), effects) =
-            (fields.next(), fields.next(), fields.next(), fields.next())
-        else {
+        let mut fields = line.splitn(5, '\t');
+        let (Some(site), Some(name), Some(panics), Some(opaque), effects) = (
+            fields.next(),
+            fields.next(),
+            fields.next(),
+            fields.next(),
+            fields.next(),
+        ) else {
             continue;
         };
         let effects = effects
@@ -92,6 +99,7 @@ pub(crate) fn parse(text: &str) -> HashMap<String, Fact> {
             Fact {
                 name: name.to_string(),
                 panics: panics == "1",
+                opaque: opaque == "1",
                 effects,
             },
         );
@@ -133,7 +141,7 @@ mod tests {
 
     #[test]
     fn parses_lines() {
-        let text = "/a.rs:3:5\tcreate\t1\tfs\x1fw\x1fcache.json\x1esvc:kube::Api::<K>\x1fr\x1f\n\
+        let text = "/a.rs:3:5\tcreate\t1\t0\tfs\x1fw\x1fcache.json\x1esvc:kube::Api::<K>\x1fr\x1f\n\
                     garbage\n";
         let t = parse(text);
         let f = &t["/a.rs:3:5"];

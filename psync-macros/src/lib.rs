@@ -11,6 +11,8 @@ use proc_macro::TokenStream;
 /// - `strict` treats awaited calls psync cannot classify as writes to an unknown resource;
 /// - `speculate` lets writes run before earlier exits everywhere in the function;
 /// - `effects(read(a, ..), write(b, ..), ordered(c, ..))` names more verbs for the effect analysis;
+/// - `yield_every = N` makes every loop of async code yield to the executor every `N` iterations
+///   (preemption points for cooperative executors);
 /// - `crate = path` names the psync crate in generated code.
 ///
 /// Hints inside the function: `#[psync::seq]`, `#[psync::fresh]`, `#[psync::independent]`,

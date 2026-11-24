@@ -18,13 +18,17 @@ extern crate alloc;
 pub mod __private;
 mod executor;
 mod future;
+#[cfg(feature = "std")]
+mod multi;
 mod os;
 mod park;
 mod pool;
 mod task;
 
 pub use executor::Executor;
-pub use future::{BoxFuture, LocalBoxFuture};
+pub use future::{BoxFuture, LocalBoxFuture, YieldNow, yield_now};
+#[cfg(feature = "std")]
+pub use multi::{MultiExecutor, MultiHandle};
 pub use park::{DefaultPark, Park};
 pub use pool::{DefaultPool, Pool};
 pub use psync_macros::{fresh, graph, independent, seq, speculate};

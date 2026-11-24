@@ -19,6 +19,8 @@ syn = { version = "2", features = ["full"] }
 
 [features]
 default = ["rp235x"]
+# `MultiExecutor`: worker threads (host targets).
+std = []
 rp235x = ["dep:embedded-alloc", "dep:rp235x-hal", "dep:cortex-m-rt", "dep:cortex-m"]
 
 [target.'cfg(all(target_os = "none", target_arch = "arm"))'.dependencies]
@@ -31,3 +33,7 @@ cortex-m = { version = "0.7", optional = true }
 lto = true
 codegen-units = 1
 panic = "abort"
+
+[[test]]
+name = "multi"
+required-features = ["std"]
