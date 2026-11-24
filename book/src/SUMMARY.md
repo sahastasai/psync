@@ -14,6 +14,18 @@
 - [Patterns and pitfalls](./guide/patterns.md)
 - [The executor](./guide/executor.md)
 
+# Foundations: compilers from zero
+
+- [The map](./foundations/index.md)
+- [Tokens](./foundations/tokens.md)
+- [Syntax trees](./foundations/syntax-trees.md)
+- [Procedural macros](./foundations/macros.md)
+- [Inside rustc: HIR, THIR, MIR](./foundations/rustc.md)
+- [Dependencies and dataflow](./foundations/dataflow.md)
+- [Effects and summaries](./foundations/effects.md)
+- [Dynamic dispatch and class hierarchies](./foundations/dispatch.md)
+- [Proofs](./foundations/proofs.md)
+
 # How psync works
 
 - [The pipeline](./internals/overview.md)
@@ -37,6 +49,13 @@
 
 - [Sixteen real-world shapes](./case-studies/graph-suite.md)
 - [kube-rs and DataFusion](./case-studies/kube-datafusion.md)
+
+# Contributing
+
+- [A tour of the repository](./contributing/index.md)
+- [Adding an effect rule](./contributing/effect-rule.md)
+- [Adding a check](./contributing/check.md)
+- [Adding a test](./contributing/tests.md)
 
 # Reference
 

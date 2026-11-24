@@ -21,6 +21,7 @@ Not modeled: early-exit replay, and the generated Rust (rustc type- and borrow-c
 
 ```sh
 lean verify/Schedule.lean      # Lean 4.22; prints nothing when every proof checks
+lean verify/Tutorial.lean      # the book's Lean introduction (Foundations, "Proofs") and its exercise solutions
 ```
 
 The proofs use only Lean's standard axioms (`propext`, `Classical.choice`, `Quot.sound`) and

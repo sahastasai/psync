@@ -111,8 +111,14 @@ decisions need a hint from you. [What is checked, what is assumed](./internals/s
   function.
 - **Guide** explains what psync does with each kind of code, how to read its report, and how to
   steer it with hints.
+- **Foundations** teaches the compiler ideas the rest of the book relies on, from zero: tokens,
+  syntax trees, procedural macros, rustc's HIR, THIR and MIR, dataflow, effect summaries,
+  class-hierarchy analysis and proofs. Each chapter has runnable examples and exercises. Read it
+  before **How psync works** if those words are new to you.
 - **How psync works** walks through the implementation: classification, the token-level read/write
   analysis, the graph, the schedule and the generated code.
 - **Safety** covers side effects: files, network, processes.
 - **Case studies** show psync on real projects.
+- **Contributing** is a tour of every crate, and recipes for adding an effect rule, a check or a
+  test.
 - **Reference** lists every option.
