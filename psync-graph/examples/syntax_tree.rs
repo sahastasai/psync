@@ -91,7 +91,9 @@ fn main() {
             Ok(Page { user, posts, avatar, friends })
         }
     "#;
-    let source = std::env::args().nth(1).unwrap_or_else(|| default.to_string());
+    let source = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| default.to_string());
     let function: ItemFn = syn::parse_str(&source).expect("an item fn");
     println!(
         "fn {} ({} statements, async: {})\n",

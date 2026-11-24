@@ -187,6 +187,8 @@ dependence, and psync draws an edge exactly when it does not hold.
 | `levels_correct` | a whole schedule of levels | induction on the levels |
 | `reorders_correct` | moving operations earlier only past independent ones changes nothing | induction on the reordering |
 | `speculation_harmless` | operations that write nothing leave the state unchanged | `frame`, by induction |
+| `replay_correct` | running every statement and replaying the first recorded exit gives the sequential state and exit, if nothing after the first exit writes | `speculation_harmless` for the rest of the list, by induction |
+| `recording_slot` | a statement that records its outcome is an ordinary `Op` with that outcome in its slot | unfolding |
 
 `Interleave a b m` is an **inductive predicate**. It defines "`m` is some interleaving of `a` and
 `b`" by three rules: both empty, take the next element from `a`, or take it from `b`. Proving
@@ -219,9 +221,20 @@ Read a theorem's hypotheses as the list of things everything else must guarantee
   services). `cargo psync check` checks the effect part against the compiled callees.
 - **Chains in a level are pairwise independent.** That is psync's edge rule.
 
-Not modeled: early exits. psync records exits and replays them in program order, and modeling
-that (with `Except`-valued operations) is the next step on the [roadmap](../safety/roadmap.md).
-The generated Rust is not modeled either. rustc type- and borrow-checks it.
+The last section, *Early exits*, adds statements that may exit. An `XOp` is an `Op` with an
+`exit` function, whose outcome depends only on what the statement reads. `seqX` runs a list
+sequentially and stops at the first exit. `outcomes` runs every statement and records each
+outcome, as psync's exit slots do, and `firstExit` replays the first one. `replay_correct` proves
+that the two agree, in state and in exit, when no statement after the first exit writes. That is
+the condition psync's speculation rule enforces. `XOp.recording` turns an `XOp` into an ordinary
+`Op` that also writes its outcome into its own slot, so the scheduling theorems apply to
+statements that record their exits.
+
+Note what the replay needs: *every* statement before an exit has run. psync once broke this, by
+replaying an exit before an earlier statement in a later level had run; see
+[Early exits](../guide/exits.md).
+
+Not modeled: the generated Rust. rustc type- and borrow-checks it.
 
 ## Exercises
 

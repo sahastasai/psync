@@ -35,6 +35,12 @@ Any other node starts a new chain.
 A chain's level is one more than the highest level of any chain it waits for. Chains on the same
 level run concurrently. Levels run one after another.
 
+Exits add one constraint. A chain's exits can be replayed only after every statement before them
+in program order has run, so `plan` gives each chain a **release** level: its own level, or the
+highest level of any chain holding an earlier statement, if a chain with an exit runs ahead of one.
+Its exits are replayed, and its bindings handed back, after the release level. A chain that waits for it
+gets a level after its release. Levels and releases are computed together until neither changes.
+
 ```text
 level 0: n0->n2 || n1 || n3
 ```
@@ -80,7 +86,9 @@ Details that matter:
   the chain. The last binding of each name wins, as shadowing does.
 - **`mut` is dropped inside a chain** for bindings the chain does not write. The handed-back
   binding keeps its `mut`. This avoids `unused_mut` warnings without changing meaning.
-- **Exits are re-raised in program order** across all chains of the level, sorted by each node's
-  position in the block. That makes the first exit sequential code would hit the one that happens.
+- **Exits are re-raised in program order**, sorted by each node's position in the block, after the
+  chain's release level (see [Levels](#levels)). That makes the first exit sequential code would
+  hit the one that happens. Chains are numbered across the whole region (`__psync_out3`), so a
+  chain whose release comes later is not shadowed by a later level's chain.
 - The whole block is emitted in place of the region's statements, and the statements after it see
   the same bindings as before.

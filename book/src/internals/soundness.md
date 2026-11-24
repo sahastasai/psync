@@ -26,8 +26,9 @@ These hold as long as the token analysis sees the dependency:
   keep their order. That covers assignment, `&mut`, a mutating method on a `mut` binding or `&mut`
   handle, and an ordered method (`send`, `write`, `next`, ...) on any receiver.
 - **Effect order.** Ordinary statements never pass each other.
-- **Exits.** `?`, `return`, `break` and `continue` are performed in program order. The function
-  exits at the same place, with the same value.
+- **Exits.** `?`, `return`, `break` and `continue` are performed in program order, each only after
+  every statement before it has run. The function exits at the same place, with the same value.
+  `replay_correct` in `verify/Schedule.lean` proves this rule.
 - **Fixed positions.** Locks and permits held past their statement, sleeps, clock reads and
   `#[psync::seq]` statements never move, and nothing moves across them.
 - **Loops.** A prefetched prefix touches only per-iteration data, and the rest of the body runs in
@@ -63,13 +64,16 @@ with footprints (what each may read and write) and shows:
   another, and so does a whole schedule of levels;
 - an order that moves operations earlier only past independent ones equals the program as written;
 - operations that write nothing, which are the only ones psync may run past an exit, change
-  nothing.
+  nothing;
+- recording every outcome and replaying the first exit in program order, after everything has
+  run, gives the sequential state and exit (`replay_correct`).
 
 So the concurrent execution ends in the state of the sequential program, *provided* two things
 hold. The footprints must be right, and psync must draw an edge between every two operations that
 are not independent. Those are the analyses' obligations. Tokens cannot discharge them alone,
 which is why [`cargo psync check`](../safety/check.md) verifies them against the compiled callees.
-Early-exit replay and the generated Rust are not modeled. rustc checks the latter.
+
+The generated Rust is not modeled. rustc checks it.
 
 ## How this compares with dynamic languages
 

@@ -23,7 +23,11 @@ Proven here:
 5. `reorders_correct`: a reordering that moves operations earlier only past independent ones has
    the effect of the program as written.
 
-Not modeled: early exits themselves (psync records them and replays them in program order), the
+6. `replay_correct`: recording every statement's exit outcome and replaying the first one in
+   program order gives the state and the exit of sequential execution.
+7. `recording_slot`: recording an outcome in a slot is an ordinary operation.
+
+Not modeled: the
 analyses that compute footprints (the access and effect analyses, and `cargo psync check`), and
 the generated Rust (type- and borrow-checked by rustc). The theorems state what those parts must
 provide: correct footprints, and edges between every pair of operations that are not
@@ -213,5 +217,103 @@ theorem reorders_correct {P L : List (Op Loc Val)} (h : Reorders P L) (s : State
     rw [runAll_append]
     show runAll B (x.run (runAll A s)) = runAll P (x.run s)
     rw [← commute_list x A hA, ← runAll_append, ih]
+
+/-! ## Early exits
+
+A statement such as `let x = f().await?` may *exit*: whether it does, and with which value, depends
+on what it reads. psync never takes an exit inside a chain: it records the outcome in an exit slot
+and stops only that chain, and after the join it replays the recorded exits in program order
+(`exits.rs`). Writes never start before an earlier statement that may exit, so the only work done
+after the first exit is reads.
+
+The theorems below say that this gives exactly the sequential behaviour: the same final state and
+the same exit. -/
+
+/-- An operation that may exit, with an outcome that depends only on what it reads. -/
+structure XOp (Loc Val E : Type) where
+  op : Op Loc Val
+  exit : State Loc Val → Option E
+  exit_dep : ∀ s s', (∀ l, op.R l → s l = s' l) → exit s = exit s'
+
+variable {E : Type}
+
+/-- Sequential execution with exits: run each operation; stop at the first that exits. -/
+def seqX : List (XOp Loc Val E) → State Loc Val → State Loc Val × Option E
+  | [], s => (s, none)
+  | x :: xs, s =>
+    match x.exit s with
+    | some e => (x.op.run s, some e)
+    | none => seqX xs (x.op.run s)
+
+/-- Every operation's outcome, in program order, when all of them run (what the exit slots hold). -/
+def outcomes : List (XOp Loc Val E) → State Loc Val → List (Option E)
+  | [], _ => []
+  | x :: xs, s => x.exit s :: outcomes xs (x.op.run s)
+
+/-- Replay: the first recorded exit in program order. -/
+def firstExit : List (Option E) → Option E
+  | [] => none
+  | some e :: _ => some e
+  | none :: r => firstExit r
+
+/-- psync's speculation rule, along a run: every operation after the first one that exits writes
+nothing. -/
+def SpecSafe : List (XOp Loc Val E) → State Loc Val → Prop
+  | [], _ => True
+  | x :: xs, s =>
+    match x.exit s with
+    | some _ => ∀ y ∈ xs, ∀ l, ¬ y.op.W l
+    | none => SpecSafe xs (x.op.run s)
+
+/-- **6.** Running every operation, recording the outcomes and replaying the first exit in program
+order gives the state and the exit of sequential execution, provided only reads run past the
+first exit. -/
+theorem replay_correct (xs : List (XOp Loc Val E)) (s : State Loc Val) (h : SpecSafe xs s) :
+    (runAll (xs.map XOp.op) s, firstExit (outcomes xs s)) = seqX xs s := by
+  induction xs generalizing s with
+  | nil => rfl
+  | cons x xs ih =>
+    simp only [SpecSafe] at h
+    simp only [List.map_cons, runAll, outcomes, seqX]
+    cases hx : x.exit s with
+    | some e =>
+      rw [hx] at h
+      simp only [firstExit]
+      rw [speculation_harmless (xs.map XOp.op) (by
+        intro o ho l
+        obtain ⟨y, hy, rfl⟩ := List.mem_map.mp ho
+        exact h y hy l)]
+    | none =>
+      rw [hx] at h
+      simp only [firstExit]
+      exact ih _ h
+
+/-- What psync's generated code runs for a statement that may exit: the statement, which also
+writes its outcome into its own exit slot `k` (encoded as a value by `enc`). -/
+def XOp.recording [DecidableEq Loc] (x : XOp Loc Val E) (k : Loc) (enc : Option E → Val) :
+    Op Loc Val where
+  run s := fun l => if l = k then enc (x.exit s) else x.op.run s l
+  R := x.op.R
+  W := fun l => x.op.W l ∨ l = k
+  frame := by
+    intro s l h
+    have hk : ¬ l = k := fun e => h (Or.inr e)
+    simp only [if_neg hk]
+    exact x.op.frame s l (fun w => h (Or.inl w))
+  local_dep := by
+    intro s s' hR l hW
+    by_cases hk : l = k
+    · simp only [if_pos hk]
+      rw [x.exit_dep s s' hR]
+    · simp only [if_neg hk]
+      exact x.op.local_dep s s' hR l (hW.resolve_right hk)
+
+/-- **7.** The slot holds the statement's outcome. Since `recording` is an ordinary `Op`, every
+theorem above applies to programs whose statements record their exits: a schedule of independent
+chains (independence now includes the slots, which no other statement touches) leaves the same
+values in every slot as program order, so the replay reads the same outcomes. -/
+theorem recording_slot [DecidableEq Loc] (x : XOp Loc Val E) (k : Loc) (enc : Option E → Val)
+    (s : State Loc Val) : (x.recording k enc).run s k = enc (x.exit s) := by
+  simp [XOp.recording]
 
 end Psync

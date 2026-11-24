@@ -193,8 +193,10 @@ theorem.
 **Status: the scheduling part is proven.** `verify/Schedule.lean` proves commutation, the
 correctness of every level's join under any interleaving, the correctness of the whole schedule,
 equivalence with program order for reorderings past independent operations, and the harmlessness
-of read-only speculation. Still open: modeling early-exit replay (`Except`-valued operations, with
-exits replayed in program order).
+of read-only speculation, and early-exit replay (`replay_correct`: recording every outcome and
+replaying the first exit in program order gives the sequential state and exit). Modeling the
+replay found a real bug: an exit was replayed before an earlier statement in a later level had
+run. Fixed, with a test.
 
 ## Priorities
 
@@ -207,4 +209,4 @@ exits replayed in program order).
 | 7. processes and cwd | over-conservative processes; cwd hazard | small |
 | 5. staged writes, 6. cancellation | wasted work, writes waiting on exits | medium to large |
 | 8. compiler driver (built: `cargo psync check`, `build`, `fix`) | the token-level foundation | next: argument-precise effects |
-| 9. Lean model (scheduling built: `verify/Schedule.lean`) | the token-level foundation | next: exit replay |
+| 9. Lean model (scheduling built: `verify/Schedule.lean`) | the token-level foundation | exit replay proven; next: loops (prefetch) |

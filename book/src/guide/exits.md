@@ -24,6 +24,23 @@ All three requests run at once (the test checks a peak of 3 in flight). With `fa
 true]` the function returns `Err("y")`. With `[true, false, true]` it returns `Err("x")`. Those are
 the errors the sequential function returns.
 
+An exit is replayed only once every statement *before* it has run, because sequential code runs
+those first, and one of them might exit instead. That matters when an earlier statement lands in a
+later level:
+
+```rust,ignore
+let a = io(T, 1).await;
+let b = io(T, 2).await;
+logged(log, a + b, fail[0]).await?;          // waits for a and b: level 1
+let c = io(T, if fail[1] { Err(Error("four")) } else { Ok(4) }).await?;   // level 0
+```
+
+`c`'s request overlaps `a`'s and `b`'s. If it fails, psync still runs `logged`, and returns
+`logged`'s error if both fail, exactly as the sequential function does. Anything that waits for `c`
+starts only after that replay. (The test `exits_wait_for_earlier_statements_in_later_levels`
+checks every combination. An earlier version replayed `c`'s exit right after level 0, skipping
+`logged`; the Lean theorem `replay_correct` states the rule that this broke.)
+
 ## What the generated code looks like
 
 Each `?` becomes a match that stores the residual in a slot and breaks out of the chain:

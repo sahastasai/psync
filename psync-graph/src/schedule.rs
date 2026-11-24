@@ -66,6 +66,9 @@ pub(crate) struct Plan {
     pub chains: Vec<Vec<usize>>,
     /// Chain indices that run concurrently, level by level.
     pub levels: Vec<Vec<usize>>,
+    /// Per chain, the level after which its exits are replayed and its bindings handed back: its
+    /// own level, or later when a statement before one of its exits runs in a later level.
+    pub release: Vec<usize>,
     pub report: RegionReport,
 }
 
@@ -106,15 +109,40 @@ pub(crate) fn plan(nodes: &[Node]) -> Plan {
             chains.push(vec![v]);
         }
     }
-    // A chain's level is one past the deepest chain it waits for.
+    // A chain's level is one past the release of the deepest chain it waits for. A chain's exits
+    // are replayed only once every statement before them in program order has run, as sequential
+    // code would run those first (and an exit of theirs would win). Until then the chain's
+    // bindings are not handed back, so what waits for it starts after its release. Chains are in
+    // topological order (only a chain's first member has edges from other chains), and levels
+    // only grow, so this settles.
     let mut level = vec![0usize; chains.len()];
-    for (c, members) in chains.iter().enumerate() {
-        for &v in members {
-            for &p in &preds[v] {
-                if chain_of[p] != c {
-                    level[c] = level[c].max(level[chain_of[p]] + 1);
+    let mut release = vec![0usize; chains.len()];
+    loop {
+        let mut changed = false;
+        for (c, members) in chains.iter().enumerate() {
+            let mut l = level[c];
+            for &v in members {
+                for &p in &preds[v] {
+                    if chain_of[p] != c {
+                        l = l.max(release[chain_of[p]] + 1);
+                    }
                 }
             }
+            changed |= l != level[c];
+            level[c] = l;
+        }
+        for (c, members) in chains.iter().enumerate() {
+            let mut r = level[c];
+            for &v in members.iter().filter(|&&v| nodes[v].exits) {
+                for u in 0..v {
+                    r = r.max(level[chain_of[u]]);
+                }
+            }
+            changed |= r != release[c];
+            release[c] = r;
+        }
+        if !changed {
+            break;
         }
     }
     let depth = level.iter().max().map_or(0, |m| m + 1);
@@ -135,6 +163,7 @@ pub(crate) fn plan(nodes: &[Node]) -> Plan {
     Plan {
         chains,
         levels,
+        release,
         report,
     }
 }
@@ -265,16 +294,42 @@ pub(crate) fn emit(
     ids: &mut usize,
 ) -> Vec<Stmt> {
     let mut out = Vec::new();
-    for level in &plan.levels {
+    // Exit replays and bindings deferred to a later level: (level, position, tokens).
+    let mut late_reraises: Vec<(usize, usize, TokenStream)> = Vec::new();
+    let mut late_binds: Vec<(usize, TokenStream)> = Vec::new();
+    // Chains are numbered across the region, so a deferred chain's slots are not shadowed.
+    let mut chain_no = 0usize;
+    for (l, level) in plan.levels.iter().enumerate() {
+        let mut reraises: Vec<(usize, TokenStream)> = Vec::new();
+        let mut binds = Vec::new();
+        for (at, pos, r) in std::mem::take(&mut late_reraises) {
+            if at == l {
+                reraises.push((pos, r))
+            } else {
+                late_reraises.push((at, pos, r))
+            }
+        }
+        for (at, b) in std::mem::take(&mut late_binds) {
+            if at == l {
+                binds.push(b)
+            } else {
+                late_binds.push((at, b))
+            }
+        }
         // A level with one chain runs exactly as written.
-        if let [only] = level[..] {
+        if let [only] = level[..]
+            && plan.release[only] == l
+        {
             out.extend(plan.chains[only].iter().map(|&v| nodes[v].stmt.clone()));
+            reraises.sort_by_key(|(p, _)| *p);
+            let (r, b) = (reraises.into_iter().map(|(_, r)| r), binds);
+            let block: syn::Block = syn::parse2(quote!({ #(#r)* #(#b)* }))
+                .expect("psync::graph generated an invalid level");
+            out.extend(block.stmts);
             continue;
         }
         let mut futures = Vec::new();
         let mut takes = Vec::new();
-        let mut binds = Vec::new();
-        let mut reraises: Vec<(usize, TokenStream)> = Vec::new();
         *ids += 1;
         let level_id = proc_macro2::Literal::usize_unsuffixed(*ids);
         for (k, &c) in level.iter().enumerate() {
@@ -288,11 +343,13 @@ pub(crate) fn emit(
                 .filter(|(i, _)| *i > chain_positions[0] && !chain_positions.contains(i))
                 .flat_map(|(_, m)| m.iter().cloned())
                 .collect();
-            let code = chain_code(krate, fresh, &members, &needed, k, &[]);
+            let code = chain_code(krate, fresh, &members, &needed, chain_no, &[]);
             let (f, out_k) = (
                 format_ident!("__psync_f{}", k),
-                format_ident!("__psync_out{}", k),
+                format_ident!("__psync_out{}", chain_no),
             );
+            chain_no += 1;
+            let at = plan.release[c];
             let body = &code.body;
             // `maybe_done_at` is `maybe_done` plus what the analysis assumed, as const generics,
             // for `cargo psync check` to verify against the compiled callees.
@@ -304,11 +361,19 @@ pub(crate) fn emit(
             let slot_idents = code.slot_idents();
             let taken = format_ident!("__psync_taken{}", k);
             takes.push(quote!(let (#(#slot_idents,)* #out_k) = #taken;));
-            for (slots, pos) in code.slots.iter().zip(chain_positions) {
-                reraises.push((pos, slots.reraise(krate)));
-            }
             let pattern = code.binding_pattern();
-            binds.push(quote!(#[allow(unused_mut)] let #pattern = #out_k.unwrap();));
+            let bind = quote!(#[allow(unused_mut)] let #pattern = #out_k.unwrap(););
+            if at == l {
+                for (slots, pos) in code.slots.iter().zip(chain_positions) {
+                    reraises.push((pos, slots.reraise(krate)));
+                }
+                binds.push(bind);
+            } else {
+                for (slots, pos) in code.slots.iter().zip(chain_positions) {
+                    late_reraises.push((at, pos, slots.reraise(krate)));
+                }
+                late_binds.push((at, bind));
+            }
         }
         // Exits are performed in program order, so the first one sequential code would hit wins.
         reraises.sort_by_key(|(p, _)| *p);

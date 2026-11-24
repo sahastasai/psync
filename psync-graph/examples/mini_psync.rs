@@ -52,7 +52,10 @@ fn mini_graph(item: TokenStream) -> syn::Result<TokenStream> {
             return Err(syn::Error::new_spanned(stmt, "mini_graph: only `let`s"));
         };
         let (Pat::Ident(p), Some(init)) = (&local.pat, &local.init) else {
-            return Err(syn::Error::new_spanned(stmt, "mini_graph: `let name = ..;` only"));
+            return Err(syn::Error::new_spanned(
+                stmt,
+                "mini_graph: `let name = ..;` only",
+            ));
         };
         let Expr::Await(awaited) = &*init.expr else {
             return Err(syn::Error::new_spanned(

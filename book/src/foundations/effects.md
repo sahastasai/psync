@@ -56,9 +56,9 @@ before knowing it was needed, which cannot be undone. Running a read speculative
 because a read changes nothing. So psync adds one more rule: a write never starts before an earlier
 statement that may exit, unless you mark it `#[psync::speculate]`. A call that may *panic*
 counts as an exit too. The theorem `speculation_harmless` in the [proofs chapter](./proofs.md) is
-the formal half of the reason reads are safe to run past an exit: extra reads change no state.
-The other half, that exits are then replayed exactly as sequential code takes them, is enforced by
-the generated code and not yet modeled in Lean.
+half of the reason reads are safe to run past an exit: extra reads change no state. The other
+half, `replay_correct`, says that recording every statement's outcome and replaying the first exit
+in program order then gives the sequential state and the sequential exit.
 
 ## Two ways to know what a call does
 

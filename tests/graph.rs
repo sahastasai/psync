@@ -147,6 +147,38 @@ fn errors_match_sequential_order() {
     assert_eq!(run(first_error_wins([false; 3])).2, 3);
 }
 
+/// Records that it ran, then fails or succeeds after a wait.
+async fn logged(log: &RefCell<Vec<u32>>, v: u32, fail: bool) -> Result<u32, Error> {
+    log.borrow_mut().push(v);
+    io(T, if fail { Err(Error("three")) } else { Ok(v) }).await
+}
+
+// `three` waits for two requests, so it runs a level after `four`. If `four` fails, its exit
+// must not be replayed before `three` has run: sequential code runs `three` first, records it,
+// and returns `three`'s error if both fail.
+#[graph]
+async fn exit_after_later_level(fail: [bool; 2], log: &RefCell<Vec<u32>>) -> Result<u32, Error> {
+    let a = io(T, 1).await;
+    let b = io(T, 2).await;
+    logged(log, a + b, fail[0]).await?;
+    let c = io(T, if fail[1] { Err(Error("four")) } else { Ok(4) }).await?;
+    Ok(c)
+}
+
+#[test]
+fn exits_wait_for_earlier_statements_in_later_levels() {
+    for (fail, expected, ran) in [
+        ([false, false], Ok(4), vec![3]),
+        ([true, true], Err(Error("three")), vec![3]),
+        ([false, true], Err(Error("four")), vec![3]),
+        ([true, false], Err(Error("three")), vec![3]),
+    ] {
+        let log = Box::leak(Box::new(RefCell::new(Vec::new())));
+        assert_eq!(run(exit_after_later_level(fail, log)).0, expected, "{fail:?}");
+        assert_eq!(*log.borrow(), ran, "{fail:?}");
+    }
+}
+
 #[graph]
 async fn options(a: Option<u32>, b: Option<u32>) -> Option<u32> {
     let a = io(T, a).await?;

@@ -27,20 +27,71 @@ struct Function {
 fn program() -> BTreeMap<&'static str, Function> {
     use Call::*;
     BTreeMap::from([
-        ("warm", Function { own: &["write file cache.json"], calls: vec![], implements: None }),
-        ("load", Function { own: &["read file cache.json"], calls: vec![], implements: None }),
+        (
+            "warm",
+            Function {
+                own: &["write file cache.json"],
+                calls: vec![],
+                implements: None,
+            },
+        ),
+        (
+            "load",
+            Function {
+                own: &["read file cache.json"],
+                calls: vec![],
+                implements: None,
+            },
+        ),
         // Mutual recursion: `walk` and `visit` call each other.
-        ("walk", Function { own: &["write file walk.log"], calls: vec![Static("visit")], implements: None }),
-        ("visit", Function { own: &["read net"], calls: vec![Static("walk")], implements: None }),
-        ("snapshot", Function { own: &[], calls: vec![Dyn("Store::checkpoint")], implements: None }),
-        ("FileStore::checkpoint", Function { own: &["write file state.db"], calls: vec![], implements: Some("Store::checkpoint") }),
-        ("MemStore::checkpoint", Function { own: &[], calls: vec![], implements: Some("Store::checkpoint") }),
+        (
+            "walk",
+            Function {
+                own: &["write file walk.log"],
+                calls: vec![Static("visit")],
+                implements: None,
+            },
+        ),
+        (
+            "visit",
+            Function {
+                own: &["read net"],
+                calls: vec![Static("walk")],
+                implements: None,
+            },
+        ),
+        (
+            "snapshot",
+            Function {
+                own: &[],
+                calls: vec![Dyn("Store::checkpoint")],
+                implements: None,
+            },
+        ),
+        (
+            "FileStore::checkpoint",
+            Function {
+                own: &["write file state.db"],
+                calls: vec![],
+                implements: Some("Store::checkpoint"),
+            },
+        ),
+        (
+            "MemStore::checkpoint",
+            Function {
+                own: &[],
+                calls: vec![],
+                implements: Some("Store::checkpoint"),
+            },
+        ),
     ])
 }
 
 /// Class-hierarchy analysis over a closed world: the implementations of each trait method in the
 /// whole program. The driver builds this table at link time, from every crate's summary file.
-fn implementations(p: &BTreeMap<&'static str, Function>) -> BTreeMap<&'static str, Vec<&'static str>> {
+fn implementations(
+    p: &BTreeMap<&'static str, Function>,
+) -> BTreeMap<&'static str, Vec<&'static str>> {
     let mut impls: BTreeMap<_, Vec<_>> = BTreeMap::new();
     for (name, f) in p {
         if let Some(m) = f.implements {
@@ -92,8 +143,10 @@ impl Memo<'_> {
 /// own effects and repeat until nothing grows. Sets only grow and are bounded, so it terminates.
 fn fixed_point(program: &BTreeMap<&'static str, Function>) -> BTreeMap<&'static str, Effects> {
     let impls = implementations(program);
-    let mut s: BTreeMap<_, Effects> =
-        program.iter().map(|(n, f)| (*n, f.own.iter().copied().collect())).collect();
+    let mut s: BTreeMap<_, Effects> = program
+        .iter()
+        .map(|(n, f)| (*n, f.own.iter().copied().collect()))
+        .collect();
     loop {
         let mut changed = false;
         for (name, f) in program {

@@ -11,13 +11,15 @@ and write), and proves in Lean 4 (core library only, no Mathlib):
 | `levels_correct` | a schedule of levels, each run concurrently in any interleaving, equals running every chain in order |
 | `reorders_correct` | an order that moves operations earlier only past independent ones equals the program as written |
 | `speculation_harmless` | operations that write nothing leave the state unchanged, so the reads psync may run past an exit change nothing |
+| `replay_correct` | running every statement, recording its exit outcome and replaying the first exit in program order gives the state and the exit of sequential execution, when nothing after the first exit writes |
+| `recording_slot` | a statement that records its outcome in its own slot is an ordinary operation whose slot holds that outcome, so the theorems above cover it |
 
 Together: the concurrent execution of psync's schedule ends in the state the sequential program
 ends in, provided the footprints are right and psync draws an edge between every pair of
 operations that are not independent. Those are the obligations of the access and effect analyses,
 which `cargo psync check` verifies against the compiled callees.
 
-Not modeled: early-exit replay, and the generated Rust (rustc type- and borrow-checks it).
+Not modeled: the generated Rust (rustc type- and borrow-checks it).
 
 ```sh
 lean verify/Schedule.lean      # Lean 4.22; prints nothing when every proof checks
