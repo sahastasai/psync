@@ -17,7 +17,9 @@
 //!    evaluation order (`hoist.rs`).
 //! 3. **Graph** each run of nodes between barriers (`schedule.rs`): an edge where one node reads a
 //!    binding another defines, where their accesses to a variable or field conflict
-//!    (`access.rs`), and between effects.
+//!    (`access.rs`), where their effects on files, services, the network, processes or the
+//!    environment conflict (`effects.rs`), before a write that an earlier exit could skip, and
+//!    between ordinary statements.
 //! 4. **Schedule**: single-predecessor runs fuse into chains; the chains of each level run
 //!    concurrently, and their bindings are handed back in program order.
 //! 5. **Loops** (`loops.rs`): iterations' awaited prefixes run up to `bound` ahead while the rest of
@@ -28,11 +30,14 @@
 //!
 //! Results, bindings and early exits. A `?`, `return`, `break` or `continue` inside a node stops
 //! that node's chain and is performed after the join in program order (`exits.rs`), so the
-//! function exits from the same place with the same value. What can differ is work that
-//! sequential code would have skipped after an exit: by adding the attribute, the programmer
-//! asserts that awaited operations tolerate running speculatively (reads, idempotent writes).
-//! Ordinary statements never move past each other, and locks, permits, transactions, sleeps and
-//! order-sensitive calls (`send`, `write`, `recv`, ...) keep their order.
+//! function exits from the same place with the same value. Recognized writes (`fs::write`,
+//! `api.delete`, `s3.put_object`, processes) never start before an earlier exit, and operations on
+//! one file or service keep their order (`effects.rs`). What can still differ is unclassified
+//! awaited work that sequential code would have skipped after an exit: by adding the attribute,
+//! the programmer asserts that such calls tolerate running speculatively; `explain` lists them and
+//! `strict` treats them as writes. Ordinary statements never move past each other, and locks,
+//! permits, transactions, sleeps and order-sensitive calls (`send`, `write`, `recv`, ...) keep
+//! their order.
 //!
 //! # Hints
 //!
@@ -42,13 +47,20 @@
 //! - `#[psync::fresh]` on a `let` makes each concurrent branch evaluate the initializer again
 //!   (`let pool = &mut context.pool();` gives every query its own connection).
 //! - `#[psync::independent]` on a loop asserts that iterations do not depend on each other
-//!   (needed for `while` loops, whose condition psync cannot reason about).
+//!   (needed for `while` loops, whose condition psync cannot reason about); on a statement, that
+//!   its effects commute with those around it.
+//! - `#[psync::speculate]` on a statement or loop asserts that its writes may run although
+//!   sequential code would have exited first (idempotent uploads, cache fills).
+//!
+//! Function options: `bound = N`, `explain`, `off`, `strict` (unclassified awaited calls are
+//! writes), `speculate`, `effects(read(..), write(..), ordered(..))` (extra verbs), `crate = path`.
 //!
 //! `#[psync::graph(off)]` compiles the function as written, for comparisons; building with the
 //! environment variable `PSYNC_GRAPH=off` does the same for every annotated function.
 
 mod access;
 mod classify;
+mod effects;
 mod exits;
 mod hoist;
 mod loops;
@@ -56,6 +68,7 @@ mod rewrite;
 mod schedule;
 
 use classify::{Scope, is_psync_attr, pat_idents};
+pub use effects::Config as EffectConfig;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 use syn::{
@@ -73,6 +86,8 @@ pub struct Options {
     pub explain: bool,
     /// Path to the psync crate in generated code (default `::psync`).
     pub krate: TokenStream,
+    /// `strict`, `speculate` and `effects(read(..), write(..), ordered(..))`.
+    pub effects: EffectConfig,
 }
 
 impl Default for Options {
@@ -82,6 +97,7 @@ impl Default for Options {
             bound: 16,
             explain: false,
             krate: quote!(::psync),
+            effects: EffectConfig::default(),
         }
     }
 }
@@ -95,6 +111,31 @@ impl Options {
             match &meta {
                 syn::Meta::Path(p) if p.is_ident("explain") => options.explain = true,
                 syn::Meta::Path(p) if p.is_ident("off") => options.off = true,
+                syn::Meta::Path(p) if p.is_ident("strict") => options.effects.strict = true,
+                syn::Meta::Path(p) if p.is_ident("speculate") => options.effects.speculate = true,
+                syn::Meta::List(list) if list.path.is_ident("effects") => {
+                    list.parse_nested_meta(|kind| {
+                        let target = if kind.path.is_ident("read") {
+                            &mut options.effects.reads
+                        } else if kind.path.is_ident("write") {
+                            &mut options.effects.writes
+                        } else if kind.path.is_ident("ordered") {
+                            &mut options.effects.ordered
+                        } else {
+                            return Err(
+                                kind.error("expected `read(..)`, `write(..)` or `ordered(..)`")
+                            );
+                        };
+                        kind.parse_nested_meta(|verb| {
+                            let name = verb
+                                .path
+                                .get_ident()
+                                .ok_or_else(|| verb.error("expected a method or function name"))?;
+                            target.push(name.to_string());
+                            Ok(())
+                        })
+                    })?;
+                }
                 syn::Meta::NameValue(nv) if nv.path.is_ident("bound") => {
                     let Expr::Lit(syn::ExprLit {
                         lit: syn::Lit::Int(n),
@@ -117,7 +158,7 @@ impl Options {
                 _ => {
                     return Err(syn::Error::new_spanned(
                         meta,
-                        "expected `bound = N`, `explain`, `off` or `crate = path`",
+                        "expected `bound = N`, `explain`, `off`, `strict`, `speculate`, `effects(..)` or `crate = path`",
                     ));
                 }
             }
@@ -151,6 +192,9 @@ pub struct RegionReport {
     pub levels: Vec<Vec<usize>>,
     /// Some level runs two or more chains concurrently.
     pub changed: bool,
+    /// `(line, call)`: awaited calls whose effect psync could not tell from their names. They are
+    /// assumed to read, unless the function is `strict`.
+    pub unclassified: Vec<(usize, String)>,
 }
 
 /// One node of a region.
@@ -162,6 +206,10 @@ pub struct NodeReport {
     pub effect: bool,
     pub exits: bool,
     pub line: usize,
+    /// Its effects on files, the network, services, processes and the environment.
+    pub effects: Vec<String>,
+    /// Its writes may run ahead of earlier exits (`#[psync::speculate]`).
+    pub speculate: bool,
 }
 
 impl From<&classify::Node> for NodeReport {
@@ -172,6 +220,8 @@ impl From<&classify::Node> for NodeReport {
             effect: n.effect,
             exits: n.exits,
             line: n.line,
+            effects: n.effects.iter().map(effects::Effect::describe).collect(),
+            speculate: n.speculate,
         }
     }
 }
@@ -224,6 +274,7 @@ pub fn transform_fn(function: &mut ItemFn, options: &Options) -> Report {
         mutable: Default::default(),
         handles: Default::default(),
         fresh: Default::default(),
+        effects: options.effects.clone(),
     };
     for input in &function.sig.inputs {
         match input {
@@ -258,6 +309,7 @@ pub fn transform_fn(function: &mut ItemFn, options: &Options) -> Report {
         report: Report::default(),
         in_async: function.sig.asyncness.is_some(),
         fresh: 0,
+        refusal: None,
     };
     rewriter.visit_block_mut(&mut function.block);
     function.attrs.retain(|a| !is_psync_attr(a, "graph"));
@@ -311,9 +363,14 @@ pub fn explain(report: &Report) -> String {
         );
         for (i, n) in region.nodes.iter().enumerate() {
             out += &format!(
-                "    n{i}: {}{}\n",
+                "    n{i}: {}{}{}\n",
                 n.label,
-                if n.awaits { " [await]" } else { "" }
+                if n.awaits { " [await]" } else { "" },
+                if n.effects.is_empty() {
+                    String::new()
+                } else {
+                    format!(" {{{}}}", n.effects.join("; "))
+                }
             );
         }
         for (a, b, why) in &region.edges {
@@ -345,8 +402,118 @@ pub fn explain(report: &Report) -> String {
         };
         out += &format!("  loop `{}`: {what}\n", l.label);
     }
+    let mut unclassified: Vec<String> = Vec::new();
+    for region in &report.regions {
+        for (_, call) in &region.unclassified {
+            if !unclassified.contains(call) {
+                unclassified.push(call.clone());
+            }
+        }
+    }
+    if !unclassified.is_empty() {
+        out += &format!(
+            "  unclassified (assumed to read; `strict` treats them as writes): {}\n",
+            unclassified.join(", ")
+        );
+    }
     for b in &report.barriers {
         out += &format!("  barrier: {b}\n");
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn report(options: Options, f: ItemFn) -> Report {
+        let mut f = f;
+        transform_fn(&mut f, &options)
+    }
+
+    fn edges(r: &Report) -> Vec<String> {
+        r.regions
+            .iter()
+            .flat_map(|g| g.edges.iter().map(|e| e.2.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn files_and_services_order_conflicting_awaits() {
+        let r = report(
+            Options::default(),
+            syn::parse_quote! {
+                async fn f(api: &Api) -> Result<(), E> {
+                    tokio::fs::write("cfg.toml", b"x").await?;
+                    let s = tokio::fs::read_to_string("cfg.toml").await?;
+                    let o = tokio::fs::read_to_string("other.toml").await?;
+                    api.delete(name).await?;
+                    Ok(())
+                }
+            },
+        );
+        let e = edges(&r);
+        assert!(
+            e.iter().any(|w| w.starts_with("write file \"cfg.toml\"")),
+            "{e:?}"
+        );
+        assert!(
+            e.iter().any(|w| w.starts_with("may exit before `delete`")),
+            "{e:?}"
+        );
+        // `other.toml` neither conflicts with the write nor is a write: it overlaps.
+        assert!(r.regions[0].levels[0].len() >= 2);
+    }
+
+    #[test]
+    fn loop_writes_past_exits_are_refused_unless_speculative() {
+        let f: ItemFn = syn::parse_quote! {
+            async fn f(store: &Store, keys: &[String]) -> Result<(), E> {
+                for k in keys {
+                    store.upload(k).await?;
+                }
+                Ok(())
+            }
+        };
+        let r = report(Options::default(), f.clone());
+        assert!(
+            !r.loops[0].changed && r.loops[0].reason.contains("speculate"),
+            "{:?}",
+            r.loops
+        );
+        let options = Options::parse(quote!(speculate)).unwrap();
+        assert!(report(options, f).loops[0].changed);
+    }
+
+    #[test]
+    fn same_target_every_iteration_is_refused() {
+        let r = report(
+            Options::default(),
+            syn::parse_quote! {
+                async fn f(store: &Store, keys: &[String]) {
+                    for k in keys {
+                        let _ = store.put("counter", k).await;
+                    }
+                }
+            },
+        );
+        assert!(
+            r.loops[0].reason.contains("every iteration"),
+            "{:?}",
+            r.loops
+        );
+    }
+
+    #[test]
+    fn effect_options_parse() {
+        let o = Options::parse(quote!(
+            strict,
+            effects(write(bump), read(peek_all), ordered(log_line))
+        ))
+        .unwrap();
+        assert!(
+            o.effects.strict && o.effects.writes == ["bump"] && o.effects.ordered == ["log_line"]
+        );
+        assert!(Options::parse(quote!(effects(maybe(x)))).is_err());
+    }
 }

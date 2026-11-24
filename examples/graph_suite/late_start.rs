@@ -28,8 +28,8 @@ impl WriteCache {
 example! {
     origin: "GreptimeTeam/greptimedb  src/mito2/src/cache/write_cache.rs  put_and_upload_sst  (dbb-19)",
     pattern: "P4 late start",
-    summary: "the Parquet upload does not need the index, but starts only after the index is built",
-    options: (),
+    summary: "the Parquet upload does not need the index, but starts only after the index is built; re-uploading an SST is idempotent (`speculate`)",
+    options: (speculate),
     call: |f| f(&WriteCache, 7),
     async fn put_and_upload_sst(cache: &WriteCache, file_id: u32) -> Result<(u64, u64), String> {
         let index = cache.build_index(file_id).await?;

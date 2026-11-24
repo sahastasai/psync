@@ -7,6 +7,7 @@
 //! records them and re-raises them in program order (see [`crate::exits`]).
 
 use crate::access::{Access, PURE_METHODS, Set, scan};
+use crate::effects::{self, Effect};
 use proc_macro2::{Delimiter, Ident, Span, TokenStream, TokenTree};
 use quote::ToTokens;
 use syn::{Attribute, Expr, Local, LocalInit, Pat, Stmt, spanned::Spanned, visit::Visit};
@@ -21,6 +22,8 @@ pub(crate) struct Scope {
     /// initializer again instead of sharing the value (for example `&mut context.pool()`).
     /// Keyed by name; holds the binding's own identifier (for hygiene) and its initializer.
     pub fresh: std::collections::BTreeMap<String, (Ident, TokenStream)>,
+    /// Effect settings from the attribute (`strict`, `speculate`, `effects(..)`).
+    pub effects: effects::Config,
 }
 
 /// A movable statement and what the analysis knows about it.
@@ -38,6 +41,15 @@ pub(crate) struct Node {
     pub effect: bool,
     /// It contains `?`, `return`, `break` or `continue` that leave the statement.
     pub exits: bool,
+    /// What it does to files, the network, services, processes and the environment.
+    pub effects: Vec<Effect>,
+    /// Awaited calls whose effect psync could not tell from their names.
+    pub unclassified: Vec<String>,
+    /// `#[psync::speculate]`: its writes may run ahead of earlier exits.
+    pub speculate: bool,
+    /// `#[psync::independent]` on the statement: its effects commute with the others in its
+    /// region (two writes to different objects through one client).
+    pub independent: bool,
     /// Short description for reports.
     pub label: String,
     /// Source line (0 when spans carry no location).
@@ -377,7 +389,24 @@ pub(crate) fn pat_has_ref(pat: &Pat) -> bool {
 }
 
 /// The hint attributes psync reads and removes from its output.
-pub(crate) const HINTS: &[&str] = &["seq", "fresh", "independent"];
+pub(crate) const HINTS: &[&str] = &["seq", "fresh", "independent", "speculate"];
+
+/// The attributes of an expression statement (`#[psync::speculate] api.delete(x).await?;`).
+pub(crate) fn expr_attrs(e: &Expr) -> &[Attribute] {
+    match e {
+        Expr::Try(t) => &t.attrs,
+        Expr::Await(a) => &a.attrs,
+        Expr::MethodCall(m) => &m.attrs,
+        Expr::Call(c) => &c.attrs,
+        Expr::If(i) => &i.attrs,
+        Expr::Match(m) => &m.attrs,
+        Expr::ForLoop(f) => &f.attrs,
+        Expr::While(w) => &w.attrs,
+        Expr::Assign(a) => &a.attrs,
+        Expr::Block(b) => &b.attrs,
+        _ => &[],
+    }
+}
 
 /// True for `#[psync::name]` (or a bare `#[graph]`).
 pub(crate) fn is_psync_attr(attr: &Attribute, name: &str) -> bool {
@@ -526,7 +555,7 @@ pub(crate) fn classify(stmt: &Stmt, scope: &Scope, relaxed: bool) -> Class {
                 Expr::Try(t) => matches!(&*t.expr, Expr::Await(_)),
                 _ => false,
             };
-            (&[], None, Some(e), awaited)
+            (expr_attrs(e), None, Some(e), awaited)
         }
         Stmt::Macro(m) => (
             &m.attrs,
@@ -606,7 +635,13 @@ pub(crate) fn classify(stmt: &Stmt, scope: &Scope, relaxed: bool) -> Class {
         }
         effect = false;
     }
+    let found = effects::of_stmt(stmt, &scope.effects);
+    let speculate = scope.effects.speculate || attrs.iter().any(|a| is_psync_attr(a, "speculate"));
     Class::Node(Box::new(Node {
+        effects: found.effects,
+        unclassified: found.unclassified,
+        speculate,
+        independent: attrs.iter().any(|a| is_psync_attr(a, "independent")),
         stmt: stmt.clone(),
         label: label_for(&defs, stmt, &x),
         defs,

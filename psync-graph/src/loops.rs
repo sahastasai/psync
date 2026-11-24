@@ -27,6 +27,7 @@ use crate::access::{Access, Set, conflict, mentions, root, scan};
 use crate::classify::{
     Class, Exits, Node, bindings_in, classify, is_psync_attr, line_of, pat_has_ref, pat_idents,
 };
+use crate::effects::{self, Effect};
 use crate::exits::ExitRewriter;
 use crate::rewrite::Rewriter;
 use crate::schedule::chain_code;
@@ -43,6 +44,15 @@ struct LoopScope {
     carried: Set,
     /// `#[psync::independent]`: the programmer asserts iterations do not depend on each other.
     independent: bool,
+    /// The body may end the whole loop (`?`, `return`, `break`): later iterations that run ahead
+    /// may be ones sequential code never reaches.
+    terminates: bool,
+    /// `#[psync::speculate]` on the loop (or `speculate` on the function): writes may run ahead
+    /// anyway.
+    speculate: bool,
+    /// Writes in the body whose target is the same in every iteration (not computed from the
+    /// item): they order every effect on the same resource across iterations.
+    carried_effects: Vec<Effect>,
 }
 
 impl LoopScope {
@@ -67,10 +77,19 @@ impl LoopScope {
             .filter(|p| !is_local(&local, p))
             .collect();
         let independent = attrs.iter().any(|a| is_psync_attr(a, "independent"));
+        let speculate =
+            rw.scope.effects.speculate || attrs.iter().any(|a| is_psync_attr(a, "speculate"));
+        let carried_effects = body_effects(&body.stmts, &rw.scope.effects)
+            .into_iter()
+            .filter(|e| e.writes() && !e.target.mentions_any(&local))
+            .collect();
         Self {
             local,
             carried,
             independent,
+            terminates: terminates(body),
+            speculate,
+            carried_effects,
         }
     }
 
@@ -81,13 +100,39 @@ impl LoopScope {
             local: Set::new(),
             carried: Set::new(),
             independent: true,
+            terminates: false,
+            speculate: true,
+            carried_effects: Vec::new(),
         }
     }
 
     /// Why `n` cannot run ahead of earlier iterations, if it cannot.
     fn refuses(&self, n: &Node) -> Option<String> {
+        // Later items' writes would run before an earlier item ends the loop.
+        if self.terminates
+            && !self.speculate
+            && !n.speculate
+            && let Some(w) = n.effects.iter().find(|e| e.writes())
+        {
+            return Some(format!(
+                "would {} for later items before knowing whether an earlier item ends the loop \
+                 (`#[psync::speculate]` allows it)",
+                w.describe()
+            ));
+        }
         if self.independent {
             return None;
+        }
+        // A write whose target does not depend on the item hits the same resource every time.
+        if let Some(w) = n
+            .effects
+            .iter()
+            .find(|e| e.writes() && !e.target.mentions_any(&self.local))
+        {
+            return Some(format!("would {} in every iteration at once", w.describe()));
+        }
+        if let Some(why) = crate::effects::conflicts(&n.effects, &self.carried_effects) {
+            return Some(format!("{why}, which every iteration performs"));
         }
         if let Some(w) = n.acc.wpaths.iter().find(|p| !is_local(&self.local, p)) {
             return Some(format!("writes `{w}`, which outlives the iteration"));
@@ -95,6 +140,88 @@ impl LoopScope {
         conflict(&self.carried, &n.acc.rpaths)
             .map(|c| format!("reads `{c}`, which the loop body writes"))
     }
+}
+
+/// The effects of a run of statements.
+fn body_effects(stmts: &[Stmt], config: &effects::Config) -> Vec<Effect> {
+    stmts
+        .iter()
+        .flat_map(|s| effects::of_stmt(s, config).effects)
+        .collect()
+}
+
+/// True when `body` may end the loop it belongs to: a `?` or `return` anywhere outside closures
+/// and async blocks, a `break` that leaves it, or a `continue` aimed at an outer loop.
+fn terminates(body: &Block) -> bool {
+    struct V {
+        depth: usize,
+        labels: Vec<String>,
+        found: bool,
+    }
+    impl V {
+        fn leaves(&self, label: Option<&syn::Lifetime>) -> bool {
+            match label {
+                Some(l) => !self.labels.contains(&l.ident.to_string()),
+                None => self.depth == 0,
+            }
+        }
+        fn nested(&mut self, label: Option<&syn::Label>, f: impl FnOnce(&mut Self)) {
+            if let Some(l) = label {
+                self.labels.push(l.name.ident.to_string());
+            }
+            self.depth += 1;
+            f(self);
+            self.depth -= 1;
+            if label.is_some() {
+                self.labels.pop();
+            }
+        }
+    }
+    impl<'ast> syn::visit::Visit<'ast> for V {
+        fn visit_expr_try(&mut self, e: &'ast syn::ExprTry) {
+            self.found = true;
+            syn::visit::visit_expr_try(self, e);
+        }
+        fn visit_expr_return(&mut self, _: &'ast syn::ExprReturn) {
+            self.found = true;
+        }
+        fn visit_expr_break(&mut self, e: &'ast syn::ExprBreak) {
+            self.found |= self.leaves(e.label.as_ref());
+        }
+        fn visit_expr_continue(&mut self, e: &'ast syn::ExprContinue) {
+            // A plain `continue` only ends its own iteration.
+            self.found |= e.label.is_some() && self.leaves(e.label.as_ref());
+        }
+        fn visit_expr_for_loop(&mut self, e: &'ast ExprForLoop) {
+            self.visit_expr(&e.expr);
+            self.nested(e.label.as_ref(), |v| v.visit_block(&e.body));
+        }
+        fn visit_expr_while(&mut self, e: &'ast syn::ExprWhile) {
+            self.visit_expr(&e.cond);
+            self.nested(e.label.as_ref(), |v| v.visit_block(&e.body));
+        }
+        fn visit_expr_loop(&mut self, e: &'ast syn::ExprLoop) {
+            self.nested(e.label.as_ref(), |v| v.visit_block(&e.body));
+        }
+        fn visit_expr_closure(&mut self, _: &'ast syn::ExprClosure) {}
+        fn visit_expr_async(&mut self, _: &'ast syn::ExprAsync) {}
+        fn visit_item(&mut self, _: &'ast syn::Item) {}
+        fn visit_macro(&mut self, m: &'ast syn::Macro) {
+            // `bail!`, `ensure!` and `?` inside macros return early too.
+            let name = crate::classify::macro_name(m);
+            self.found |= matches!(
+                name.as_str(),
+                "bail" | "ensure" | "try" | "return_err" | "fail"
+            );
+        }
+    }
+    let mut v = V {
+        depth: 0,
+        labels: Vec::new(),
+        found: false,
+    };
+    syn::visit::Visit::visit_block(&mut v, body);
+    v.found
 }
 
 /// Whether a branch ends in a value (`if c { f().await } else { x }`), which cannot be moved into
@@ -295,9 +422,13 @@ impl Rewriter<'_> {
         let mut pattern = Vec::new();
         pat_idents(&f.pat, &mut pattern);
         let scope = LoopScope::new(self, &pattern, &f.body, &f.attrs);
+        self.refusal = None;
         let (prefix, rest) = self.take_prefix(f.body.stmts.clone(), true, &scope);
         if prefix.is_empty() {
-            return Err("no awaited statement can run ahead".into());
+            return Err(self
+                .refusal
+                .take()
+                .unwrap_or_else(|| "no awaited statement can run ahead".into()));
         }
         // The prefix runs as one chain per item; its bindings flow into the rest of the body.
         let krate = self.options.krate.clone();
@@ -429,6 +560,29 @@ impl Rewriter<'_> {
         {
             return None;
         }
+        // The first part runs for every item before the rest of any: its writes must not run for
+        // items sequential code would not reach, nor touch what the rest touches on a shared target.
+        let (fa, fb) = (
+            body_effects(&first, &self.scope.effects),
+            body_effects(&rest, &self.scope.effects),
+        );
+        let speculate =
+            self.scope.effects.speculate || attrs.iter().any(|a| is_psync_attr(a, "speculate"));
+        if !speculate && terminates(body) && fa.iter().any(|e| e.writes()) {
+            return None;
+        }
+        let shared = |es: &[Effect]| -> Vec<Effect> {
+            es.iter()
+                .filter(|e| !e.target.mentions_any(&local))
+                .cloned()
+                .collect()
+        };
+        if !independent
+            && (crate::effects::conflicts(&shared(&fa), &fb).is_some()
+                || crate::effects::conflicts(&fa, &shared(&fb)).is_some())
+        {
+            return None;
+        }
 
         // Values the rest needs from each item: the pattern's bindings and the first part's.
         let mut defined: Vec<(Ident, bool)> = pattern.to_vec();
@@ -525,7 +679,12 @@ impl Rewriter<'_> {
             {
                 let after: Vec<Stmt> = body.by_ref().collect();
                 match self.invert_guard(c, after.clone(), scope) {
-                    Some((guard, unpack)) if scope.refuses(&guard).is_none() => {
+                    Some((guard, unpack))
+                        if scope
+                            .refuses(&guard)
+                            .map(|why| self.refusal.get_or_insert(why))
+                            .is_none() =>
+                    {
                         prefix.push(guard);
                         rest.push(stmt);
                         rest.extend(unpack);
@@ -539,7 +698,13 @@ impl Rewriter<'_> {
             }
             if !blocked
                 && let Some((nodes, replacement)) = self.prefix_candidate(&stmt, allow_guard, scope)
-                && nodes.iter().all(|n| scope.refuses(n).is_none())
+                && nodes.iter().all(|n| match scope.refuses(n) {
+                    Some(why) => {
+                        self.refusal.get_or_insert(why);
+                        false
+                    }
+                    None => true,
+                })
                 && nodes.iter().all(|n| {
                     behind
                         .iter()

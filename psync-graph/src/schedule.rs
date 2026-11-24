@@ -37,6 +37,20 @@ pub(crate) fn depends(a: &Node, b: &Node) -> Option<String> {
     {
         return Some(format!("writes `{x}`"));
     }
+    // Effects on the same file, service or other outside resource keep their order.
+    if !(a.independent || b.independent)
+        && let Some(why) = crate::effects::conflicts(&a.effects, &b.effects)
+    {
+        return Some(why);
+    }
+    // A write is not performed before an earlier statement that may leave: sequential code
+    // would not have performed it at all.
+    if a.exits
+        && !b.speculate
+        && let Some(w) = b.effects.iter().find(|e| e.writes())
+    {
+        return Some(format!("may exit before `{}` runs", w.op));
+    }
     // Ordinary statements keep their order relative to each other. A binding or await may still
     // run ahead of one that might leave the block: that is the speculation the attribute allows,
     // and the exit is still performed in program order.
@@ -109,6 +123,10 @@ pub(crate) fn plan(nodes: &[Node]) -> Plan {
         .collect();
     let report = RegionReport {
         nodes: nodes.iter().map(crate::NodeReport::from).collect(),
+        unclassified: nodes
+            .iter()
+            .flat_map(|n| n.unclassified.iter().map(move |u| (n.line, u.clone())))
+            .collect(),
         edges,
         chains: chains.clone(),
         levels: levels.clone(),
@@ -343,7 +361,34 @@ impl VisitMut for StripHints {
         self.visit_attributes_mut(&mut l.attrs);
         syn::visit_mut::visit_local_mut(self, l);
     }
+    fn visit_stmt_mut(&mut self, s: &mut Stmt) {
+        if let Stmt::Expr(e, _) = s {
+            strip_expr_hints(e);
+        }
+        syn::visit_mut::visit_stmt_mut(self, s);
+    }
+    fn visit_expr_while_mut(&mut self, w: &mut syn::ExprWhile) {
+        self.visit_attributes_mut(&mut w.attrs);
+        syn::visit_mut::visit_expr_while_mut(self, w);
+    }
     fn visit_stmt_macro_mut(&mut self, m: &mut syn::StmtMacro) {
         self.visit_attributes_mut(&mut m.attrs);
     }
+}
+
+/// Removes hints from an expression statement's own attributes.
+fn strip_expr_hints(e: &mut syn::Expr) {
+    use syn::Expr::*;
+    let attrs = match e {
+        Try(t) => &mut t.attrs,
+        Await(a) => &mut a.attrs,
+        MethodCall(m) => &mut m.attrs,
+        Call(c) => &mut c.attrs,
+        If(i) => &mut i.attrs,
+        Match(m) => &mut m.attrs,
+        Assign(a) => &mut a.attrs,
+        Block(b) => &mut b.attrs,
+        _ => return,
+    };
+    attrs.retain(|a| !HINTS.iter().any(|h| is_psync_attr(a, h)));
 }

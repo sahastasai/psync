@@ -1,0 +1,9 @@
+[book]
+title = "The psync Book"
+authors = ["Sahanav Sai Ramesh"]
+language = "en"
+src = "src"
+description = "How to use psync, and how its automatic concurrency works."
+
+[output.html]
+git-repository-url = "https://github.com/sahastasai/psync"

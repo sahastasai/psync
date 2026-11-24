@@ -157,11 +157,12 @@ static UPLOADS: LazyLock<Vec<String>> = LazyLock::new(|| {
 example! {
     origin: "jdx/mise  src/task/task_cache/http.rs  HttpTaskCacheStore::commit  (tools-13)",
     pattern: "P2 await in a loop (fission)",
-    summary: "deduplicated blob uploads: the dedupe set runs first, then the uploads run ahead",
+    summary: "deduplicated blob uploads: the dedupe set runs first, then the uploads run ahead; content-addressed uploads are idempotent (`#[psync::speculate]`)",
     options: (bound = 8),
     call: |f| f(&CasClient, &UPLOADS),
     async fn commit(client: &CasClient, uploads: &Vec<String>) -> Result<usize, String> {
         let mut published = BTreeSet::new();
+        #[psync::speculate]
         for upload in uploads {
             if published.insert(upload.clone()) {
                 client.put_blob(upload).await?;
@@ -269,11 +270,12 @@ pub fn routed() -> BTreeMap<String, Vec<u32>> {
 example! {
     origin: "apache/iggy  core/connectors/sinks/iceberg_sink/src/router/dynamic_router.rs  route_data  (infra-22)",
     pattern: "P2 await in a loop (fission)",
-    summary: "take each table's batch from the routing map in order, then write the tables concurrently",
+    summary: "take each table's batch from the routing map in order, then write the tables concurrently; `#[psync::speculate]` accepts writes to later tables after an earlier one fails",
     options: (bound = 8),
     call: |f| f(&Catalog, routed(), &TABLES),
     async fn route_data(catalog: &Catalog, mut table_to_message: BTreeMap<String, Vec<u32>>, tables: &Vec<String>) -> Result<usize, String> {
         let mut written = 0;
+        #[psync::speculate]
         for table_name in tables {
             let batch_messages = match table_to_message.remove(table_name) {
                 Some(m) => m,

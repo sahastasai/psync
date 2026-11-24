@@ -735,3 +735,130 @@ fn prefetched_trait_objects_stay_send() {
     let (out, _, _) = run(spawnable(finish_all(parts, "t".into())));
     assert_eq!(out, Ok(3));
 }
+
+// ---- effects on the outside world ----
+
+/// A remote store: every call is one round trip, and the log records what reached the server.
+struct Store {
+    log: RefCell<Vec<String>>,
+    fail: &'static str,
+}
+impl Store {
+    fn new(fail: &'static str) -> &'static Store {
+        Box::leak(Box::new(Store {
+            log: RefCell::default(),
+            fail,
+        }))
+    }
+    async fn op(&self, verb: &str, key: &str) -> Result<u32, Error> {
+        io(T, ()).await;
+        self.log.borrow_mut().push(format!("{verb} {key}"));
+        if key == self.fail {
+            Err(Error("remote"))
+        } else {
+            Ok(key.len() as u32)
+        }
+    }
+    async fn get(&self, key: &str) -> Result<u32, Error> {
+        self.op("get", key).await
+    }
+    async fn delete(&self, key: &str) -> Result<u32, Error> {
+        self.op("delete", key).await
+    }
+    async fn create(&self, key: &str) -> Result<u32, Error> {
+        self.op("create", key).await
+    }
+    async fn upload(&self, key: &str) -> Result<u32, Error> {
+        self.op("upload", key).await
+    }
+    async fn bump(&self, key: &str) -> Result<u32, Error> {
+        self.op("bump", key).await
+    }
+}
+
+#[graph]
+async fn recreate(store: &Store, name: &str) -> Result<u32, Error> {
+    store.delete(name).await?;
+    let n = store.create(name).await?;
+    Ok(n)
+}
+
+#[test]
+fn writes_to_one_service_keep_their_order() {
+    let store = Store::new("");
+    let (out, _, peak) = run(recreate(store, "pod"));
+    assert_eq!((out, peak), (Ok(3), 1));
+    assert_eq!(*store.log.borrow(), ["delete pod", "create pod"]);
+}
+
+#[graph]
+async fn reads_then_one_write(store: &Store) -> Result<u32, Error> {
+    let a = store.get("a").await?;
+    let b = store.get("bb").await?;
+    let c = store.create("ccc").await?;
+    Ok(a + b + c)
+}
+
+#[test]
+fn reads_overlap_but_writes_wait_for_earlier_exits() {
+    let store = Store::new("");
+    let (out, _, peak) = run(reads_then_one_write(store));
+    // The two reads overlap; the write waits until both have not failed.
+    assert_eq!((out, peak), (Ok(6), 2));
+    let failing = Store::new("a");
+    assert_eq!(run(reads_then_one_write(failing)).0, Err(Error("remote")));
+    assert!(!failing.log.borrow().iter().any(|l| l.starts_with("create")));
+}
+
+#[graph]
+async fn upload_all(store: &Store, keys: Vec<&'static str>) -> Result<u32, Error> {
+    let mut total = 0;
+    for k in keys {
+        total += store.upload(k).await?;
+    }
+    Ok(total)
+}
+
+#[graph]
+async fn upload_all_speculatively(store: &Store, keys: Vec<&'static str>) -> Result<u32, Error> {
+    let mut total = 0;
+    #[psync::speculate]
+    for k in keys {
+        total += store.upload(k).await?;
+    }
+    Ok(total)
+}
+
+#[test]
+fn loop_writes_need_a_hint_to_run_past_a_failure() {
+    let keys = vec!["a", "bad", "c", "d"];
+    let store = Store::new("bad");
+    let (out, _, peak) = run(upload_all(store, keys.clone()));
+    assert_eq!((out, peak), (Err(Error("remote")), 1));
+    assert_eq!(*store.log.borrow(), ["upload a", "upload bad"]);
+    // With the hint, later uploads run ahead; the error is still the first one.
+    let store = Store::new("bad");
+    let (out, _, peak) = run(upload_all_speculatively(store, keys));
+    assert_eq!((out, peak), (Err(Error("remote")), 4));
+    assert_eq!(store.log.borrow().len(), 4);
+}
+
+#[graph(effects(write(bump)))]
+async fn bumps(store: &Store) -> Result<u32, Error> {
+    let a = store.bump("x").await?;
+    let b = store.bump("x").await?;
+    Ok(a + b)
+}
+
+#[graph(strict)]
+async fn strict_unknown(store: &Store) -> Result<u32, Error> {
+    let a = store.get("a").await?;
+    let b = store.op("mystery", "b").await?;
+    Ok(a + b)
+}
+
+#[test]
+fn declared_and_strict_effects_stay_ordered() {
+    assert_eq!(run(bumps(Store::new(""))).2, 1);
+    assert_eq!(run(strict_unknown(Store::new(""))).2, 1);
+}

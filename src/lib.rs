@@ -1,5 +1,14 @@
-//! A cooperative, single-core async executor. Larger priorities run first.
-//! `#[psync::graph]` runs the independent awaits of an async function concurrently.
+//! psync: automatic concurrency for async Rust, and a small priority executor.
+//!
+//! - [`graph`] (`#[psync::graph]`) rewrites an async function so that awaits which do not depend
+//!   on each other run concurrently, with results, errors, early exits and writes to files and
+//!   services kept as in the sequential code. The hints [`seq`], [`fresh`], [`independent`] and
+//!   [`speculate`] tell it what tokens cannot show. The generated code needs only `core` and
+//!   `alloc` (loop fission also uses `std`'s `Vec`) and runs on any executor.
+//! - [`Executor`] is a cooperative, single-core, `no_std` executor: larger priorities run first,
+//!   equal priorities rotate FIFO, and sleeping tasks are polled only after a wake.
+//!
+//! The psync book (`book/` in the repository) covers both in depth.
 #![no_std]
 
 extern crate alloc;
@@ -18,7 +27,7 @@ pub use executor::Executor;
 pub use future::{BoxFuture, LocalBoxFuture};
 pub use park::{DefaultPark, Park};
 pub use pool::{DefaultPool, Pool};
-pub use psync_macros::{fresh, graph, independent, seq};
+pub use psync_macros::{fresh, graph, independent, seq, speculate};
 pub use task::{Task, TaskHandle};
 
 #[cfg(all(feature = "rp235x", target_os = "none", target_arch = "arm"))]

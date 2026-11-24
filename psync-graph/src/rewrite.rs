@@ -31,6 +31,8 @@ pub(crate) struct Rewriter<'a> {
     pub in_async: bool,
     /// Counter that keeps generated names unique within the function.
     pub fresh: usize,
+    /// Why the last loop statement could not run ahead, for the loop's report.
+    pub refusal: Option<String>,
 }
 
 impl VisitMut for Rewriter<'_> {

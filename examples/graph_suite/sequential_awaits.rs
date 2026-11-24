@@ -66,8 +66,8 @@ impl Client {
 example! {
     origin: "matrix-org/matrix-rust-sdk  crates/matrix-sdk/src/encryption/recovery  Recovery::disable  (app-18)",
     pattern: "P1 independent awaits",
-    summary: "one GET and eight PUTs to distinct event types; only one PUT needs the GET",
-    options: (),
+    summary: "one GET and eight PUTs to distinct event types; only one PUT needs the GET; the PUTs are idempotent, so `speculate` lets them run before earlier ones succeed",
+    options: (speculate),
     call: |f| f(&Client),
     async fn disable(client: &Client) -> Result<usize, String> {
         let default_key = client.get_account_data("m.secret_storage.default_key").await?;
