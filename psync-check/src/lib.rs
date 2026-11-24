@@ -137,6 +137,28 @@ pub struct FnSummary {
     /// Calls the driver could not see through (function pointers, `dyn` methods without a
     /// verb, other crates' functions without a summary).
     pub opaque: Vec<String>,
+    /// It may panic explicitly (`unwrap`, `expect`, `panic!`, `assert!`) in the user's code,
+    /// directly or through the user's own functions.
+    #[serde(default)]
+    pub panics: bool,
+    /// Trait methods it calls through `dyn` or an unresolved generic, by key: their effects
+    /// are the union over every implementation in the build, resolved by [`link`].
+    #[serde(default)]
+    pub deferred: Vec<String>,
+}
+
+/// What one call in a `#[psync::graph]` function does, for the macro.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct CallFact {
+    /// The callee's path, as resolved by the compiler.
+    pub callee: String,
+    /// The callee's name as written at the call site, to detect stale facts.
+    pub name: String,
+    pub effects: Vec<Effect>,
+    pub panics: bool,
+    pub deferred: Vec<String>,
+    /// Some of its callees could not be seen through.
+    pub opaque: bool,
 }
 
 /// Every summary of one crate, keyed by the stable hash of each function's definition path.
@@ -148,6 +170,138 @@ pub struct CrateSummaries {
     #[serde(default)]
     pub crate_id: String,
     pub functions: BTreeMap<String, FnSummary>,
+    /// Trait method key -> keys of this crate's methods implementing it.
+    #[serde(default)]
+    pub impls: BTreeMap<String, Vec<String>>,
+    /// Call sites in `#[psync::graph]` functions, by `file:line:column` of the callee's name.
+    #[serde(default)]
+    pub calls: BTreeMap<String, CallFact>,
+}
+
+/// The effects of a deferred trait method: the union over its implementations in the build.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct Resolved {
+    pub effects: Vec<Effect>,
+    pub panics: bool,
+    /// Implementations found.
+    pub impls: usize,
+}
+
+/// Link-time resolution of `dyn` and generic trait calls over the whole build (closed world):
+/// every deferred trait method's effects are the union of its implementations' effects, and
+/// of what those call through `dyn` in turn.
+pub fn link(crates: &[CrateSummaries]) -> BTreeMap<String, Resolved> {
+    let mut functions: BTreeMap<&str, &FnSummary> = BTreeMap::new();
+    let mut impls: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for c in crates {
+        for (k, f) in &c.functions {
+            functions.insert(k, f);
+        }
+        for (t, is) in &c.impls {
+            impls
+                .entry(t)
+                .or_default()
+                .extend(is.iter().map(String::as_str));
+        }
+    }
+    let mut out: BTreeMap<String, Resolved> = BTreeMap::new();
+    let mut traits: Vec<&str> = impls.keys().copied().collect();
+    for f in functions.values() {
+        traits.extend(f.deferred.iter().map(String::as_str));
+    }
+    traits.sort();
+    traits.dedup();
+    for t in traits {
+        let mut resolved = Resolved::default();
+        let mut stack = vec![t];
+        let mut seen = std::collections::BTreeSet::new();
+        while let Some(t) = stack.pop() {
+            if !seen.insert(t) {
+                continue;
+            }
+            for i in impls.get(t).into_iter().flatten() {
+                resolved.impls += 1;
+                // An implementation without a summary has no effects (summaries omit those).
+                let Some(f) = functions.get(i) else { continue };
+                resolved.panics |= f.panics;
+                for e in &f.effects {
+                    if !resolved.effects.iter().any(|x| same_effect(x, e)) {
+                        resolved.effects.push(e.clone());
+                    }
+                }
+                stack.extend(f.deferred.iter().map(String::as_str));
+            }
+        }
+        out.insert(t.to_string(), resolved);
+    }
+    out
+}
+
+fn same_effect(a: &Effect, b: &Effect) -> bool {
+    a.domain == b.domain && a.access == b.access && a.target == b.target
+}
+
+/// The final effects of a call site: its own, and those of the trait methods it reaches
+/// through `dyn`.
+pub fn resolve_call(fact: &CallFact, linked: &BTreeMap<String, Resolved>) -> (Vec<Effect>, bool) {
+    let mut effects = fact.effects.clone();
+    let mut panics = fact.panics;
+    for t in &fact.deferred {
+        if let Some(r) = linked.get(t) {
+            panics |= r.panics;
+            for e in &r.effects {
+                if !effects.iter().any(|x| same_effect(x, e)) {
+                    let mut e = e.clone();
+                    e.via.insert(0, fact.callee.clone());
+                    effects.push(e);
+                }
+            }
+        }
+    }
+    (effects, panics)
+}
+
+/// The facts file the macro reads (`PSYNC_FACTS`): one call site per line,
+/// `site \t name \t panics \t effects`, effects separated by `\x1e`, each
+/// `domain \x1f access \x1f target`. Domains: `fs`, `net`, `env`, `process`, `output`,
+/// `svc:<owner>`; accesses `r`, `w`, `o`. A line-based format keeps the macro free of a JSON
+/// dependency.
+pub fn facts_text(crates: &[CrateSummaries], linked: &BTreeMap<String, Resolved>) -> String {
+    let mut out = String::new();
+    for c in crates {
+        for (site, fact) in &c.calls {
+            let (effects, panics) = resolve_call(fact, linked);
+            let effects: Vec<String> = effects
+                .iter()
+                .map(|e| {
+                    let domain = match &e.domain {
+                        Domain::Fs => "fs".to_string(),
+                        Domain::Net => "net".to_string(),
+                        Domain::Env => "env".to_string(),
+                        Domain::Process => "process".to_string(),
+                        Domain::Output => "output".to_string(),
+                        Domain::Service(s) => format!("svc:{s}"),
+                    };
+                    let access = match e.access {
+                        Access::Read => "r",
+                        Access::Write => "w",
+                        Access::Ordered => "o",
+                    };
+                    format!(
+                        "{domain}\x1f{access}\x1f{}",
+                        e.target.as_deref().unwrap_or("")
+                    )
+                })
+                .collect();
+            out += &format!(
+                "{site}\t{}\t{}\t{}\n",
+                fact.name,
+                u8::from(panics),
+                effects.join("\x1e")
+            );
+        }
+    }
+    out
 }
 
 /// How serious a finding is.
@@ -170,6 +324,17 @@ pub struct Finding {
     pub location: String,
     /// The function the rewritten code is in.
     pub function: String,
+    /// A machine-applicable fix: text to insert at a byte offset of a file (`cargo psync fix`).
+    #[serde(default)]
+    pub fix: Option<Fix>,
+}
+
+/// An insertion that fixes a finding: `#[psync::seq]` before the statement or loop.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Fix {
+    pub file: String,
+    pub offset: usize,
+    pub insert: String,
 }
 
 /// The findings of one crate, as written by the driver.
@@ -178,6 +343,9 @@ pub struct CrateFindings {
     pub crate_name: String,
     pub checked_levels: usize,
     pub checked_loops: usize,
+    /// Per rewritten function: `(concurrent levels, prefetched loops)`.
+    #[serde(default)]
+    pub functions: BTreeMap<String, (usize, usize)>,
     pub findings: Vec<Finding>,
 }
 
@@ -209,6 +377,14 @@ pub mod env {
     pub const DENY: &str = "PSYNC_CHECK_DENY";
     /// Set to `1` to also report notes (output order, interior mutability).
     pub const NOTES: &str = "PSYNC_CHECK_NOTES";
+    /// The linked resolution of deferred trait methods (`linked.json`), when a previous run
+    /// produced one: the driver then checks `dyn` calls against every implementation.
+    pub const LINKED: &str = "PSYNC_LINKED";
+    /// Read by the macro: the facts file to schedule with.
+    pub const FACTS: &str = "PSYNC_FACTS";
+    /// Read by the macro (through `option_env!`, so cargo rebuilds when it changes): a hash of
+    /// the facts file.
+    pub const FACTS_STAMP: &str = "PSYNC_FACTS_STAMP";
 }
 
 #[cfg(test)]

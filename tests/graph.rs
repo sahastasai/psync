@@ -862,3 +862,19 @@ fn declared_and_strict_effects_stay_ordered() {
     assert_eq!(run(bumps(Store::new(""))).2, 1);
     assert_eq!(run(strict_unknown(Store::new(""))).2, 1);
 }
+
+#[graph]
+async fn upload_all_in_order(store: &Store, keys: Vec<&'static str>) -> Result<u32, Error> {
+    let mut total = 0;
+    #[psync::seq]
+    for k in keys {
+        total += store.get(k).await?;
+    }
+    Ok(total)
+}
+
+#[test]
+fn seq_on_a_loop_keeps_it_sequential() {
+    let (out, _, peak) = run(upload_all_in_order(Store::new(""), vec!["a", "bb", "c"]));
+    assert_eq!((out, peak), (Ok(4), 1));
+}

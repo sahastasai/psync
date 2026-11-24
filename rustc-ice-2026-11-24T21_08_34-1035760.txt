@@ -1,0 +1,43 @@
+thread 'rustc' panicked at /rustc-dev/6905905bb7727fd0f9223f5fdc9ad4e62236d5a2/compiler/rustc_ty_utils/src/assoc.rs:73:17:
+Box<dyn Any>
+stack backtrace:
+   0:     0x7039c33c5bc5 - <std[dbf8a649d02461c]::backtrace::Backtrace>::create
+   1:     0x7039c33c5b15 - <std[dbf8a649d02461c]::backtrace::Backtrace>::force_capture
+   2:     0x7039c2134fd2 - std[dbf8a649d02461c]::panicking::update_hook::<alloc[1fc48dad18a5838a]::boxed::Box<rustc_driver_impl[bd0ab2dad98eec61]::install_ice_hook::{closure#1}>>::{closure#0}
+   3:     0x7039c33dbce2 - std[dbf8a649d02461c]::panicking::panic_with_hook
+   4:     0x7039c2f65d5d - std[dbf8a649d02461c]::panicking::begin_panic::<rustc_span[5620dd6ec7607f87]::macros::ExplicitBug>::{closure#0}
+   5:     0x7039c2f63c9e - std[dbf8a649d02461c]::sys::backtrace::__rust_end_short_backtrace::<std[dbf8a649d02461c]::panicking::begin_panic<rustc_span[5620dd6ec7607f87]::macros::ExplicitBug>::{closure#0}, !>
+   6:     0x7039c2f6335c - std[dbf8a649d02461c]::panicking::begin_panic::<rustc_span[5620dd6ec7607f87]::macros::ExplicitBug>
+   7:     0x7039bf7f9f41 - rustc_span[5620dd6ec7607f87]::macros::bug_impl
+   8:     0x7039c3e3f89b - rustc_ty_utils[3722aaa2e398dd99]::assoc::associated_item
+   9:     0x7039c3e3cc57 - rustc_query_impl[ac063ae162b86440]::query_vtables::associated_item::invoke_provider_fn::__rust_begin_short_backtrace
+  10:     0x7039c3e3533b - rustc_query_impl[ac063ae162b86440]::execution::try_execute_query::<rustc_middle[cabd280ba4988967]::query::caches::DefIdCache<rustc_middle[cabd280ba4988967]::query::erase::ErasedData<[u8; 32usize]>>, true>
+  11:     0x7039c3e33da1 - rustc_query_impl[ac063ae162b86440]::query_vtables::associated_item::execute_query_incr::__rust_end_short_backtrace
+  12:     0x60f8cad9467c - query_get_at<rustc_middle::query::caches::DefIdCache<rustc_middle::query::erase::ErasedData<[u8; 32]>>>
+                               at /home/sahasta/.rustup/toolchains/nightly-2026-11-20-x86_64-unknown-linux-gnu/lib/rustlib/rustc-src/rust/compiler/rustc_middle/src/query/calls.rs:154:17
+  13:     0x60f8cad9467c - associated_item<rustc_span::def_id::DefId>
+                               at /home/sahasta/.rustup/toolchains/nightly-2026-11-20-x86_64-unknown-linux-gnu/lib/rustlib/rustc-src/rust/compiler/rustc_middle/src/query/query_api.rs:289:61
+  14:     0x60f8cad9467c - associated_item<rustc_span::def_id::DefId>
+                               at /home/sahasta/.rustup/toolchains/nightly-2026-11-20-x86_64-unknown-linux-gnu/lib/rustlib/rustc-src/rust/compiler/rustc_middle/src/query/query_api.rs:279:39
+  15:     0x60f8cad9467c - write_summaries
+                               at /home/sahasta/Development/psync-graph/psync-check/src/bin/../driver/analysis.rs:497:43
+  16:     0x60f8cad36207 - <psync_driver[8a720b59718bf93d]::Psync as rustc_driver_impl[bd0ab2dad98eec61]::Callbacks>::after_analysis
+                               at /home/sahasta/Development/psync-graph/psync-check/src/bin/psync-driver.rs:52:18
+  17:     0x7039c4cedbde - rustc_interface[f1d08008a92fa4b0]::interface::run_compiler::<(), rustc_driver_impl[bd0ab2dad98eec61]::compiler_entrypoint::{closure#0}>::{closure#2}
+  18:     0x7039c4fcd83e - <rustc_thread_pool[e8681e08503a654f]::job::StackJob<rustc_thread_pool[e8681e08503a654f]::latch::LatchRef<rustc_thread_pool[e8681e08503a654f]::latch::LockLatch>, <rustc_thread_pool[e8681e08503a654f]::registry::Registry>::in_worker_cold<<rustc_thread_pool[e8681e08503a654f]::thread_pool::ThreadPool>::install<rustc_interface[f1d08008a92fa4b0]::util::run_in_thread_pool_with_globals<rustc_interface[f1d08008a92fa4b0]::interface::run_compiler<(), rustc_driver_impl[bd0ab2dad98eec61]::compiler_entrypoint::{closure#0}>::{closure#2}, ()>::{closure#6}::{closure#0}::{closure#1}::{closure#0}, ()>::{closure#0}, ()>::{closure#0}::{closure#0}, ()> as rustc_thread_pool[e8681e08503a654f]::job::Job>::execute
+  19:     0x7039c4fce036 - <rustc_thread_pool[e8681e08503a654f]::registry::WorkerThread>::wait_or_steal_until_cold
+  20:     0x7039c4fcf161 - <rustc_thread_pool[e8681e08503a654f]::registry::ThreadBuilder>::run
+  21:     0x7039c4fcefac - std[dbf8a649d02461c]::sys::backtrace::__rust_begin_short_backtrace::<<rustc_thread_pool[e8681e08503a654f]::ThreadPoolBuilder>::build_scoped<rustc_interface[f1d08008a92fa4b0]::util::run_in_thread_pool_with_globals<rustc_interface[f1d08008a92fa4b0]::interface::run_compiler<(), rustc_driver_impl[bd0ab2dad98eec61]::compiler_entrypoint::{closure#0}>::{closure#2}, ()>::{closure#6}::{closure#0}::{closure#0}, rustc_interface[f1d08008a92fa4b0]::util::run_in_thread_pool_with_globals<rustc_interface[f1d08008a92fa4b0]::interface::run_compiler<(), rustc_driver_impl[bd0ab2dad98eec61]::compiler_entrypoint::{closure#0}>::{closure#2}, ()>::{closure#6}::{closure#0}::{closure#1}, ()>::{closure#0}::{closure#0}::{closure#0}, ()>
+  22:     0x7039c4fcee44 - <std[dbf8a649d02461c]::thread::lifecycle::spawn_unchecked<<rustc_thread_pool[e8681e08503a654f]::ThreadPoolBuilder>::build_scoped<rustc_interface[f1d08008a92fa4b0]::util::run_in_thread_pool_with_globals<rustc_interface[f1d08008a92fa4b0]::interface::run_compiler<(), rustc_driver_impl[bd0ab2dad98eec61]::compiler_entrypoint::{closure#0}>::{closure#2}, ()>::{closure#6}::{closure#0}::{closure#0}, rustc_interface[f1d08008a92fa4b0]::util::run_in_thread_pool_with_globals<rustc_interface[f1d08008a92fa4b0]::interface::run_compiler<(), rustc_driver_impl[bd0ab2dad98eec61]::compiler_entrypoint::{closure#0}>::{closure#2}, ()>::{closure#6}::{closure#0}::{closure#1}, ()>::{closure#0}::{closure#0}::{closure#0}, ()>::{closure#1} as core[3c7097275da79756]::ops::function::FnOnce<()>>::call_once::{shim:vtable#0}
+  23:     0x7039c4d887db - <std[dbf8a649d02461c]::sys::thread::unix::Thread>::new::thread_start
+  24:     0x7039bdc9ce53 - start_thread
+  25:     0x7039bdd2429c - __clone3
+  26:                0x0 - <unknown>
+
+
+rustc version: 1.102.0-nightly (6905905bb 2026-11-19)
+platform: x86_64-unknown-linux-gnu
+
+query stack during panic:
+#0 [associated_item] computing associated item data for `main`
+end of query stack

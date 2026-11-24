@@ -47,6 +47,8 @@ pub(crate) struct Node {
     pub unclassified: Vec<String>,
     /// `#[psync::speculate]`: its writes may run ahead of earlier exits.
     pub speculate: bool,
+    /// The compiler says it may panic on purpose: an exit for the speculation rule.
+    pub panics: bool,
     /// `#[psync::independent]` on the statement: its effects commute with the others in its
     /// region (two writes to different objects through one client).
     pub independent: bool,
@@ -640,6 +642,7 @@ pub(crate) fn classify(stmt: &Stmt, scope: &Scope, relaxed: bool) -> Class {
     Class::Node(Box::new(Node {
         effects: found.effects,
         unclassified: found.unclassified,
+        panics: found.panics,
         speculate,
         independent: attrs.iter().any(|a| is_psync_attr(a, "independent")),
         stmt: stmt.clone(),

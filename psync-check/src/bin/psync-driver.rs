@@ -28,6 +28,18 @@ impl rustc_driver::Callbacks for Plain {}
 
 struct Psync;
 impl rustc_driver::Callbacks for Psync {
+    fn config(&mut self, config: &mut rustc_interface::interface::Config) {
+        // Recheck a crate when the linked resolution of `dyn` calls changes: cargo reruns a crate
+        // whose recorded environment dependencies changed.
+        config.track_state = Some(Box::new(|sess| {
+            let value = std::env::var("PSYNC_LINKED_STAMP").ok();
+            sess.env_depinfo.borrow_mut().insert((
+                rustc_span::Symbol::intern("PSYNC_LINKED_STAMP"),
+                value.as_deref().map(rustc_span::Symbol::intern),
+            ));
+        }));
+    }
+
     fn after_analysis<'tcx>(
         &mut self,
         _compiler: &rustc_interface::interface::Compiler,

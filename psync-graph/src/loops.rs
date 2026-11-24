@@ -87,7 +87,12 @@ impl LoopScope {
             local,
             carried,
             independent,
-            terminates: terminates(body),
+            // A panic ends the loop too (facts from the compiler).
+            terminates: terminates(body)
+                || body
+                    .stmts
+                    .iter()
+                    .any(|s| effects::of_stmt(s, &rw.scope.effects).panics),
             speculate,
             carried_effects,
         }
@@ -338,6 +343,17 @@ impl Rewriter<'_> {
             line_of(f.for_token.span()),
             crate::classify::end_line_of(f.span()),
         );
+        // `#[psync::seq]` keeps the loop as written (its body is still rewritten inside).
+        if f.attrs.iter().any(|a| is_psync_attr(a, "seq")) {
+            self.report.loops.push(LoopReport {
+                label,
+                line,
+                end_line,
+                reason: "marked #[psync::seq]".into(),
+                ..Default::default()
+            });
+            return None;
+        }
         // A loop whose body is only another loop is treated as one loop over the pairs, so the
         // awaited work of later outer items can run ahead too.
         let flat = flatten(f);

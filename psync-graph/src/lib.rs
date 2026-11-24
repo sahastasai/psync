@@ -61,6 +61,9 @@
 mod access;
 mod classify;
 mod effects;
+mod facts;
+
+extern crate proc_macro;
 mod exits;
 mod hoist;
 mod loops;
@@ -313,6 +316,16 @@ pub fn transform_fn(function: &mut ItemFn, options: &Options) -> Report {
         refusal: None,
     };
     rewriter.visit_block_mut(&mut function.block);
+    // Marks the function for `cargo psync`'s driver (which records facts about its calls), and
+    // makes cargo rebuild it when the facts change (`option_env!` is tracked).
+    function.block.stmts.insert(
+        0,
+        syn::parse_quote! {
+            #[allow(dead_code)]
+            const __PSYNC_GRAPH: ::core::option::Option<&str> =
+                ::core::option_env!("PSYNC_FACTS_STAMP");
+        },
+    );
     function.attrs.retain(|a| !is_psync_attr(a, "graph"));
     schedule::StripHints.visit_block_mut(&mut function.block);
     rewriter.report

@@ -40,7 +40,7 @@
 use crate::access::{Set, mentions, overlaps};
 use proc_macro2::TokenStream;
 use quote::ToTokens;
-use syn::{Expr, visit::Visit};
+use syn::{Expr, spanned::Spanned, visit::Visit};
 
 /// Where an effect lands.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -63,6 +63,9 @@ impl Domain {
         match (self, other) {
             (Process | Unknown, _) | (_, Process | Unknown) => true,
             (Service(a), Service(b)) => match (a, b) {
+                // A service the compiler named by its type (`type:kube::Api::<K>`) may be behind
+                // any receiver variable; two types are the same service only if equal.
+                (Some(a), Some(b)) if a.starts_with("type:") != b.starts_with("type:") => true,
                 (Some(a), Some(b)) => overlaps(a, b),
                 _ => true,
             },
@@ -518,6 +521,8 @@ fn receiver_path(e: &Expr) -> Option<String> {
 pub(crate) struct Found {
     pub effects: Vec<Effect>,
     pub unclassified: Vec<String>,
+    /// The compiler says a call here panics on purpose (only with facts, see [`crate::facts`]).
+    pub panics: bool,
 }
 
 /// Find the effects in `node` (a statement's tokens, parsed by the caller).
@@ -539,6 +544,24 @@ struct Finder<'a> {
 }
 
 impl Finder<'_> {
+    /// Use the compiler's facts for the call of `ident` at `span`, if there are any.
+    fn fact(&mut self, span: proc_macro2::Span, ident: &str) -> bool {
+        let Some(fact) = crate::facts::at(span, ident) else {
+            return false;
+        };
+        self.found.effects.extend(fact.effects.iter().cloned());
+        self.found.panics |= fact.panics;
+        true
+    }
+
+    /// The last identifier of a called path (`stamp` in `helpers::stamp(..)`).
+    fn callee_name(c: &syn::ExprCall) -> Option<String> {
+        match &*c.func {
+            Expr::Path(p) => p.path.segments.last().map(|s| s.ident.to_string()),
+            _ => None,
+        }
+    }
+
     fn push(&mut self, domain: Domain, kind: Kind, target: Target, op: String, ordered: bool) {
         self.found.effects.push(Effect {
             domain,
@@ -555,6 +578,11 @@ impl Finder<'_> {
         let Expr::Path(p) = &*c.func else {
             return false;
         };
+        if let Some(name) = Self::callee_name(c)
+            && self.fact(c.func.span(), &name)
+        {
+            return true;
+        }
         let segs: Vec<String> = p
             .path
             .segments
@@ -659,6 +687,19 @@ impl Finder<'_> {
                 _ => break,
             }
         }
+        // Facts from the compiler for any call of the chain replace the names' guesses.
+        let mut known = false;
+        for m in &calls {
+            known |= self.fact(m.method.span(), &m.method.to_string());
+        }
+        if let Expr::Call(c) = e
+            && let Some(name) = Self::callee_name(c)
+        {
+            known |= self.fact(c.func.span(), &name);
+        }
+        if known {
+            return;
+        }
         // `e` is the chain's root; a root that is itself a call (`Command::new(..)`,
         // `File::open(..)`, `fetch(x)`) is classified by `visit_expr_call`.
         if let Expr::Call(c) = e
@@ -727,6 +768,12 @@ impl<'ast> Visit<'ast> for Finder<'_> {
             other => self.visit_expr(other),
         }
         self.awaited -= 1;
+    }
+
+    fn visit_expr_method_call(&mut self, m: &'ast syn::ExprMethodCall) {
+        // Synchronous method calls only have effects psync knows of through the compiler.
+        self.fact(m.method.span(), &m.method.to_string());
+        syn::visit::visit_expr_method_call(self, m);
     }
 
     fn visit_expr_call(&mut self, c: &'ast syn::ExprCall) {

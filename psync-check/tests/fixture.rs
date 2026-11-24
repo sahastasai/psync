@@ -46,11 +46,106 @@ fn finds_effects_hidden_in_callees() {
             .iter()
             .any(|f| f.kind == "interior-mutability" && f.severity == Severity::Note)
     );
+    // A `dyn Store` whose implementation writes the file the next call reads: resolved by the
+    // link step over every implementation in the build, then checked in a second pass.
+    assert!(at("conflict", "lib.rs:111"), "{:#?}", app.findings);
     // `sizes` reads two files: nothing to report.
     assert!(!app.findings.iter().any(|f| f.function == "sizes"));
-    assert_eq!(app.findings.len(), 4, "{:#?}", app.findings);
+    assert_eq!(app.findings.len(), 5, "{:#?}", app.findings);
+    assert!(stderr.contains("concurrent level(s)"));
+
+    // With the compiler's facts, the macro schedules safely by itself and gains concurrency
+    // where names were too pessimistic.
+    let output = Command::new(env!("CARGO_BIN_EXE_cargo-psync"))
+        .args(["psync", "check", "--facts"])
+        .current_dir(&fixture)
+        .env("CARGO_TARGET_DIR", &target)
+        .output()
+        .expect("run cargo psync check --facts");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    let crates: Vec<CrateFindings> = psync_check::read_all(&target.join("psync").join("findings"));
+    let app = crates
+        .iter()
+        .find(|c| c.crate_name == "app")
+        .expect("app was checked");
     assert!(
-        stderr.contains("psync check: 5 concurrent level(s)")
-            || stderr.contains("concurrent level(s)")
+        app.findings.iter().all(|f| f.severity != Severity::Warning),
+        "{:#?}",
+        app.findings
     );
+    // `warm`/`load`, `check`/`get_token` and `checkpoint`/`inspect_db` now run in order; the
+    // loop whose prefix writes is no longer prefetched.
+    for sequential in ["start", "login", "snapshot", "sync_dirs"] {
+        assert!(
+            !app.functions.contains_key(sequential),
+            "{:?}",
+            app.functions
+        );
+    }
+    // `create_view` only reads: its two calls now overlap.
+    assert_eq!(
+        app.functions.get("views"),
+        Some(&(1, 0)),
+        "{:?}",
+        app.functions
+    );
+    assert!(stderr.contains("with compiler facts"));
+}
+
+/// Copies `dir` to `to`, without its `target` directory.
+fn copy_dir(dir: &Path, to: &Path) {
+    std::fs::create_dir_all(to).expect("create");
+    for entry in std::fs::read_dir(dir).expect("read fixture") {
+        let entry = entry.expect("entry");
+        let (from, dest) = (entry.path(), to.join(entry.file_name()));
+        if entry.file_name() == "target" {
+            continue;
+        }
+        if from.is_dir() {
+            copy_dir(&from, &dest);
+        } else {
+            std::fs::copy(&from, &dest).expect("copy");
+        }
+    }
+}
+
+#[test]
+fn fix_inserts_seq_hints_until_clean() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let work = root.join("target/fixture-fix");
+    let _ = std::fs::remove_dir_all(&work);
+    copy_dir(&root.join("tests/fixtures/hidden"), &work);
+    // The copy is elsewhere: point it at psync, and at the pinned toolchain.
+    let manifest = work.join("app/Cargo.toml");
+    let text = std::fs::read_to_string(&manifest).expect("manifest");
+    let psync = root.parent().expect("repository").display().to_string();
+    std::fs::write(&manifest, text.replace("../../../../..", &psync)).expect("manifest");
+    std::fs::copy(
+        root.join("rust-toolchain.toml"),
+        work.join("rust-toolchain.toml"),
+    )
+    .expect("toolchain");
+    let run = |command: &str| {
+        let output = Command::new(env!("CARGO_BIN_EXE_cargo-psync"))
+            .args(["psync", command])
+            .current_dir(&work)
+            .env("CARGO_TARGET_DIR", work.join("target"))
+            .output()
+            .expect("run cargo psync");
+        String::from_utf8_lossy(&output.stderr).to_string()
+    };
+    let fixed = run("fix");
+    assert!(
+        fixed.contains("inserted 4 `#[psync::seq]` hint(s)"),
+        "{fixed}"
+    );
+    let source = std::fs::read_to_string(work.join("app/src/lib.rs")).expect("source");
+    assert_eq!(source.matches("#[psync::seq]").count(), 4);
+    assert!(
+        source.contains("#[psync::seq]\n    for d in dirs"),
+        "{source}"
+    );
+    let checked = run("check");
+    assert!(checked.contains("0 warning(s)"), "{checked}");
 }

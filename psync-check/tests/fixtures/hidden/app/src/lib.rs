@@ -72,3 +72,42 @@ pub async fn shared(log: &RefCell<Vec<u32>>) -> u32 {
     let b = bump(log, 2).await;
     a + b
 }
+
+/// `create_view` sounds like a write but only reads: by name the two calls stay in order, with the
+/// compiler's facts (`cargo psync build`) they overlap.
+pub struct Catalog;
+impl Catalog {
+    async fn create_view(&self, name: &str) -> Result<usize, Error> {
+        Ok(std::fs::read(name)?.len())
+    }
+}
+
+#[graph]
+pub async fn views(c: &Catalog) -> Result<usize, Error> {
+    let a = c.create_view("a.sql").await?;
+    let b = c.create_view("b.sql").await?;
+    Ok(a + b)
+}
+
+/// A trait object whose implementation writes the file the next call reads. Nothing in the
+/// function's tokens says so, and the compiler cannot resolve `dyn` at the call: the link step
+/// resolves it over every implementation in the build.
+pub trait Store {
+    fn checkpoint(&self) -> std::pin::Pin<Box<dyn Future<Output = std::io::Result<()>> + '_>>;
+}
+pub struct FileStore;
+impl Store for FileStore {
+    fn checkpoint(&self) -> std::pin::Pin<Box<dyn Future<Output = std::io::Result<()>> + '_>> {
+        Box::pin(async { std::fs::write("store.db", b"x") })
+    }
+}
+async fn inspect_db() -> std::io::Result<usize> {
+    Ok(std::fs::read("store.db")?.len())
+}
+
+#[graph]
+pub async fn snapshot(store: &dyn Store) -> Result<usize, Error> {
+    store.checkpoint().await?;
+    let n = inspect_db().await?;
+    Ok(n)
+}

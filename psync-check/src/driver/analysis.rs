@@ -1,14 +1,15 @@
 //! Effect summaries from MIR, and the checks of `#[psync::graph]` rewrites.
 
 use psync_check::{
-    Access, CrateFindings, CrateSummaries, Domain, Effect, Finding, FnSummary, Severity, conflict,
-    env,
+    Access, CallFact, CrateFindings, CrateSummaries, Domain, Effect, Finding, FnSummary, Resolved,
+    Severity, conflict, env,
 };
 use rustc_hir::def::DefKind;
 use rustc_hir::def_id::{DefId, LOCAL_CRATE, LocalDefId};
 use rustc_middle::mir::{self, AggregateKind, Operand, Rvalue, StatementKind, TerminatorKind};
-use rustc_middle::ty::{self, GenericArgs, Instance, Ty, TyCtxt, TypingEnv};
+use rustc_middle::ty::{self, GenericArgs, Instance, InstanceKind, Ty, TyCtxt, TypingEnv};
 use rustc_span::Span;
+use std::collections::BTreeMap;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -24,9 +25,30 @@ pub struct Located {
 pub struct Summary {
     pub effects: Vec<Located>,
     pub opaque: Vec<String>,
+    /// May panic explicitly in the user's code.
+    pub panics: bool,
+    /// Trait methods reached through `dyn` or unresolved generics (keys), for the link step.
+    pub deferred: Vec<String>,
 }
 
 impl Summary {
+    fn absorb(&mut self, other: &Summary, span: Span, via: Option<&str>) {
+        for l in &other.effects {
+            let mut effect = l.effect.clone();
+            if let Some(v) = via {
+                effect.via.insert(0, v.to_string());
+            }
+            self.add(effect, span);
+        }
+        self.opaque.extend(other.opaque.iter().cloned());
+        self.panics |= other.panics;
+        for d in &other.deferred {
+            if !self.deferred.contains(d) {
+                self.deferred.push(d.clone());
+            }
+        }
+    }
+
     fn add(&mut self, effect: Effect, span: Span) {
         let same = |l: &Located| {
             l.effect.domain == effect.domain
@@ -109,6 +131,8 @@ pub struct Analyzer<'tcx> {
     /// The crate being compiled comes from crates.io or git (not the user's workspace): its
     /// summaries keep only real I/O, never verbs of the APIs it calls internally.
     library: bool,
+    /// Deferred trait methods resolved over the whole build by a previous run's link step.
+    linked: BTreeMap<String, Resolved>,
 }
 
 impl<'tcx> Analyzer<'tcx> {
@@ -121,6 +145,10 @@ impl<'tcx> Analyzer<'tcx> {
             summarized: HashSet::new(),
             summary_dir: std::env::var_os(env::SUMMARIES).map(PathBuf::from),
             library: is_registry(tcx, rustc_hir::def_id::CRATE_DEF_ID.to_def_id()),
+            linked: std::env::var_os(env::LINKED)
+                .and_then(|p| std::fs::read_to_string(p).ok())
+                .and_then(|t| serde_json::from_str(&t).ok())
+                .unwrap_or_default(),
         }
     }
 
@@ -156,10 +184,7 @@ impl<'tcx> Analyzer<'tcx> {
                     | AggregateKind::CoroutineClosure(nested, _) = **kind
                 {
                     let inner = self.summarize(nested);
-                    for l in &inner.effects {
-                        summary.add(l.effect.clone(), stmt.source_info.span);
-                    }
-                    summary.opaque.extend(inner.opaque.iter().cloned());
+                    summary.absorb(&inner, stmt.source_info.span, None);
                 }
             }
             let terminator = data.terminator();
@@ -195,11 +220,37 @@ impl<'tcx> Analyzer<'tcx> {
         span: Span,
     ) {
         let tcx = self.tcx;
-        let resolved = Instance::try_resolve(tcx, typing_env, callee, gargs)
+        let instance = Instance::try_resolve(tcx, typing_env, callee, gargs)
             .ok()
-            .flatten()
-            .map(|i| i.def_id())
-            .unwrap_or(callee);
+            .flatten();
+        let resolved = instance.map(|i| i.def_id()).unwrap_or(callee);
+        // A trait method called through `dyn`, or on a generic the compiler cannot resolve here:
+        // its implementations may be anywhere in the build, so the link step resolves it.
+        let unresolved = match instance {
+            Some(i) => matches!(i.def, InstanceKind::Virtual(..)),
+            None => true,
+        };
+        if unresolved
+            && let Some(trait_id) = tcx.trait_of_assoc(callee)
+            && !self.library
+            && !is_registry(tcx, trait_id)
+            && !OPAQUE_STD.contains(&tcx.crate_name(trait_id.krate).as_str())
+        {
+            let key = format!("{:?}", tcx.def_path_hash(callee));
+            let path = display_path(tcx, callee);
+            if let Some(r) = self.linked.get(&key) {
+                for e in &r.effects {
+                    let mut e = e.clone();
+                    e.via.insert(0, path.clone());
+                    summary.add(e, span);
+                }
+                summary.panics |= r.panics;
+            }
+            if !summary.deferred.contains(&key) {
+                summary.deferred.push(key);
+            }
+            return;
+        }
         let path = display_path(tcx, resolved);
         let krate = tcx.crate_name(resolved.krate);
         let krate = krate.as_str();
@@ -224,6 +275,11 @@ impl<'tcx> Analyzer<'tcx> {
         if krate == "psync" {
             return;
         }
+        // Explicit panics in the user's code are exits too: a write must not run before them.
+        if !library && panicking(krate, &path, &name) {
+            summary.panics = true;
+            return;
+        }
         if OPAQUE_STD.contains(&krate) || IO_CRATES.contains(&krate) {
             if let Some((domain, access, keeps_target)) = io_effect(&path, &name)
                 // Inside libraries, socket traffic is transport, not meaning: every request
@@ -236,15 +292,10 @@ impl<'tcx> Analyzer<'tcx> {
         }
         if resolved.is_local() {
             let inner = self.summarize(resolved);
-            for l in &inner.effects {
-                let mut effect = l.effect.clone();
-                effect.via.insert(0, path.clone());
-                summary.add(effect, span);
-            }
+            summary.absorb(&inner, span, Some(&path));
             if !self.has_body(resolved) && !library {
                 self.by_name(summary, &path, &name, target, span);
             }
-            summary.opaque.extend(inner.opaque.iter().cloned());
             return;
         }
         // Another crate. Its summary says what its body does; at the boundary between the user's
@@ -268,6 +319,12 @@ impl<'tcx> Analyzer<'tcx> {
                     summary.add(effect, span);
                 }
                 summary.opaque.extend(s.opaque);
+                summary.panics |= s.panics;
+                for d in s.deferred {
+                    if !summary.deferred.contains(&d) {
+                        summary.deferred.push(d);
+                    }
+                }
             }
             _ if library || !returns_future(tcx, resolved) => {}
             _ => self.by_name(summary, &path, &name, target, span),
@@ -343,6 +400,86 @@ impl<'tcx> Analyzer<'tcx> {
         String::from_utf8(bytes.to_vec()).ok()
     }
 
+    /// The functions `#[psync::graph]` annotated: each contains the item `__PSYNC_GRAPH`.
+    fn annotated(&self) -> Vec<DefId> {
+        let tcx = self.tcx;
+        tcx.hir_body_owners()
+            .filter(|o| {
+                tcx.def_kind(*o) == DefKind::Const
+                    && tcx
+                        .opt_item_name(o.to_def_id())
+                        .is_some_and(|n| n.as_str() == "__PSYNC_GRAPH")
+            })
+            .map(|o| tcx.parent(o.to_def_id()))
+            .collect()
+    }
+
+    /// Facts about every call in the annotated functions (and the closures and async blocks in
+    /// them), keyed by the source location of the callee's name, for the macro's next expansion.
+    fn call_facts(&mut self) -> BTreeMap<String, CallFact> {
+        let tcx = self.tcx;
+        let mut out = BTreeMap::new();
+        let mut bodies = self.annotated();
+        let mut seen = HashSet::new();
+        while let Some(def_id) = bodies.pop() {
+            if !seen.insert(def_id) || !self.has_body(def_id) {
+                continue;
+            }
+            let body = tcx.optimized_mir(def_id);
+            let typing_env = TypingEnv::post_analysis(tcx, def_id);
+            for data in body.basic_blocks.iter() {
+                for stmt in &data.statements {
+                    if let StatementKind::Assign(assign) = &stmt.kind
+                        && let Rvalue::Aggregate(kind, _) = &assign.1
+                        && let AggregateKind::Closure(nested, _)
+                        | AggregateKind::Coroutine(nested, _)
+                        | AggregateKind::CoroutineClosure(nested, _) = **kind
+                    {
+                        bodies.push(nested);
+                    }
+                }
+                let terminator = data.terminator();
+                let TerminatorKind::Call {
+                    func,
+                    args,
+                    fn_span,
+                    ..
+                } = &terminator.kind
+                else {
+                    continue;
+                };
+                let Some((callee, gargs)) = func.const_fn_def() else {
+                    continue;
+                };
+                if fn_span.from_expansion() || tcx.crate_name(callee.krate).as_str() == "psync" {
+                    continue;
+                }
+                let Some(site) = site_key(tcx, *fn_span) else {
+                    continue;
+                };
+                let args: Vec<&Operand<'tcx>> = args.iter().map(|a| &a.node).collect();
+                let mut one = Summary::default();
+                self.call(&mut one, typing_env, callee, gargs, &args, *fn_span);
+                let name = tcx
+                    .opt_item_name(callee)
+                    .map(|n| n.to_string())
+                    .unwrap_or_default();
+                out.insert(
+                    site,
+                    CallFact {
+                        callee: display_path(tcx, callee),
+                        name,
+                        effects: one.effects.into_iter().map(|l| l.effect).collect(),
+                        panics: one.panics,
+                        deferred: one.deferred,
+                        opaque: !one.opaque.is_empty(),
+                    },
+                );
+            }
+        }
+        out
+    }
+
     /// Write the summaries of every local function for crates that depend on this one.
     pub fn write_summaries(&mut self) {
         let Some(dir) = self.summary_dir.clone() else {
@@ -352,7 +489,7 @@ impl<'tcx> Analyzer<'tcx> {
         let mut out = CrateSummaries {
             crate_name: tcx.crate_name(LOCAL_CRATE).to_string(),
             crate_id: format!("{:?}", tcx.stable_crate_id(LOCAL_CRATE)),
-            functions: Default::default(),
+            ..Default::default()
         };
         let owners: Vec<LocalDefId> = tcx.hir_body_owners().collect();
         for owner in owners {
@@ -360,19 +497,33 @@ impl<'tcx> Analyzer<'tcx> {
             if !matches!(tcx.def_kind(def_id), DefKind::Fn | DefKind::AssocFn) {
                 continue;
             }
+            let key = format!("{:?}", tcx.def_path_hash(def_id));
+            // Methods implementing a trait method, for the link step's resolution of `dyn` calls.
+            if tcx.def_kind(def_id) == DefKind::AssocFn
+                && let Some(trait_item) = tcx.associated_item(def_id).trait_item_def_id()
+                && !OPAQUE_STD.contains(&tcx.crate_name(trait_item.krate).as_str())
+            {
+                out.impls
+                    .entry(format!("{:?}", tcx.def_path_hash(trait_item)))
+                    .or_default()
+                    .push(key.clone());
+            }
             let s = self.summarize(def_id);
-            if s.effects.is_empty() && s.opaque.is_empty() {
+            if s.effects.is_empty() && s.opaque.is_empty() && !s.panics && s.deferred.is_empty() {
                 continue;
             }
             out.functions.insert(
-                format!("{:?}", tcx.def_path_hash(def_id)),
+                key,
                 FnSummary {
                     path: display_path(tcx, def_id),
                     effects: s.effects.iter().map(|l| l.effect.clone()).collect(),
                     opaque: s.opaque.clone(),
+                    panics: s.panics,
+                    deferred: s.deferred.clone(),
                 },
             );
         }
+        out.calls = self.call_facts();
         let _ = std::fs::create_dir_all(&dir);
         let file = dir.join(format!(
             "{}-{:?}.json",
@@ -383,6 +534,84 @@ impl<'tcx> Analyzer<'tcx> {
             let _ = std::fs::write(file, json);
         }
     }
+}
+
+/// Insert `#[psync::seq]` before the statement containing `span` (or, for a loop prefix, before
+/// the `for` loop around it), on its own line with the statement's indentation.
+fn seq_fix(tcx: TyCtxt<'_>, span: Span, enclosing_loop: bool) -> Option<psync_check::Fix> {
+    let sm = tcx.sess.source_map();
+    let pos = sm.lookup_byte_offset(span.lo());
+    let src = pos.sf.src.as_ref()?;
+    let rustc_span::FileName::Real(real) = &pos.sf.name else {
+        return None;
+    };
+    let path = real.local_path()?;
+    let file = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let bytes = src.as_bytes();
+    let mut at = pos.pos.0 as usize;
+    // Walk back to the start of the statement: the previous `;`, `{` or `}` outside brackets.
+    let mut depth = 0i32;
+    let start = loop {
+        if at == 0 {
+            break 0;
+        }
+        at -= 1;
+        match bytes[at] {
+            b')' | b']' => depth += 1,
+            b'(' | b'[' => depth -= 1,
+            b'}' if depth == 0 => break at + 1,
+            b'{' | b';' if depth == 0 => break at + 1,
+            b'}' => depth += 1,
+            b'{' => depth -= 1,
+            _ => {}
+        }
+    };
+    let mut start = start;
+    // For a loop, the statement found is inside the body: continue to the `for` that opens it.
+    if enclosing_loop {
+        let before = &src[..start];
+        let header = before.rfind("for ")?;
+        start = before[..header].rfind('\n').map_or(0, |i| i + 1);
+    }
+    while start < bytes.len() && bytes[start].is_ascii_whitespace() {
+        start += 1;
+    }
+    let line_start = src[..start].rfind('\n').map_or(0, |i| i + 1);
+    let indent: String = src[line_start..start]
+        .chars()
+        .take_while(|c| c.is_whitespace())
+        .collect();
+    Some(psync_check::Fix {
+        file: file.display().to_string(),
+        offset: start,
+        insert: format!("#[psync::seq]\n{indent}"),
+    })
+}
+
+/// `/abs/path/file.rs:line:column` of a span's start (column counted in characters, from 1), the
+/// key the macro computes from its tokens' spans.
+fn site_key(tcx: TyCtxt<'_>, span: Span) -> Option<String> {
+    let loc = tcx.sess.source_map().lookup_char_pos(span.lo());
+    let rustc_span::FileName::Real(real) = &loc.file.name else {
+        return None;
+    };
+    let path = real.local_path()?;
+    let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    Some(format!("{}:{}:{}", path.display(), loc.line, loc.col.0 + 1))
+}
+
+/// Calls that panic on purpose: `panic!`, `assert!`, `unreachable!`, `todo!`, `unwrap`, `expect`.
+fn panicking(krate: &str, path: &str, name: &str) -> bool {
+    if !OPAQUE_STD.contains(&krate) {
+        return false;
+    }
+    path.contains("::panicking::")
+        || matches!(
+            name,
+            "begin_panic" | "panic_fmt" | "panic_display" | "assert_failed"
+        )
+        || ((path.contains("Option") || path.contains("Result"))
+            && matches!(name, "unwrap" | "expect" | "unwrap_err" | "expect_err"))
 }
 
 /// Whether calling `def_id` returns a future: an `async fn`, or a function or method returning
@@ -607,6 +836,15 @@ impl<'a, 'tcx> Checker<'a, 'tcx> {
                 continue;
             }
             let (levels, prefixes) = self.markers(def_id);
+            if !levels.is_empty() || !prefixes.is_empty() {
+                let entry = self
+                    .findings
+                    .functions
+                    .entry(display_path(tcx, def_id))
+                    .or_default();
+                entry.0 += levels.len();
+                entry.1 += prefixes.len();
+            }
             for (_, chains) in levels {
                 self.findings.checked_levels += 1;
                 self.check_level(def_id, &chains);
@@ -861,12 +1099,16 @@ impl<'a, 'tcx> Checker<'a, 'tcx> {
         ));
         diag.emit();
         let location = tcx.sess.source_map().span_to_diagnostic_string(span);
+        let fix = (severity == Severity::Warning)
+            .then(|| seq_fix(tcx, span, kind == "loop-speculative-write"))
+            .flatten();
         self.findings.findings.push(Finding {
             severity,
             kind: kind.to_string(),
             message,
             location,
             function: display_path(tcx, function),
+            fix,
         });
     }
 

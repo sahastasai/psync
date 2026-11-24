@@ -45,7 +45,7 @@ pub(crate) fn depends(a: &Node, b: &Node) -> Option<String> {
     }
     // A write is not performed before an earlier statement that may leave: sequential code
     // would not have performed it at all.
-    if a.exits
+    if (a.exits || a.panics)
         && !b.speculate
         && let Some(w) = b.effects.iter().find(|e| e.writes())
     {
