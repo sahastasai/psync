@@ -51,6 +51,54 @@ Line by line:
 Hoisted values appear under generated names: `__psync_hN` for an operand, `__psync_sN` for a
 scrutinee, `__psync_gN` for a guarded branch, `__psync_tN` for a block's tail.
 
+## Worked example: a false edge
+
+A report is most useful when it shows an edge you did not expect. Take:
+
+```rust,ignore
+#[psync::graph(explain)]
+async fn report(db: &Db, cache: &Cache) -> Result<Report, Error> {
+    let view = db.create_view("sales").await?;
+    let totals = db.get_totals("sales").await?;
+    let hits = cache.lookup("sales").await;
+    Ok(Report::new(view, totals, hits))
+}
+```
+
+```text
+  region 0:
+    n0: view = create_view()? [await] {write `db` "sales" (create_view)}
+    n1: totals = get_totals()? [await] {read `db` "sales" (get_totals)}
+    n2: hits = lookup() [await] {read `cache` "sales" (lookup)}
+    n0 -> n1 (write `db` "sales" (create_view) vs read `db` "sales" (get_totals))
+    level 0: n0->n1 || n2
+```
+
+Read it from the bottom. One level, two chains: `create_view` then `get_totals` in order, and
+`lookup` beside them. Why must `get_totals` wait? The edge says: psync took `create_view` for a
+write (`create` is a write verb) on the receiver `db`, with the target `"sales"`, and `get_totals`
+reads the same thing.
+
+Is that true? It depends on your `Db`. If `create_view` only builds a query plan in memory, the
+edge is false, and you can say so for this one name:
+
+```rust,ignore
+#[psync::graph(explain, effects(read(create_view)))]
+```
+
+```text
+  region 0:
+    n0: view = create_view()? [await] {read `db` "sales" (create_view)}
+    n1: totals = get_totals()? [await] {read `db` "sales" (get_totals)}
+    n2: hits = lookup() [await] {read `cache` "sales" (lookup)}
+    level 0: n0 || n1 || n2
+```
+
+All three requests now start together. If `create_view` really does create a view on the server,
+the first report was right, and changing it would let `get_totals` read before the view exists.
+Before overriding a name, check what the callee does: [`cargo psync check`](../safety/check.md)
+reads its body and tells you.
+
 ## `psync-expand`
 
 `psync-expand` runs the same transformation on any function in any file, without changing the

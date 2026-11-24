@@ -163,3 +163,32 @@ Some exits cannot be recorded, so the statement holding them becomes a barrier:
 
 Logging macros (`trace!`, `debug!`, `info!`, `warn!`, `error!`, `log!`) are an exception. They use
 `?x` and `%x` as field sigils, so a `?` in them is not an exit.
+
+## Exercises
+
+Predict, then check by running the tests named (`cargo test --no-default-features --test graph`).
+
+1. `first_error_wins([true, true, true])`: which error comes back? How many requests were in
+   flight at the peak?
+2. In the later-level example above (`exit_after_later_level`), `fail = [false, true]`: does
+   `logged` run? What is returned?
+3. Same function, `fail = [true, false]`: `logged` fails, `four` succeeds. Sequential code never
+   starts `four`. Does psync? Is that a problem here?
+4. Change `four` into a write, for example `store.put("c", 4).await?`. What does psync do with
+   it now, and why? (Check with `psync-expand`.)
+
+<details>
+<summary>Answers</summary>
+
+1. `Err("x")`, the first in program order. All three ran at once, so the peak is 3: exits are
+   recorded, not taken, until the join.
+2. Yes. `four` failed in level 0, but `logged` comes first in program order, so psync runs it
+   (level 1) before replaying `four`'s error. It returns `Err("four")`, and the log is `[3]`.
+3. Yes: `four` ran in level 0, before `logged` was even started. That is speculation, and it is
+   harmless here because `four` only reads. Its result is dropped and `logged`'s error is
+   returned.
+4. It stays after `logged`: a write may not start before an earlier statement that may exit
+   (``may exit before `put` runs``), because sequential code would not have written anything
+   when `logged` fails. `#[psync::speculate]` on the statement would let it overlap again.
+
+</details>
