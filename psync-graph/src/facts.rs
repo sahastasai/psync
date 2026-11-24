@@ -94,15 +94,24 @@ pub(crate) fn parse(text: &str) -> HashMap<String, Fact> {
                 })
             })
             .collect();
-        out.insert(
-            site.to_string(),
-            Fact {
-                name: name.to_string(),
-                panics: panics == "1",
-                opaque: opaque == "1",
-                effects,
-            },
-        );
+        let fact = Fact {
+            name: name.to_string(),
+            panics: panics == "1",
+            opaque: opaque == "1",
+            effects,
+        };
+        // A site listed twice (two builds of one crate): keep everything either says.
+        match out.get_mut(site) {
+            Some(old) => {
+                let old: &mut Fact = old;
+                old.panics |= fact.panics;
+                old.opaque |= fact.opaque;
+                old.effects.extend(fact.effects);
+            }
+            None => {
+                out.insert(site.to_string(), fact);
+            }
+        }
     }
     out
 }

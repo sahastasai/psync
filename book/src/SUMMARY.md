@@ -30,6 +30,7 @@
 
 - [Side effects: files, network and processes](./safety/effects.md)
 - [Checking rewrites: `cargo psync check`](./safety/check.md)
+- [Scheduling with compiler facts: `cargo psync build`](./safety/facts.md)
 - [Roadmap: beyond tokens](./safety/roadmap.md)
 
 # Case studies

@@ -258,7 +258,9 @@ impl<'tcx> Analyzer<'tcx> {
             && let Some(trait_id) = tcx.trait_of_assoc(callee)
             && !OPAQUE_STD.contains(&tcx.crate_name(trait_id.krate).as_str())
         {
-            summary.opaque.push(format!("dyn {}", display_path(tcx, callee)));
+            summary
+                .opaque
+                .push(format!("dyn {}", display_path(tcx, callee)));
         }
         let path = display_path(tcx, resolved);
         let krate = tcx.crate_name(resolved.krate);
@@ -290,6 +292,18 @@ impl<'tcx> Analyzer<'tcx> {
             return;
         }
         if OPAQUE_STD.contains(&krate) || IO_CRATES.contains(&krate) {
+            // Generic I/O helpers (`AsyncWriteExt::shutdown`, `Write::write_all`) act on whatever
+            // writer they are given: the receiver's type is the resource.
+            let self_ty = tcx
+                .trait_of_assoc(callee)
+                .and_then(|_| gargs.types().next())
+                .map(|t| format!("{t}"));
+            if !library
+                && let Some((domain, access)) = io_trait_effect(&path, &name, self_ty.as_deref())
+            {
+                add(domain, access, None);
+                return;
+            }
             if let Some((domain, access, keeps_target)) = io_effect(&path, &name)
                 // Inside libraries, socket traffic is transport, not meaning: every request
                 // writes to a socket.
@@ -707,6 +721,50 @@ fn is_plumbing(name: &str) -> bool {
         || name.starts_with("from_")
 }
 
+/// Methods of the I/O traits (`AsyncWrite`/`AsyncWriteExt`, `io::Write`, `AsyncRead`, `io::Read`)
+/// on a writer or reader that is not an in-memory buffer: a write or read of that object, named
+/// by its type. Files are classified by [`io_effect`].
+fn io_trait_effect(path: &str, name: &str, self_ty: Option<&str>) -> Option<(Domain, Access)> {
+    let ty = self_ty?;
+    let in_memory = [
+        "Vec<",
+        "Cursor<",
+        "String",
+        "Sink",
+        "Empty",
+        "&mut [u8]",
+        "[u8]",
+        "Repeat",
+    ]
+    .iter()
+    .any(|m| ty.contains(m));
+    if in_memory || ty.contains("fs::File") {
+        return None;
+    }
+    let writes = (path.contains("AsyncWrite") || path.contains("io::Write"))
+        && [
+            "write",
+            "flush",
+            "shutdown",
+            "poll_write",
+            "poll_flush",
+            "poll_shutdown",
+        ]
+        .iter()
+        .any(|p| name.starts_with(p));
+    let reads =
+        (path.contains("AsyncRead") || path.contains("io::Read") || path.contains("BufRead"))
+            && (name.starts_with("read")
+                || name.starts_with("poll_read")
+                || name.starts_with("fill_buf"));
+    let domain = || Domain::Service(format!("io {ty}"));
+    match (writes, reads) {
+        (true, _) => Some((domain(), Access::Write)),
+        (false, true) => Some((domain(), Access::Read)),
+        _ => None,
+    }
+}
+
 /// File, socket, process, environment and output operations of std and the async runtimes,
 /// recognized by path: `(domain, access, whether the first argument is the target)`.
 fn io_effect(path: &str, name: &str) -> Option<(Domain, Access, bool)> {
@@ -1005,6 +1063,34 @@ impl<'a, 'tcx> Checker<'a, 'tcx> {
             }
         }
         self.check_interior(function, chains);
+        // Cancellation: dropping the function's future mid-join interrupts every chain at once.
+        let writers: Vec<usize> = summaries
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| {
+                s.effects
+                    .iter()
+                    .any(|l| l.effect.writes() && l.effect.domain != Domain::Output)
+            })
+            .map(|(k, _)| k)
+            .collect();
+        if writers.len() >= 2 {
+            let tcx = self.analyzer.tcx;
+            let span = |k: usize| user_span(tcx, chains[k].body).unwrap_or(chains[k].span);
+            self.report(
+                Severity::Note,
+                "cancellation",
+                function,
+                span(writers[1]),
+                format!(
+                    "psync runs {} chains that write concurrently: if this function's future is \
+                     dropped (a timeout, `select!`), each may stop halfway, where sequential code \
+                     had at most one write in progress",
+                    writers.len()
+                ),
+                Some((span(writers[0]), "another chain that writes".to_string())),
+            );
+        }
     }
 
     fn check_prefix(&mut self, function: DefId, prefix: &Prefix) {

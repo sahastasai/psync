@@ -167,11 +167,13 @@ MIR) would know:
 psync would keep the macro as the user interface and the code generator. The driver would refine
 the graph and fail the build when the macro's token-level guess was too optimistic.
 
-**Status: the checker is built.** [`cargo psync check`](./check.md) is this driver, in checking
-mode. It resolves callees, summarizes effects through function bodies and across crates, and
-reports conflicts, speculative writes and shared interior-mutable state in the generated code. Still
-open: feeding the summaries back into the macro, so that it schedules with them instead of only
-being checked, and `&mut`-precise argument effects.
+**Status: built.** [`cargo psync check`](./check.md) is this driver. It resolves callees,
+summarizes effects through function bodies and across crates, and reports conflicts, speculative
+writes and shared interior-mutable state in the generated code.
+[`cargo psync build`](./facts.md) feeds its facts back into the macro, which then schedules with
+them. It also resolves `dyn` calls by link-time class-hierarchy analysis and treats explicit panics
+as exits. Still open: `&mut`-precise argument effects (which parameter a callee writes through),
+and interior mutability as an effect rather than a note.
 
 ## 9. A machine-checked argument
 
@@ -188,6 +190,12 @@ exactly the assumptions this chapter lists. Formalizing it would turn "Assumed b
 [What is checked, what is assumed](../internals/soundness.md) into the precise hypotheses of a
 theorem.
 
+**Status: the scheduling part is proven.** `verify/Schedule.lean` proves commutation, the
+correctness of every level's join under any interleaving, the correctness of the whole schedule,
+equivalence with program order for reorderings past independent operations, and the harmlessness
+of read-only speculation. Still open: modeling early-exit replay (`Except`-valued operations, with
+exits replayed in program order).
+
 ## Priorities
 
 | Step | Closes | Effort |
@@ -198,5 +206,5 @@ theorem.
 | 4. HTTP semantics | coarse service conflicts | small |
 | 7. processes and cwd | over-conservative processes; cwd hazard | small |
 | 5. staged writes, 6. cancellation | wasted work, writes waiting on exits | medium to large |
-| 8. compiler driver (checker built: `cargo psync check`) | the token-level foundation | large; next: feed summaries back into scheduling |
-| 9. Lean model | the token-level foundation | large |
+| 8. compiler driver (built: `cargo psync check`, `build`, `fix`) | the token-level foundation | next: argument-precise effects |
+| 9. Lean model (scheduling built: `verify/Schedule.lean`) | the token-level foundation | next: exit replay |

@@ -53,6 +53,24 @@ When you add `#[psync::graph]`, you assert:
 5. **Hints are true.** `#[psync::independent]`, `#[psync::fresh]` and `#[psync::speculate]` turn
    checks off.
 
+## Machine-checked
+
+`verify/Schedule.lean` proves the scheduling argument in Lean 4. It models a program as operations
+with footprints (what each may read and write) and shows:
+
+- independent operations commute;
+- any interleaving of a level's pairwise-independent chains equals running the chains one after
+  another, and so does a whole schedule of levels;
+- an order that moves operations earlier only past independent ones equals the program as written;
+- operations that write nothing, which are the only ones psync may run past an exit, change
+  nothing.
+
+So the concurrent execution ends in the state of the sequential program, *provided* two things
+hold. The footprints must be right, and psync must draw an edge between every two operations that
+are not independent. Those are the analyses' obligations. Tokens cannot discharge them alone,
+which is why [`cargo psync check`](../safety/check.md) verifies them against the compiled callees.
+Early-exit replay and the generated Rust are not modeled. rustc checks the latter.
+
 ## How this compares with dynamic languages
 
 Tools that reorder awaits in JavaScript rely on a whole-program side-effect analysis. They state

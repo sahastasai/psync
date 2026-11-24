@@ -14,16 +14,17 @@ works when `psync::graph` is imported.
 | `crate = path` | `::psync` | path to the psync crate in generated code, for re-exports |
 | `strict` | off | unclassified awaited calls are writes to an unknown resource: they conflict with every effect and never run speculatively |
 | `speculate` | off | writes may run before earlier exits everywhere in the function |
+| `yield_every = N` | off | insert `psync::yield_now().await` at the start of every loop body in async code, every `N` iterations ([Yield injection](../guide/executor.md#yield-injection)) |
 | `effects(read(a, ..), write(b, ..), ordered(c, ..))` | none | extra verbs (whole names or first `_`-separated words) for the [effect analysis](../safety/effects.md) |
 
 Options are comma-separated: `#[psync::graph(bound = 4, explain)]`. Anything else is a compile
-error: ``expected `bound = N`, `explain`, `off`, `strict`, `speculate`, `effects(..)` or `crate = path` ``.
+error: ``expected `bound = N`, `explain`, `off`, `strict`, `speculate`, `effects(..)`, `yield_every = N` or `crate = path` ``.
 
 ## Hints
 
 | Hint | On | Effect inside `#[psync::graph]` |
 |---|---|---|
-| `#[psync::seq]` | any statement | the statement is a barrier: it and everything around it keep their order |
+| `#[psync::seq]` | any statement | the statement is a barrier: it and everything around it keep their order; on a `for` loop, the loop is not prefetched |
 | `#[psync::fresh]` | `let x = init;` with one binding | the `let` stays in place, and each concurrent chain that uses `x` begins with its own `let x = init;`; uses of `x` are not conflicts |
 | `#[psync::independent]` | `for` or `while` loop | skip loop-carried-state and cross-iteration effect checks for prefetch and fission; required for `while` loops |
 | `#[psync::independent]` | any other statement | its effects commute with those of the statements around it; data dependencies still apply |

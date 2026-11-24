@@ -14,7 +14,9 @@ files, or use a separate `CARGO_TARGET_DIR`, whenever you change it. See
 ## `cargo psync`
 
 ```sh
-cargo psync check [--deny] [--notes] [CARGO CHECK ARGS...]
+cargo psync check [--deny] [--notes] [--facts] [CARGO CHECK ARGS...]
+cargo psync build [--deny] [--notes] [CARGO BUILD ARGS...]
+cargo psync fix [CARGO CHECK ARGS...]
 cargo psync summaries [CRATE] [--all]
 ```
 
@@ -28,6 +30,10 @@ with a pinned nightly (`cd psync-check && cargo install --path .`). See
 | `PSYNC_FINDINGS_DIR` | `target/psync/findings` | where the driver writes per-crate findings (JSON) |
 | `PSYNC_CHECK_DENY` | `--deny` | `1`: findings are errors |
 | `PSYNC_CHECK_NOTES` | `--notes` | `1`: also report output order and interior mutability |
+| `PSYNC_LINKED` | `target/psync/linked.json` | the driver reads the link step's resolution of `dyn` calls |
+| `PSYNC_LINKED_STAMP` | hash of `linked.json` | tracked by the driver, so workspace crates are re-checked when it changes |
+| `PSYNC_FACTS` | `target/psync/facts.tsv` (`build`, `check --facts`) | the macro schedules with these facts ([Scheduling with compiler facts](../safety/facts.md)) |
+| `PSYNC_FACTS_STAMP` | hash of `facts.tsv` | read through `option_env!` in generated code, so cargo rebuilds when facts change |
 
 ## `psync-expand`
 

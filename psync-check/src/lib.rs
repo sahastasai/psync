@@ -273,10 +273,28 @@ pub fn resolve_call(
 /// `svc:<owner>`; accesses `r`, `w`, `o`. A line-based format keeps the macro free of a JSON
 /// dependency.
 pub fn facts_text(crates: &[CrateSummaries], linked: &BTreeMap<String, Resolved>) -> String {
-    let mut out = String::new();
+    // One site can be compiled more than once (a crate built with two feature sets): merge the
+    // facts conservatively.
+    let mut merged: BTreeMap<&str, (&CallFact, Vec<Effect>, bool, bool)> = BTreeMap::new();
     for c in crates {
         for (site, fact) in &c.calls {
             let (effects, panics, opaque) = resolve_call(fact, linked);
+            let entry = merged
+                .entry(site)
+                .or_insert_with(|| (fact, Vec::new(), false, false));
+            for e in effects {
+                if !entry.1.iter().any(|x| same_effect(x, &e)) {
+                    entry.1.push(e);
+                }
+            }
+            entry.2 |= panics;
+            entry.3 |= opaque;
+        }
+    }
+    let mut out = String::new();
+    {
+        for (site, (fact, effects, panics, opaque)) in merged {
+            let (effects, panics, opaque) = (effects, panics, opaque);
             let effects: Vec<String> = effects
                 .iter()
                 .map(|e| {
@@ -324,7 +342,8 @@ pub enum Severity {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Finding {
     pub severity: Severity,
-    /// `conflict`, `speculative-write`, `loop-speculative-write`, `interior-mutability`, `output-order`.
+    /// `conflict`, `speculative-write`, `loop-speculative-write`, `interior-mutability`,
+    /// `output-order`, `cancellation`.
     pub kind: String,
     pub message: String,
     /// `file:line:column` of the primary location.
