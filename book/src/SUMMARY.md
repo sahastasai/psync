@@ -51,6 +51,7 @@
 
 - [Synchronous code](./phase2/using.md)
 - [Design](./phase2/design.md)
+- [The audit: where it helps](./phase2/audit.md)
 
 # Case studies
 

@@ -24,6 +24,10 @@ required-features = ["cli"]
 name = "psync-cert"
 required-features = ["cli"]
 
+[[bin]]
+name = "psync-scan"
+required-features = ["cli"]
+
 [dev-dependencies]
 # The book's Part 0 examples print the code they generate.
 prettyplease = "0.2"

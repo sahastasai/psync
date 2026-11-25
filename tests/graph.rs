@@ -956,3 +956,25 @@ fn injected_yields_let_urgent_work_run_inside_long_loops() {
         ["step", "step", "step", "urgent", "step", "step", "step"]
     );
 }
+
+/// Records `v` after a simulated request; returns nothing.
+async fn record(log: &RefCell<Vec<u32>>, v: u32) {
+    let v = io(T, v).await;
+    log.borrow_mut().push(v);
+}
+
+// A loop body that ends in an await without `;` (as DataFusion's join fuzz tests are written).
+#[graph]
+async fn tail_await_loop(log: &'static RefCell<Vec<u32>>) {
+    for x in [1u32, 2, 3] {
+        let y = io(T, x * 10).await;
+        record(log, y).await
+    }
+}
+
+#[test]
+fn loop_bodies_may_end_in_an_await() {
+    let log = Box::leak(Box::new(RefCell::new(Vec::new())));
+    run(tail_await_loop(log));
+    assert_eq!(*log.borrow(), vec![10, 20, 30]);
+}

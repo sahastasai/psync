@@ -598,6 +598,36 @@ mod tests {
         assert!(r.regions[0].changed);
     }
 
+    /// A loop body may end in an await without `;` (`api.put(x).await`, as in DataFusion's join
+    /// fuzz tests and greptimedb's `wait_datanodes_alive`): the generated code was invalid and the
+    /// macro panicked. Found by `psync-scan` over the audit corpus.
+    #[test]
+    fn loop_bodies_ending_in_an_await_without_semicolon() {
+        for f in [
+            syn::parse_quote! {
+                async fn each(api: &Api, xs: Vec<u32>) {
+                    for x in xs {
+                        api.put(x).await
+                    }
+                }
+            },
+            syn::parse_quote! {
+                async fn poll(api: &Api) {
+                    for _ in 0..100 {
+                        let n = api.count().await.unwrap();
+                        if n == 3 {
+                            return;
+                        }
+                        tokio::time::sleep(D).await
+                    }
+                }
+            },
+        ] {
+            let mut f: ItemFn = f;
+            transform_fn(&mut f, &Options::default());
+        }
+    }
+
     /// `let x: u32 = ..` inside a statement binds `x`; it does not write `u32` (a false edge
     /// between every two statements with such an annotation).
     #[test]

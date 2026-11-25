@@ -309,6 +309,22 @@ pub(crate) fn chain_code_with(
         }
         let mut rewriter = ExitRewriter::new(&label, format!("{k}_{m}"), krate);
         rewriter.visit_stmt_mut(&mut stmt);
+        // A loop body may end in `api.put(x).await` with no `;` (its value is `()`). In a chain the
+        // member is followed by more code, so it needs one.
+        if let Stmt::Expr(e, semi @ None) = &mut stmt
+            && !matches!(
+                e,
+                syn::Expr::If(_)
+                    | syn::Expr::Match(_)
+                    | syn::Expr::Block(_)
+                    | syn::Expr::ForLoop(_)
+                    | syn::Expr::While(_)
+                    | syn::Expr::Loop(_)
+                    | syn::Expr::Unsafe(_)
+            )
+        {
+            *semi = Some(Default::default());
+        }
         if let Some(p) = progress {
             let m = proc_macro2::Literal::usize_unsuffixed(m);
             stmts.push(quote!(#p.store(#m, ::core::sync::atomic::Ordering::Relaxed);));

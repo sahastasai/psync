@@ -113,15 +113,31 @@ fn reads_clock(tokens: TokenStream) -> bool {
 }
 
 /// Synchronous calls that wait on the network or a process (Phase II): in a synchronous function,
-/// a statement making one plays the part of an await. Matched by path segment; `reqwest` only
-/// through `reqwest::blocking`.
-const BLOCKING_PATHS: &[&str] = &["ureq", "TcpStream", "UdpSocket", "Command"];
+/// a statement making one plays the part of an await. A statement blocks when it names one of
+/// these paths *and* calls one of the methods that wait: `Command::new("git")` builds a command,
+/// `.output()` runs it, and `Command::Reply` or clap's `Command::parse_from` are no process at all.
+/// `reqwest` counts only through `reqwest::blocking`.
+const NET_PATHS: &[&str] = &["ureq", "TcpStream", "UdpSocket"];
+const NET_WAITS: &[&str] = &[
+    "connect",
+    "call",
+    "send",
+    "send_to",
+    "recv",
+    "recv_from",
+    "read_to_end",
+    "read_to_string",
+    "read_exact",
+];
+const PROCESS_WAITS: &[&str] = &["output", "status", "wait", "wait_with_output"];
 
 /// Methods whose result, bound by a `let`, is a guard held afterwards (synchronous locks and
 /// `RefCell` borrows; `read` and `write` only without arguments, as on `RwLock`).
 const GUARD_METHODS: &[&str] = &["lock", "try_lock", "borrow", "borrow_mut", "read", "write"];
 
-/// Scans tokens outside closures and async blocks, which decide for themselves when they run.
+/// Scans tokens outside closures and async blocks, which decide for themselves when they run,
+/// and outside macro arguments, whose effects psync cannot see (`assert!(cmd.status()?..)` must
+/// not become a blocking statement with no effects).
 fn any_token(tokens: TokenStream, f: &dyn Fn(&[TokenTree], usize) -> bool) -> bool {
     let tokens: Vec<TokenTree> = tokens.into_iter().collect();
     tokens.iter().enumerate().any(|(i, t)| match t {
@@ -130,21 +146,43 @@ fn any_token(tokens: TokenStream, f: &dyn Fn(&[TokenTree], usize) -> bool) -> bo
                 matches!(p, TokenTree::Punct(c) if c.as_char() == '|')
                     || matches!(p, TokenTree::Ident(k) if k == "async" || k == "move")
             });
-            !deferred && any_token(g.stream(), f)
+            let macro_args =
+                i > 0 && matches!(&tokens[i - 1], TokenTree::Punct(c) if c.as_char() == '!');
+            !deferred && !macro_args && any_token(g.stream(), f)
         }
         _ => f(&tokens, i),
     })
 }
 
-/// A synchronous call to the network or a process.
+/// A synchronous call to the network or a process: a path that reaches one, and a method that
+/// waits for it.
 fn blocks_on_world(tokens: TokenStream) -> bool {
-    any_token(tokens, &|ts, i| match &ts[i] {
-        TokenTree::Ident(id) if BLOCKING_PATHS.contains(&id.to_string().as_str()) => true,
-        TokenTree::Ident(id) if id == "reqwest" => {
-            matches!(ts.get(i + 3), Some(TokenTree::Ident(b)) if b == "blocking")
+    let named = |set: &'static [&'static str]| {
+        move |ts: &[TokenTree], i: usize| match &ts[i] {
+            TokenTree::Ident(id) if set.contains(&id.to_string().as_str()) => true,
+            TokenTree::Ident(id) if id == "reqwest" && set == NET_PATHS => {
+                matches!(ts.get(i + 3), Some(TokenTree::Ident(b)) if b == "blocking")
+            }
+            _ => false,
         }
-        _ => false,
-    })
+    };
+    // `.output()` and `.call()`, and for the network also `TcpStream::connect(..)`.
+    let calls = |set: &'static [&'static str]| {
+        move |ts: &[TokenTree], i: usize| {
+            matches!(&ts[i], TokenTree::Ident(m) if set.contains(&m.to_string().as_str()))
+                && i > 0
+                && matches!(&ts[i - 1], TokenTree::Punct(p)
+                    if p.as_char() == '.' || (p.as_char() == ':' && set == NET_WAITS))
+                && matches!(ts.get(i + 1), Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Parenthesis)
+        }
+    };
+    let net = any_token(tokens.clone(), &named(NET_PATHS))
+        && any_token(tokens.clone(), &calls(NET_WAITS));
+    let process = any_token(
+        tokens.clone(),
+        &|ts, i| matches!(&ts[i], TokenTree::Ident(id) if id == "Command"),
+    ) && any_token(tokens, &calls(PROCESS_WAITS));
+    net || process
 }
 
 /// `.lock()`, `.borrow_mut()`, `.read()` and the like: the value may be a guard.

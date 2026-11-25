@@ -20,10 +20,16 @@ psync = { version = "0.1", default-features = false, features = ["std"] }
 ## Which statements block
 
 psync cannot see time, so it has to be told which statements are slow. It recognizes some by
-path:
+path, when the statement both names the resource and calls a method that waits for it:
 
-- the network: `ureq`, `reqwest::blocking`, `TcpStream`, `UdpSocket`;
-- processes: `Command`.
+- the network: `ureq`, `reqwest::blocking`, `TcpStream` or `UdpSocket`, with `connect`, `call`,
+  `send`, `recv` or `read_to_end` (and similar);
+- processes: `Command`, with `.output()`, `.status()` or `.wait()`.
+
+Both halves are needed. `Command::new("git")` only builds a command, and `Command::Reply` or clap's
+`Command::parse_from` are not processes at all. Calls inside a macro's arguments
+(`assert!(cmd.status()?.success())`) never count: psync cannot see a macro's effects, so it must
+not move the statement as if it had none.
 
 Everything else needs a hint. Most slow calls in real code go through a helper (`download(url)`,
 `repo.infos_index()`), and a helper's name says nothing. Mark such a statement with
