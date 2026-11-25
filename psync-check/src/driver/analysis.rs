@@ -115,117 +115,343 @@ const SAME_VALUE: &[&str] = &[
     "from",
 ];
 
-/// What each local of `body` holds, as a [`Src`]. A parameter is followed only if it is never
-/// assigned or borrowed mutably, and another local only if it is assigned once, from a copy, move
-/// or shared borrow of a followed local (through `*`), a string constant, or a [`SAME_VALUE`]
-/// call of the standard library on one; everything else is `Unknown`.
-fn sources<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    body: &mir::Body<'tcx>,
-    constant: impl Fn(&Operand<'tcx>) -> Option<String>,
-) -> Vec<Src> {
-    #[derive(Clone)]
-    enum Def {
-        Alias(mir::Local),
-        Const(String),
-        Other,
-    }
-    let n = body.local_decls.len();
-    let mut defs: Vec<Vec<Def>> = vec![Vec::new(); n];
-    let mut tainted = vec![false; n];
-    let plain = |p: &mir::Place<'tcx>| {
-        p.projection
-            .iter()
-            .all(|e| matches!(e, mir::ProjectionElem::Deref))
-            .then_some(p.local)
-    };
-    let of_operand = |op: &Operand<'tcx>| match op {
-        Operand::Copy(p) | Operand::Move(p) => plain(p).map_or(Def::Other, Def::Alias),
-        c => constant(c).map_or(Def::Other, Def::Const),
-    };
-    let mut assign = |place: &mir::Place<'tcx>, def: Def, defs: &mut Vec<Vec<Def>>| {
-        if place.projection.is_empty() {
-            defs[place.local.as_usize()].push(def);
-        } else {
-            tainted[place.local.as_usize()] = true;
+/// Where a value lives in a body: a local, or, in a closure or coroutine, one of its captured
+/// values (upvar `k`) or a slot of a suspended coroutine's state (variant, field), where locals
+/// live across an `await`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum Root {
+    Local(mir::Local),
+    Upvar(usize),
+    Slot(usize, usize),
+}
+
+/// What the values of one body hold, as [`Src`]s.
+///
+/// In a function, `Param(k)` is its parameter `k`. In a closure or coroutine, it is the captured
+/// value `k`, which is what the body that creates it passes ([`Analyzer::local`] records the
+/// captures as the edge's sources); its own parameters (the closure or `Pin<&mut Self>`, the
+/// context, a closure's arguments) are unknown.
+///
+/// A parameter or capture is followed only if it is never assigned or borrowed mutably. A local
+/// or slot is followed only if it is assigned once, from a copy, move or shared borrow of a
+/// followed value (through `*`), a string constant, or a [`SAME_VALUE`] call of the standard
+/// library on one. Everything else is `Unknown`.
+struct Held {
+    srcs: HashMap<Root, Src>,
+    /// The local function whose call produced the value (a future returned by an `async fn`),
+    /// followed through moves, borrows, `into_future` and `Pin::new_unchecked`.
+    origin: HashMap<Root, DefId>,
+    /// Locals that hold the closure or coroutine itself (`_7 = copy (_1.0)` of `Pin<&mut _>`).
+    selves: HashSet<mir::Local>,
+    nested: bool,
+    coroutine: bool,
+}
+
+impl Held {
+    fn new<'tcx>(
+        tcx: TyCtxt<'tcx>,
+        def_id: DefId,
+        body: &mir::Body<'tcx>,
+        constant: impl Fn(&Operand<'tcx>) -> Option<String>,
+    ) -> Self {
+        #[derive(Clone)]
+        enum Def {
+            Alias(Root),
+            Const(String),
+            Other,
         }
-    };
-    let mut borrowed_mut = Vec::new();
-    for data in body.basic_blocks.iter() {
-        for stmt in &data.statements {
-            match &stmt.kind {
-                StatementKind::Assign(a) => {
-                    let (place, rv) = &**a;
-                    let def = match rv {
-                        Rvalue::Use(op, _) => of_operand(op),
-                        Rvalue::CopyForDeref(p) => plain(p).map_or(Def::Other, Def::Alias),
-                        Rvalue::Ref(_, mir::BorrowKind::Shared | mir::BorrowKind::Fake(_), p) => {
-                            plain(p).map_or(Def::Other, Def::Alias)
-                        }
-                        _ => Def::Other,
-                    };
-                    match rv {
-                        Rvalue::Ref(_, mir::BorrowKind::Mut { .. }, p)
-                        | Rvalue::RawPtr(mir::RawPtrKind::Mut, p) => borrowed_mut.push(p.local),
-                        _ => {}
+        let mut held = Held {
+            srcs: HashMap::new(),
+            origin: HashMap::new(),
+            selves: HashSet::new(),
+            nested: tcx.is_closure_like(def_id),
+            coroutine: tcx.is_coroutine(def_id),
+        };
+        // The locals that hold the coroutine: copies of `_1.0` (the pointer in the `Pin`).
+        if held.coroutine {
+            for data in body.basic_blocks.iter() {
+                for stmt in &data.statements {
+                    if let StatementKind::Assign(a) = &stmt.kind
+                        && let (place, Rvalue::Use(Operand::Copy(p) | Operand::Move(p), _)) = &**a
+                        && place.projection.is_empty()
+                        && p.local.as_usize() == 1
+                        && matches!(p.projection[..], [mir::ProjectionElem::Field(f, _)] if f.as_usize() == 0)
+                    {
+                        held.selves.insert(place.local);
                     }
-                    assign(place, def, &mut defs);
                 }
-                StatementKind::SetDiscriminant { place, .. } => borrowed_mut.push(place.local),
+            }
+        }
+        let mut defs: HashMap<Root, Vec<Def>> = HashMap::new();
+        let mut tainted: HashSet<Root> = HashSet::new();
+        #[derive(Clone, Copy)]
+        enum From {
+            Root(Root),
+            Call(DefId),
+            Other,
+        }
+        let mut froms: HashMap<Root, Vec<From>> = HashMap::new();
+        let of_place = |p: &mir::Place<'tcx>| held.root(p).map_or(Def::Other, Def::Alias);
+        let of_operand = |op: &Operand<'tcx>| match op {
+            Operand::Copy(p) | Operand::Move(p) => of_place(p),
+            c => constant(c).map_or(Def::Other, Def::Const),
+        };
+        // An assignment to a whole local or slot defines it; to anything else (a field, through
+        // a pointer, a capture) it changes what the root holds.
+        let assign = |place: &mir::Place<'tcx>,
+                      def: Def,
+                      defs: &mut HashMap<Root, Vec<Def>>,
+                      tainted: &mut HashSet<Root>| {
+            match held.target_root(place) {
+                Some(r @ (Root::Local(_) | Root::Slot(..))) => defs.entry(r).or_default().push(def),
+                Some(r) => {
+                    tainted.insert(r);
+                }
+                None => {
+                    tainted.insert(held.base(place));
+                }
+            }
+        };
+        for data in body.basic_blocks.iter() {
+            for stmt in &data.statements {
+                match &stmt.kind {
+                    StatementKind::Assign(a) => {
+                        let (place, rv) = &**a;
+                        let def = match rv {
+                            Rvalue::Use(op, _) => of_operand(op),
+                            Rvalue::CopyForDeref(p) => of_place(p),
+                            Rvalue::Ref(
+                                _,
+                                mir::BorrowKind::Shared | mir::BorrowKind::Fake(_),
+                                p,
+                            ) => of_place(p),
+                            _ => Def::Other,
+                        };
+                        if let Rvalue::Ref(_, mir::BorrowKind::Mut { .. }, p)
+                        | Rvalue::RawPtr(mir::RawPtrKind::Mut, p) = rv
+                        {
+                            tainted.insert(held.root(p).unwrap_or_else(|| held.base(p)));
+                        }
+                        assign(place, def, &mut defs, &mut tainted);
+                        if let Some(r) = held.target_root(place) {
+                            let from = match rv {
+                                Rvalue::Use(Operand::Copy(p) | Operand::Move(p), _)
+                                | Rvalue::CopyForDeref(p)
+                                | Rvalue::Ref(_, _, p) => {
+                                    held.root(p).map_or(From::Other, From::Root)
+                                }
+                                _ => From::Other,
+                            };
+                            froms.entry(r).or_default().push(from);
+                        }
+                    }
+                    StatementKind::SetDiscriminant { place, .. } => {
+                        // The coroutine's own state change is not a change of its values.
+                        if !held.selves.contains(&place.local) {
+                            tainted.insert(held.base(place));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if let TerminatorKind::Call {
+                func,
+                args,
+                destination,
+                ..
+            } = &data.terminator().kind
+            {
+                let same = func.const_fn_def().is_some_and(|(callee, _)| {
+                    matches!(
+                        tcx.crate_name(callee.krate).as_str(),
+                        "std" | "core" | "alloc"
+                    ) && tcx
+                        .opt_item_name(callee)
+                        .is_some_and(|n| SAME_VALUE.contains(&n.as_str()))
+                });
+                let def = match args.first() {
+                    Some(a) if same && args.len() == 1 => of_operand(&a.node),
+                    _ => Def::Other,
+                };
+                assign(destination, def, &mut defs, &mut tainted);
+                if let Some(r) = held.target_root(destination) {
+                    let from = match func.const_fn_def() {
+                        Some((callee, _)) if callee.is_local() => From::Call(callee),
+                        Some((callee, _))
+                            if matches!(tcx.crate_name(callee.krate).as_str(), "core" | "std")
+                                && tcx.opt_item_name(callee).is_some_and(|n| {
+                                    matches!(n.as_str(), "into_future" | "new_unchecked" | "new")
+                                })
+                                && args.len() == 1 =>
+                        {
+                            match &args[0].node {
+                                Operand::Copy(p) | Operand::Move(p) => {
+                                    held.root(p).map_or(From::Other, From::Root)
+                                }
+                                _ => From::Other,
+                            }
+                        }
+                        _ => From::Other,
+                    };
+                    froms.entry(r).or_default().push(from);
+                }
+            }
+        }
+        let arg_count = body.arg_count;
+        let nested = held.nested;
+        let resolve = |r: Root| -> Src {
+            let mut r = r;
+            for _ in 0..64 {
+                if tainted.contains(&r) {
+                    return Src::Unknown;
+                }
+                let d = defs.get(&r).map(Vec::as_slice).unwrap_or(&[]);
+                match r {
+                    Root::Upvar(k) => {
+                        return if d.is_empty() {
+                            Src::Param(k)
+                        } else {
+                            Src::Unknown
+                        };
+                    }
+                    Root::Local(l) if (1..=arg_count).contains(&l.as_usize()) => {
+                        return if nested || !d.is_empty() {
+                            Src::Unknown
+                        } else {
+                            Src::Param(l.as_usize() - 1)
+                        };
+                    }
+                    _ => {}
+                }
+                match d {
+                    [Def::Alias(x)] => r = *x,
+                    [Def::Const(c)] => return Src::Const(c.clone()),
+                    _ => return Src::Unknown,
+                }
+            }
+            Src::Unknown
+        };
+        let mut roots: Vec<Root> = (0..body.local_decls.len())
+            .map(|l| Root::Local(mir::Local::from_usize(l)))
+            .collect();
+        roots.extend(defs.keys().copied());
+        roots.extend(tainted.iter().copied());
+        let srcs = roots.into_iter().map(|r| (r, resolve(r))).collect();
+        // Every assignment of the root must lead to the same call.
+        let origin_of = |r: Root| -> Option<DefId> {
+            let mut r = r;
+            for _ in 0..64 {
+                match froms.get(&r).map(Vec::as_slice).unwrap_or(&[]) {
+                    [From::Root(x)] => r = *x,
+                    [From::Call(f)] => return Some(*f),
+                    _ => return None,
+                }
+            }
+            None
+        };
+        let origin = froms
+            .keys()
+            .filter_map(|r| origin_of(*r).map(|f| (*r, f)))
+            .collect();
+        Held {
+            srcs,
+            origin,
+            ..held
+        }
+    }
+
+    /// The root a place's value is read from: a local through `*`, a capture or a slot of the
+    /// coroutine through `*`. `None` for anything else (a field of a local, an index).
+    fn root(&self, p: &mir::Place<'_>) -> Option<Root> {
+        use mir::ProjectionElem::{Deref, Downcast, Field};
+        let proj = &p.projection[..];
+        let derefs = |rest: &[mir::PlaceElem<'_>]| rest.iter().all(|e| matches!(e, Deref));
+        let after_self = if self.coroutine && self.selves.contains(&p.local) {
+            Some(match proj.first() {
+                Some(Deref) => &proj[1..],
+                _ => return None,
+            })
+        } else if self.nested && !self.coroutine && p.local.as_usize() == 1 {
+            // A closure: `_1` is the closure, by value or behind a reference.
+            Some(match proj.first() {
+                Some(Deref) => &proj[1..],
+                _ => proj,
+            })
+        } else {
+            None
+        };
+        match after_self {
+            None => derefs(proj).then_some(Root::Local(p.local)),
+            Some(rest) => match rest {
+                [Field(k, _), tail @ ..] if derefs(tail) => Some(Root::Upvar(k.as_usize())),
+                [Downcast(_, v), Field(f, _), tail @ ..] if derefs(tail) => {
+                    Some(Root::Slot(v.as_usize(), f.as_usize()))
+                }
+                _ => None,
+            },
+        }
+    }
+
+    /// The root an assignment to `p` defines (a whole local or slot) or changes (a capture).
+    fn target_root(&self, p: &mir::Place<'_>) -> Option<Root> {
+        match self.root(p)? {
+            // `*_5 = ..` changes what `_5` points to; `*(slot) = ..` likewise.
+            Root::Local(_) if !p.projection.is_empty() => None,
+            Root::Slot(..)
+                if p.projection
+                    .iter()
+                    .filter(|e| matches!(e, mir::ProjectionElem::Deref))
+                    .count()
+                    > 1 =>
+            {
+                None
+            }
+            r => Some(r),
+        }
+    }
+
+    /// The root whose value a write to `p` may change: its capture or slot, or its local.
+    fn base(&self, p: &mir::Place<'_>) -> Root {
+        use mir::ProjectionElem::{Deref, Downcast, Field};
+        let proj = &p.projection[..];
+        if (self.coroutine && self.selves.contains(&p.local))
+            || (self.nested && !self.coroutine && p.local.as_usize() == 1)
+        {
+            let rest = match proj.first() {
+                Some(Deref) => &proj[1..],
+                _ => proj,
+            };
+            match rest {
+                [Field(k, _), ..] => return Root::Upvar(k.as_usize()),
+                [Downcast(_, v), Field(f, _), ..] => return Root::Slot(v.as_usize(), f.as_usize()),
                 _ => {}
             }
         }
-        if let TerminatorKind::Call {
-            func,
-            args,
-            destination,
-            ..
-        } = &data.terminator().kind
-        {
-            let same = func.const_fn_def().is_some_and(|(callee, _)| {
-                matches!(
-                    tcx.crate_name(callee.krate).as_str(),
-                    "std" | "core" | "alloc"
-                ) && tcx
-                    .opt_item_name(callee)
-                    .is_some_and(|n| SAME_VALUE.contains(&n.as_str()))
-            });
-            let def = match args.first() {
-                Some(a) if same && args.len() == 1 => of_operand(&a.node),
-                _ => Def::Other,
-            };
-            assign(destination, def, &mut defs);
+        Root::Local(p.local)
+    }
+
+    /// The local function whose call produced an operand's value, if one did.
+    fn origin_of(&self, op: &Operand<'_>) -> Option<DefId> {
+        match op {
+            Operand::Copy(p) | Operand::Move(p) => self.origin.get(&self.root(p)?).copied(),
+            _ => None,
         }
     }
-    for l in borrowed_mut {
-        tainted[l.as_usize()] = true;
-    }
-    fn resolve(
-        l: usize,
-        arg_count: usize,
-        defs: &[Vec<Def>],
-        tainted: &[bool],
-        depth: usize,
+
+    /// What an operand of this body holds.
+    fn of<'tcx>(
+        &self,
+        op: &Operand<'tcx>,
+        constant: impl Fn(&Operand<'tcx>) -> Option<String>,
     ) -> Src {
-        if tainted[l] || depth > 64 {
-            return Src::Unknown;
-        }
-        if (1..=arg_count).contains(&l) {
-            return if defs[l].is_empty() {
-                Src::Param(l - 1)
-            } else {
-                Src::Unknown
-            };
-        }
-        match &defs[l][..] {
-            [Def::Alias(x)] => resolve(x.as_usize(), arg_count, defs, tainted, depth + 1),
-            [Def::Const(c)] => Src::Const(c.clone()),
-            _ => Src::Unknown,
+        match op {
+            Operand::Copy(p) | Operand::Move(p) => self
+                .root(p)
+                .and_then(|r| self.srcs.get(&r).cloned())
+                .unwrap_or(Src::Unknown),
+            c => constant(c).map_or(Src::Unknown, Src::Const),
         }
     }
-    (0..n)
-        .map(|l| resolve(l, body.arg_count, &defs, &tainted, 0))
-        .collect()
 }
 
 /// A call from one body to a local body: a function, or a closure or coroutine it creates.
@@ -457,18 +683,27 @@ impl<'tcx> Analyzer<'tcx> {
         let typing_env = TypingEnv::post_analysis(tcx, def_id);
         let mut own = Summary::default();
         let mut calls = Vec::new();
-        let held = sources(tcx, body, |op| self.string_constant(op));
+        let held = Held::new(tcx, def_id, body, |op| self.string_constant(op));
         for data in body.basic_blocks.iter() {
             for stmt in &data.statements {
                 if let StatementKind::Assign(assign) = &stmt.kind
-                    && let Rvalue::Aggregate(kind, _) = &assign.1
+                    && let Rvalue::Aggregate(kind, operands) = &assign.1
                     && let AggregateKind::Closure(nested, _)
                     | AggregateKind::Coroutine(nested, _)
                     | AggregateKind::CoroutineClosure(nested, _) = **kind
                 {
+                    // A closure's or coroutine's captures, in order: what `Param(k)` means in its
+                    // body. (An async closure's body is another coroutine: not followed.)
+                    let srcs = match **kind {
+                        AggregateKind::CoroutineClosure(..) => Vec::new(),
+                        _ => operands
+                            .iter()
+                            .map(|op| held.of(op, |c| self.string_constant(c)))
+                            .collect(),
+                    };
                     calls.push(Edge {
                         callee: nested,
-                        srcs: Vec::new(),
+                        srcs,
                         span: stmt.source_info.span,
                         via: None,
                     });
@@ -482,17 +717,9 @@ impl<'tcx> Analyzer<'tcx> {
                         let args: Vec<&Operand<'tcx>> = args.iter().map(|a| &a.node).collect();
                         let srcs: Vec<Src> = args
                             .iter()
-                            .map(|a| match a {
-                                Operand::Copy(p) | Operand::Move(p)
-                                    if p.projection
-                                        .iter()
-                                        .all(|e| matches!(e, mir::ProjectionElem::Deref)) =>
-                                {
-                                    held[p.local.as_usize()].clone()
-                                }
-                                c => self.string_constant(c).map_or(Src::Unknown, Src::Const),
-                            })
+                            .map(|a| held.of(a, |c| self.string_constant(c)))
                             .collect();
+                        let origin = args.first().and_then(|a| held.origin_of(a));
                         self.call(
                             &mut own,
                             Some(&mut calls),
@@ -501,6 +728,7 @@ impl<'tcx> Analyzer<'tcx> {
                             gargs,
                             &args,
                             &srcs,
+                            origin,
                             span,
                         );
                     }
@@ -527,6 +755,7 @@ impl<'tcx> Analyzer<'tcx> {
         gargs: GenericArgs<'tcx>,
         args: &[&Operand<'tcx>],
         srcs: &[Src],
+        origin: Option<DefId>,
         span: Span,
     ) {
         let tcx = self.tcx;
@@ -648,6 +877,12 @@ impl<'tcx> Analyzer<'tcx> {
             return;
         }
         if resolved.is_local() {
+            // Polling the future that a call of `async fn f` in this body returned: its effects
+            // came with that call, with its arguments substituted. Followed again here, the
+            // captures would be unknown.
+            if tcx.is_coroutine(resolved) && origin.is_some_and(|f| tcx.parent(resolved) == f) {
+                return;
+            }
             match calls {
                 Some(calls) if self.has_body(resolved) => calls.push(Edge {
                     callee: resolved,
@@ -831,7 +1066,7 @@ impl<'tcx> Analyzer<'tcx> {
                 // In terms of the call's own arguments: the macro reads them at the call site.
                 let srcs: Vec<Src> = (0..args.len()).map(Src::Param).collect();
                 self.call(
-                    &mut one, None, typing_env, callee, gargs, &args, &srcs, *fn_span,
+                    &mut one, None, typing_env, callee, gargs, &args, &srcs, None, *fn_span,
                 );
                 let name = tcx
                     .opt_item_name(callee)
