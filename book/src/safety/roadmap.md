@@ -216,6 +216,43 @@ is proved for a fragment of MIR with cross-function summaries (`verify/Footprint
 specifications for HTTP, the Kubernetes API and S3, checked against server logs, then
 certificates for prefetched loops and exits.
 
+## 10. Branches on several cores
+
+**Problem.** The code `#[psync::graph]` generates joins its chains inside one task. Once the waits
+overlap, the CPU work in the chains runs on one core. In kube-rs's `get_all`
+([Patterns and pitfalls](../guide/patterns.md)), Amdahl's law predicted 10.4–11.5× and the
+measurement was 5.0–9.2×. Every response arrived at once, and decoding them took one core.
+
+**Where that CPU work is.** In `get_all` it is inside the awaited future. `api.list(..)` decodes
+the JSON before it returns. So running the statements *after* the awaits on threads, the way
+[Phase II](../phase2/using.md) runs synchronous jobs with `par_run`, would not help here. Each
+item's future has to be polled on another thread.
+
+**Why psync cannot simply spawn.** Three ways were considered:
+
+- **Spawn the chain as a task.** A task must be `'static`, and the chains borrow from the function:
+  `client`, `discovery`, and `ar` and `caps` from the group being walked. The macro sees tokens,
+  not types, so it cannot tell which chains would compile. Spawning every chain would break the
+  build of most rewritten functions.
+- **Scoped spawning that waits in `Drop`.** The function's future borrows the spawned tasks'
+  data, and its `Drop` waits for them. This is unsound, because a future can be leaked
+  (`mem::forget(Box::pin(f))`) without running `Drop`, and the borrowed data is then freed while
+  the tasks still use it. Libraries such as `async-scoped` mark this `unsafe` for that reason.
+- **Block the current thread and poll the chains on psync's workers** (sound, like `par_run`).
+  The chains' I/O needs the user's runtime. hyper registers its sockets with the tokio reactor of
+  the thread that polls it, and psync's workers have none. It would also block a runtime worker
+  for the whole join.
+
+**What would work.** An opt-in that names the user's spawner,
+`#[psync::graph(spawn = my_spawn)]` with `fn my_spawn<F: Future + Send + 'static>(f: F) -> impl
+Future<Output = F::Output>`, and a statement or loop hint that asks for it. The programmer then
+makes that chain `'static` (owned clones instead of borrows), and the compiler checks it. Exits,
+panics and results would come back through the same slots as today. **Cost.** psync's generated
+code depends on a runtime the user picks. For loops, item bodies must be written to own their data.
+
+**Status.** Not built. The choice of interface (an option naming a spawner, or a feature for
+tokio) is open.
+
 ## Priorities
 
 | Step | Closes | Effort |
