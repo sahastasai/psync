@@ -354,6 +354,9 @@ for data in body.basic_blocks.iter() {
   text. `span.from_expansion()` tells whether a span came from a macro, which is how the driver
   separates the user's calls from the code psync generated around them.
 
+How these summaries are stored, named across crates and linked over the whole build is the
+subject of [From MIR to summaries across crates](../internals/compiler.md).
+
 ## Which form, for which question
 
 | Question | Earliest form that answers it |

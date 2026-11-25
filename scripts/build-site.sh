@@ -16,6 +16,13 @@ rustup_run() { if command -v rustup >/dev/null; then "$@"; else nix-shell -p rus
 # The Lean proofs, with doc-gen4 (theorem statements in LaTeX, rendered by MathJax). The first
 # build fetches and compiles doc-gen4 (several minutes); later builds take seconds.
 LEAN_BIN=${LEAN_BIN:-$HOME/.elan/toolchains/leanprover--lean4---v4.22.0/bin}
+# doc-gen4 links every declaration to its source on GitHub, found with `git remote get-url origin`.
+# In a clone whose origin is not GitHub (a local hub), map it to GitHub for this build only.
+ORIGIN=$(git remote get-url origin 2>/dev/null || true)
+GITHUB=${PSYNC_GITHUB:-https://github.com/sahastasai/psync}
+if [[ -n "$ORIGIN" && "$ORIGIN" != *github.com* ]]; then
+  export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="url.$GITHUB.insteadOf" GIT_CONFIG_VALUE_0="$ORIGIN"
+fi
 (cd verify/docbuild && PATH="$LEAN_BIN:$PATH" lake build PsyncVerify:docs GeneratedCerts:docs)
 
 rm -rf book/book/api && mkdir -p book/book/api
@@ -38,7 +45,7 @@ a{color:#006d77}li{margin:.4rem 0}@media(prefers-color-scheme:dark){body{backgro
 <li><a href="check/psync_check/index.html">psync-check</a>: the effect model, summaries, link step, facts</li>
 <li><a href="check/psync_driver/index.html">psync-driver</a>: the rustc driver (MIR summaries and checks)</li>
 <li><a href="check/cargo_psync/index.html">cargo-psync</a>: the cargo subcommand</li>
-<li><a href="lean/index.html">Lean proofs</a> (doc-gen4): every theorem with its statement in mathematical notation; start at <a href="lean/Schedule.html">Schedule</a>, <a href="lean/World.html">World</a>, <a href="lean/Cert.html">Cert</a>, <a href="lean/Footprint.html">Footprint</a></li>
+<li><a href="lean/index.html">Lean proofs</a> (doc-gen4): every theorem with its statement in mathematical notation; start at <a href="lean/Schedule.html">Schedule</a>, <a href="lean/World.html">World</a>, <a href="lean/Cert.html">Cert</a>, <a href="lean/Footprint.html">Footprint</a>, <a href="lean/Specs.html">Specs</a></li>
 </ul>
 HTML
 echo "site built in book/book (book + api/)"

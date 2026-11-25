@@ -89,6 +89,35 @@ When your server is like this, say so. Make the call that observes the counter a
 (`effects(write(fetch_count))`) or keep it in place (`#[psync::seq]`). Either way, the
 specification psync schedules with becomes sound again.
 
+## Specifications for HTTP, S3 and Kubernetes
+
+`verify/Specs.lean` writes three real protocols as server models and proves a specification sound
+for each. The models are the assumptions: one copy of the state, requests applied one at a time
+(linearizable), and nothing else changing the state behind the client's back.
+
+| Server | The spec allows | Proved | And proved *not* to commute |
+|---|---|---|---|
+| HTTP (RFC 9110): resources on paths; `GET`, `HEAD`, list are safe; `PUT`, `DELETE` change their target; `POST` does whatever the server does | two safe requests; or two non-`POST` requests on paths **apart** (neither a prefix of the other) | `httpSpec_sound`, for every meaning of `POST` | two identical `PUT`s (`http_put_twice_not_commute`) |
+| S3, without versioning | the same; and the same `PUT` or `DELETE` twice | `s3Spec_sound` | two `PUT`s of different bodies to one key |
+| Kubernetes API | for clients that ignore `resourceVersion`: two reads; writes to different objects; a list and a write in another namespace | `kube_commutes_up_to_rv` | two writes to *different* objects, exactly (`kube_writes_not_commute`) |
+
+Two of these results correct intuitions that psync's rule relies on:
+
+- **Idempotent is not commutative.** RFC 9110 calls `PUT` idempotent: doing it twice leaves the
+  state as doing it once. But the first `PUT` to a new path answers `201 Created` and the second
+  `200 OK`, so the two do not commute, and a client that looks at the status sees the order. S3's
+  `PutObject` answers with the ETag, which depends only on the body, so there two identical
+  `PUT`s do commute.
+- **Kubernetes writes to different objects do not commute.** Every write takes the next value of
+  one cluster-wide counter, the `resourceVersion`, and returns it. Run two `apply`s in the other
+  order and each object gets the other's version. psync's built-in rule, which lets writes with
+  different targets overlap, is therefore sound only for clients that do not compare
+  resourceVersions across objects. The proof makes this precise. Erasing resourceVersions is a
+  simulation: it commutes with every request (`kube_simulation`). On the erased server the spec
+  is sound, so requests the spec allows commute *up to* resourceVersions. A client that uses
+  `resourceVersion` for optimistic concurrency on one object is unaffected. A client that orders
+  events from different objects by `resourceVersion` sees the difference.
+
 ## Testing the specification
 
 The specification is the only assumption, and it is about something you can observe. A
@@ -96,8 +125,9 @@ server-side log (the Kubernetes API server's audit log, S3 access logs) records 
 were applied in which order. If two requests that psync ran concurrently were applied in an order
 that changed the outcome, that log entry is a **counterexample to the specification**, not just a
 failed test. The benchmark harnesses already record these logs (see
-[the case studies](../case-studies/kube-datafusion.md)). Checking them against a written
-specification for HTTP, the Kubernetes API and S3 is on the [roadmap](./roadmap.md).
+[the case studies](../case-studies/kube-datafusion.md)). The specifications above are now
+written and proved; checking the logs against them is the next step on the
+[roadmap](./roadmap.md).
 
 ## What is not modelled
 
