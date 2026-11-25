@@ -89,6 +89,9 @@ may be the same. Targets are compared only as far as tokens allow:
   not depend on a `mut` binding, and a later `let` of a name the value depends on forgets it.
 - Anything else computed may be anything.
 
+`Path::new(x)`, `PathBuf::from(x)` and the like name what `x` names, so
+`Path::new(&format!("{dir}/one")).exists()` reads the file `{dir}/one`.
+
 Like literals, templates compare paths as text. Two different names in one directory are taken to
 be different files, even though a symbolic link could make them one.
 

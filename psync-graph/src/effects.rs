@@ -711,6 +711,20 @@ fn target_of(arg: Option<&Expr>) -> Target {
         })) => Target::Literal(s.value()),
         Some(Expr::Reference(r)) => target_of(Some(&r.expr)),
         Some(Expr::Paren(p)) => target_of(Some(&p.expr)),
+        // `Path::new(&format!(..))`, `PathBuf::from("a")`: the same text as a path.
+        Some(Expr::Call(c))
+            if c.args.len() == 1
+                && matches!(&*c.func, Expr::Path(p) if {
+                    let s: Vec<String> =
+                        p.path.segments.iter().map(|s| s.ident.to_string()).collect();
+                    matches!(
+                        s.iter().map(String::as_str).collect::<Vec<_>>()[..],
+                        [.., "Path" | "OsStr", "new"] | [.., "PathBuf" | "OsString" | "String", "from"]
+                    )
+                }) =>
+        {
+            target_of(c.args.first())
+        }
         // `&format!("key.{id}")`: keep the literal text before the first placeholder.
         Some(Expr::Macro(m)) if m.mac.path.is_ident("format") => {
             let tokens = m.mac.tokens.clone();
