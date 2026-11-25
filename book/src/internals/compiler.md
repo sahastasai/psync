@@ -190,9 +190,34 @@ of the body once:
 An edge records what its call passes, and absorbing a callee's summary substitutes it. The
 link step and `dyn` calls clear `arg`: the parameter is the implementation's, not the call's.
 
-What this does not yet follow: an `async fn` keeps its parameters in its coroutine's fields, and
-the edge from the function to its coroutine passes nothing. An effect on a parameter of an
-`async fn` is therefore unknown. Synchronous helpers, which Phase II calls, are followed.
+An `async fn` keeps its parameters in its coroutine. The function's body only builds the
+coroutine, `_0 = {coroutine} { path: copy _1, data: copy _2 }`, and the coroutine's body reads them
+as its **captures**, `copy ((*_7).0)`, where `_7 = copy (_1.0)` is the pointer inside the
+`Pin<&mut Self>`. Across an `await` they are first saved in a slot of the suspended state,
+`((*_7) as variant#3).0`, and read from there. `sources` therefore follows three kinds of values:
+locals, captures and slots. In a closure or coroutine, `Param(k)` means capture `k`, and the edge
+from the body that builds it passes the sources of its operands. A slot is followed like a local
+that is assigned once.
+
+Awaiting the future reaches the coroutine a second time, through `Future::poll`, whose argument
+is the `Pin` and says nothing about the captures. That edge would add the same effects with an
+unknown target. It is skipped when the polled value comes, through `into_future`,
+`Pin::new_unchecked`, borrows, moves and slots, from a call in the same body of the `async fn`
+that builds that coroutine, because that call already brought its effects with the arguments
+substituted. A future that comes from anywhere else, such as a parameter, keeps the edge.
+
+`keep` in the fixture writes after an `await`:
+
+```rust,ignore
+async fn keep(path: &str, data: &str) -> std::io::Result<()> {
+    ready().await;
+    std::fs::write(path, data)
+}
+```
+
+Its summary is `Fs Write arg 0`. `keep("x.json", ..)` and `keep("y.json", ..)` are two different
+files (`keep_both`, accepted), and `keep("x.json", ..)` twice is a conflict (`keep_same`). An
+async closure's body is another coroutine, built by the closure. It is not followed yet.
 
 The edges form a call graph, and a function's summary is its own effects plus the summaries of
 everything it calls:

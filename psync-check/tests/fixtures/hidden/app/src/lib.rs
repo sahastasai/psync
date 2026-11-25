@@ -210,3 +210,27 @@ pub fn stash_same() -> std::io::Result<()> {
     let r2 = stash("a.json", "2");
     r1.and(r2)
 }
+
+/// The same through an `async fn`: its parameters live in its coroutine (captured, then saved
+/// across the `await`), and the compiler still says which one it writes.
+async fn ready() {}
+async fn keep(path: &str, data: &str) -> std::io::Result<()> {
+    ready().await;
+    std::fs::write(path, data)
+}
+
+/// Safe: two different files.
+#[graph]
+pub async fn keep_both() -> std::io::Result<()> {
+    let a = keep("x.json", "1").await;
+    let b = keep("y.json", "2").await;
+    a.and(b)
+}
+
+/// The same file twice.
+#[graph]
+pub async fn keep_same() -> std::io::Result<()> {
+    let a = keep("x.json", "1").await;
+    let b = keep("x.json", "2").await;
+    a.and(b)
+}
