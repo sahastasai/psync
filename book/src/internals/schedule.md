@@ -125,6 +125,13 @@ A path qualifies under the rules the [loop check](./loops.md#checking-per-item-f
 So its value at the start of the region is its value when the statement runs. The same expression
 written twice stays one file, and the statements stay ordered.
 
+A string literal keeps its own target. Two literals are already compared exactly while compiling
+(`"out"` contains `"out/a.txt"`, and neither is `"cfg.toml"`), so they never need a gate. A
+literal against a computed path is compared at run time like any other pair. (Until this was
+fixed, literal paths were renamed too, so `remove_dir_all("out")` and `read("out/a.txt")` were
+ordered by a gate whose condition was always true, and the report showed no edge between them.
+Test `literal_paths_are_compared_when_compiling`.)
+
 The region is planned twice: once as written, and once with each qualifying path replaced by a
 name for its expression. Every dependency that only the second plan drops must come from qualifying
 paths. Each one becomes a **gate** between its two chains:

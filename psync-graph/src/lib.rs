@@ -958,6 +958,40 @@ mod tests {
     }
 
     #[test]
+    fn literal_paths_are_compared_when_compiling() {
+        let region = |f: ItemFn| {
+            let r = report(Options::parse(quote!(speculate)).unwrap(), f);
+            r.regions[0].clone()
+        };
+        // Two literals are compared exactly: a directory and a file inside it stay ordered by an
+        // edge, with nothing left to compare at run time, and the labels keep their paths.
+        let r = region(syn::parse_quote! {
+            async fn f() -> std::io::Result<()> {
+                tokio::fs::remove_dir_all("out").await?;
+                let a = tokio::fs::read("out/a.txt").await?;
+                let b = tokio::fs::read("cfg.toml").await?;
+                Ok(())
+            }
+        });
+        assert_eq!(r.runtime_checks, 0);
+        assert!(
+            r.edges.iter().any(|e| (e.0, e.1) == (0, 1)),
+            "{:?}",
+            r.edges
+        );
+        assert!(!format!("{:?}", r.nodes).contains("compared at run time"));
+        // A literal against a computed path is still compared at run time.
+        let r = region(syn::parse_quote! {
+            async fn f(p: &Path) -> std::io::Result<()> {
+                tokio::fs::remove_dir_all("out").await?;
+                let a = tokio::fs::read(p).await?;
+                Ok(())
+            }
+        });
+        assert_eq!(r.runtime_checks, 1);
+    }
+
+    #[test]
     fn computed_paths_are_compared_at_run_time() {
         let checks = |f: ItemFn| {
             let r = report(Options::parse(quote!(speculate)).unwrap(), f);
