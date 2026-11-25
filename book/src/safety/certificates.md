@@ -85,7 +85,7 @@ cargo run -p psync-graph --features cli --bin psync-cert -- src/lib.rs > verify/
 cd verify && lake build GeneratedCerts
 ```
 
-`scripts/certify.sh` does this for the repository's own schedules: 39 certificates from the graph tests,
+`scripts/certify.sh` does this for the repository's own schedules: 40 certificates from the graph tests,
 the Phase II tests, the driver fixture and `graph_suite`, checked in a few seconds. The checker is
 the same for synchronous code: a level is a set of chains, whether they run as futures or on
 threads. CI regenerates the certificates,

@@ -978,3 +978,37 @@ fn loop_bodies_may_end_in_an_await() {
     run(tail_await_loop(log));
     assert_eq!(*log.borrow(), vec![10, 20, 30]);
 }
+
+// An await inside a binding's value is exposed: `extra` need not wait for `a`, which only
+// `combine` reads. Earlier operands that are not pure still evaluate first.
+fn combine(a: u32, b: u32) -> u32 {
+    a * 100 + b
+}
+
+#[graph]
+async fn await_inside_a_binding() -> (u32, Vec<u32>) {
+    let mut order = Vec::new();
+    let a = io(T, 1).await;
+    let total = combine(a, io(T, 2).await);
+    let pair = (
+        {
+            order.push(1);
+            io(T, 3).await
+        },
+        io(T, 4).await,
+    );
+    order.push(2);
+    (total + pair.0 + pair.1, order)
+}
+
+#[test]
+fn awaits_inside_bindings_overlap() {
+    let ((sum, order), polls, peak) = run(await_inside_a_binding());
+    assert_eq!(sum, 102 + 3 + 4);
+    assert_eq!(order, [1, 2]);
+    // All four awaits start together: `io(T, 2)` beside `a`, and the pair's two awaits beside
+    // each other. Without exposing them, `total` waits for `a` and the pair's awaits run in turn
+    // (2T, peak 2); sequentially it is 4T.
+    assert_eq!(peak, 4);
+    assert_eq!(polls, T as usize + 1);
+}

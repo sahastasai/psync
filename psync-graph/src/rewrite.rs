@@ -141,7 +141,9 @@ impl Rewriter<'_> {
         let mut work: Vec<(Stmt, usize)> = stmts.into_iter().rev().map(|s| (s, 0)).collect();
         while let Some((stmt, depth)) = work.pop() {
             let hides_await = match classify(&stmt, &self.scope, false) {
-                Class::Node(n) => n.effect && n.awaits,
+                // A binding hides an await when its value only contains one: in
+                // `let t = combine(a, f().await);` the await need not wait for `a`.
+                Class::Node(n) => n.awaits && (n.effect || !awaited_value(&stmt)),
                 Class::Barrier(_) => Exits::of_stmt(&stmt).awaits,
             };
             if hides_await && depth < MAX_HOIST_DEPTH {
@@ -279,5 +281,27 @@ fn bind_values(values: &mut std::collections::HashMap<String, Target>, stmt: &St
     let t = value_target(&init.expr);
     if t.informative() && t.names().is_none_or(|n| n.is_disjoint(mutable)) {
         values.insert(p.ident.to_string(), t);
+    }
+}
+
+/// Whether a `let`'s value is itself awaited (`x.await`, `x.await?`, `x.await.len()`), so the
+/// binding is already a node of its own await and there is nothing to expose.
+fn awaited_value(stmt: &Stmt) -> bool {
+    let Stmt::Local(syn::Local {
+        init: Some(init), ..
+    }) = stmt
+    else {
+        return true;
+    };
+    let mut e = &*init.expr;
+    loop {
+        match e {
+            Expr::Await(_) => return true,
+            Expr::Try(t) => e = &t.expr,
+            Expr::Paren(p) => e = &p.expr,
+            Expr::MethodCall(m) => e = &m.receiver,
+            Expr::Field(f) => e = &f.base,
+            _ => return false,
+        }
     }
 }
