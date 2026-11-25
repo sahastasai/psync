@@ -12,6 +12,7 @@ test answers:
 | Is this real-world shape faster, and still correct? | `examples/graph_suite/` | `cargo run --example graph_suite --no-default-features -- --brief` |
 | Is the scheduling argument right? | `verify/Schedule.lean` | `lean verify/Schedule.lean` |
 | Is it right against a server, relative to a spec? | `verify/World.lean` | `lean verify/World.lean` |
+| Is *this* schedule safe? | certificates, `verify/Cert.lean` | `scripts/certify.sh` (regenerate `verify/Certs.lean`, then `lake build`) |
 | Do the book's examples still run? | `psync-graph/examples/`, `verify/Tutorial.lean` | `cargo test -p psync-graph`; `lean verify/Tutorial.lean` |
 
 ## Analysis decisions: `psync-graph` unit tests

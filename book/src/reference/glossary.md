@@ -14,6 +14,8 @@ value.
 **Bound.** The maximum number of a loop's prefixes in flight at once (`bound = N`, default 16).
 Nested loops multiply their bounds.
 
+**Certificate.** What psync claims about one region: each statement's places and the levels of chains it chose. A Lean checker, proven sound, accepts or rejects it. See [Certified schedules](../safety/certificates.md).
+
 **Chain.** Nodes fused into one sequential future, because each one waits only for the one before
 it. A chain starts its next node as soon as its previous one finishes, whatever the other chains
 are doing.

@@ -159,6 +159,7 @@ pub(crate) fn plan(nodes: &[Node]) -> Plan {
         chains: chains.clone(),
         levels: levels.clone(),
         changed: levels.iter().any(|l| l.len() > 1),
+        cert: cert_nodes(nodes),
     };
     Plan {
         chains,
@@ -166,6 +167,66 @@ pub(crate) fn plan(nodes: &[Node]) -> Plan {
         release,
         report,
     }
+}
+
+/// Each node's places, for the region's certificate: one place per reason `depends` can give,
+/// so that two nodes have no edge only if neither writes a place the other touches (the checker
+/// in `verify/Cert.lean` may be stricter than `depends`, never more lenient).
+fn cert_nodes(nodes: &[Node]) -> Vec<crate::CertNode> {
+    let one = |ns: &str, rest: &[&str]| -> Vec<String> {
+        std::iter::once(ns)
+            .chain(rest.iter().copied())
+            .map(str::to_string)
+            .collect()
+    };
+    let path = |p: &str| -> Vec<String> {
+        std::iter::once("p")
+            .chain(p.split('.'))
+            .map(str::to_string)
+            .collect()
+    };
+    nodes
+        .iter()
+        .enumerate()
+        .map(|(j, n)| {
+            let mut c = crate::CertNode::default();
+            for (d, _) in &n.defs {
+                c.writes.push(one("n", &[&d.to_string()]));
+            }
+            for u in &n.acc.uses {
+                c.reads.push(one("n", &[u]));
+            }
+            for p in &n.acc.rpaths {
+                c.reads.push(path(p));
+            }
+            for p in &n.acc.wpaths {
+                c.writes.push(path(p));
+            }
+            if !n.independent {
+                for e in &n.effects {
+                    if e.writes() {
+                        c.writes.push(e.place());
+                    } else {
+                        c.reads.push(e.place());
+                    }
+                }
+            }
+            if n.exits || n.panics {
+                c.writes.push(one("x", &[&j.to_string()]));
+            }
+            if !n.speculate && n.effects.iter().any(|e| e.writes()) {
+                for (i, m) in nodes[..j].iter().enumerate() {
+                    if m.exits || m.panics {
+                        c.reads.push(one("x", &[&i.to_string()]));
+                    }
+                }
+            }
+            if n.effect {
+                c.writes.push(one("e", &[]));
+            }
+            c
+        })
+        .collect()
 }
 
 /// The nodes that (transitively) depend on `from`; nodes are in program order, so edges go forward.

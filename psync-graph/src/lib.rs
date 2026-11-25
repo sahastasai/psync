@@ -223,6 +223,19 @@ pub struct RegionReport {
     /// `(line, call)`: awaited calls whose effect psync could not tell from their names. They are
     /// assumed to read, unless the function is `strict`.
     pub unclassified: Vec<(usize, String)>,
+    /// The certificate of this region's schedule: each node's places (see `verify/Cert.lean`).
+    /// With `chains` and `levels`, `psync-cert` turns it into a Lean check.
+    pub cert: Vec<CertNode>,
+}
+
+/// One node as a certificate describes it: the places it may read and write, each a path of
+/// segments. Two nodes are independent when neither writes a place the other reads or writes, and
+/// places overlap when one is a prefix of the other.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "cli", derive(serde::Serialize))]
+pub struct CertNode {
+    pub reads: Vec<Vec<String>>,
+    pub writes: Vec<Vec<String>>,
 }
 
 /// One node of a region.
@@ -533,6 +546,92 @@ pub fn explain(report: &Report) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// The certificate is never more lenient than psync: every edge psync draws is a conflict
+    /// between the two nodes' places, so `verify/Cert.lean` can only reject what psync accepted,
+    /// not accept what psync would not. Checked over every annotated function of the graph
+    /// tests, the driver fixture and `graph_suite`.
+    #[test]
+    fn certificates_cover_every_edge() {
+        use proc_macro2::TokenTree;
+        let overlap = |p: &Vec<String>, q: &Vec<String>| p.starts_with(q) || q.starts_with(p);
+        let touches = |ws: &[Vec<String>], others: &[Vec<String>]| {
+            ws.iter().any(|w| others.iter().any(|o| overlap(w, o)))
+        };
+        let conflict = |a: &CertNode, b: &CertNode| {
+            let b_all: Vec<Vec<String>> = b.reads.iter().chain(&b.writes).cloned().collect();
+            touches(&a.writes, &b_all) || touches(&b.writes, &a.reads)
+        };
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
+        let mut files = vec![
+            format!("{root}/tests/graph.rs"),
+            format!("{root}/psync-check/tests/fixtures/hidden/app/src/lib.rs"),
+        ];
+        for f in std::fs::read_dir(format!("{root}/examples/graph_suite")).unwrap() {
+            files.push(f.unwrap().path().display().to_string());
+        }
+        let is_graph = |attrs: &[syn::Attribute]| {
+            attrs
+                .iter()
+                .any(|a| a.path().segments.last().is_some_and(|s| s.ident == "graph"))
+        };
+        let (mut functions, mut checked) = (0, 0);
+        for file in files {
+            let parsed = syn::parse_file(&std::fs::read_to_string(&file).unwrap()).unwrap();
+            let mut fns: Vec<(Options, ItemFn)> = Vec::new();
+            let opts = |attrs: &[syn::Attribute]| match attrs
+                .iter()
+                .find(|a| a.path().segments.last().is_some_and(|s| s.ident == "graph"))
+                .map(|a| &a.meta)
+            {
+                Some(syn::Meta::List(l)) => Options::parse(l.tokens.clone()).unwrap(),
+                _ => Options::default(),
+            };
+            for item in &parsed.items {
+                match item {
+                    syn::Item::Fn(f) if is_graph(&f.attrs) => fns.push((opts(&f.attrs), f.clone())),
+                    syn::Item::Macro(m) if m.mac.path.is_ident("example") => {
+                        let tts: Vec<TokenTree> = m.mac.tokens.clone().into_iter().collect();
+                        let at = tts.windows(2).position(|w| {
+                            matches!((&w[0], &w[1]), (TokenTree::Ident(a), TokenTree::Ident(f)) if a == "async" && f == "fn")
+                        });
+                        let options = tts
+                            .windows(3)
+                            .find_map(|w| match (&w[0], &w[2]) {
+                                (TokenTree::Ident(i), TokenTree::Group(g)) if i == "options" => {
+                                    Some(Options::parse(g.stream()).unwrap())
+                                }
+                                _ => None,
+                            })
+                            .unwrap_or_default();
+                        if let Some(at) = at {
+                            let body: TokenStream = tts[at..].iter().cloned().collect();
+                            fns.push((options, syn::parse2(body).unwrap()));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            for (options, f) in fns {
+                functions += 1;
+                // Under its own options, and under the defaults (which keep more edges).
+                let runs = [report(options, f.clone()), report(Options::default(), f)];
+                for region in runs.iter().flat_map(|r| &r.regions) {
+                    for (i, j, why) in &region.edges {
+                        checked += 1;
+                        assert!(
+                            conflict(&region.cert[*i], &region.cert[*j]),
+                            "{file}: edge n{i} -> n{j} ({why}) has no conflict in the certificate"
+                        );
+                    }
+                }
+            }
+        }
+        assert!(
+            functions > 40 && checked > 120,
+            "{functions} functions, {checked} edges"
+        );
+    }
+
     use super::*;
 
     fn report(options: Options, f: ItemFn) -> Report {

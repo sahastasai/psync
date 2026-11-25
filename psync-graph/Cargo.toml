@@ -20,6 +20,10 @@ serde_json = { version = "1", optional = true }
 name = "psync-expand"
 required-features = ["cli"]
 
+[[bin]]
+name = "psync-cert"
+required-features = ["cli"]
+
 [dev-dependencies]
 # The book's Part 0 examples print the code they generate.
 prettyplease = "0.2"

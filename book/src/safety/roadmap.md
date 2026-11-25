@@ -202,9 +202,13 @@ run. Fixed, with a test.
 system, and proves that the schedule preserves the server's state and every response, relative to
 a commutativity specification. It also proves that psync's built-in rule is such a specification,
 and that the rule is unsound for a server whose reads change state
-([What psync guarantees about the outside world](./world.md)). Next: per-function certificates
-that a Lean checker, proven sound, verifies for every build; then footprint soundness over a MIR
-fragment; then specifications for HTTP, the Kubernetes API and S3, checked against server logs.
+([What psync guarantees about the outside world](./world.md)).
+
+**Schedules are certified.** psync writes a certificate per concurrent region, and a Lean checker,
+proven sound, accepts or rejects it; CI checks all of the repository's schedules
+([Certified schedules](./certificates.md)). Next: footprint soundness over a MIR fragment
+(the checker's hypothesis), certificates for prefetched loops and exits, then specifications for
+HTTP, the Kubernetes API and S3, checked against server logs.
 
 ## Priorities
 
@@ -217,4 +221,4 @@ fragment; then specifications for HTTP, the Kubernetes API and S3, checked again
 | 7. processes and cwd | over-conservative processes; cwd hazard | small |
 | 5. staged writes, 6. cancellation | wasted work, writes waiting on exits | medium to large |
 | 8. compiler driver (built: `cargo psync check`, `build`, `fix`) | the token-level foundation | next: argument-precise effects |
-| 9. Lean model (scheduling built: `verify/Schedule.lean`) | the token-level foundation | exit replay and the server model proven; next: certified schedules |
+| 9. Lean model (scheduling built: `verify/Schedule.lean`) | the token-level foundation | exit replay, the server model and certified schedules built; next: footprint soundness |

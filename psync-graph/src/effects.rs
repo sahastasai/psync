@@ -152,6 +152,64 @@ impl Effect {
         self.kind == Kind::Write
     }
 
+    /// The place this effect touches, for certificates: `w/<domain>/<target..>`. Places overlap
+    /// by prefix, so where `conflict` is finer than a prefix (string-prefix and computed targets,
+    /// services named by type, ordered writes that conflict on any target), the place is cut
+    /// short, which only adds conflicts.
+    pub fn place(&self) -> Vec<String> {
+        let mut place = vec!["w".to_string()];
+        let svc = |r: &str| -> Vec<String> {
+            let mut v = vec!["svc".to_string()];
+            if !r.starts_with("type:") {
+                v.extend(r.split('.').map(str::to_string));
+            }
+            v
+        };
+        match &self.domain {
+            Domain::Process | Domain::Unknown => return place,
+            Domain::Fs => place.push("fs".into()),
+            Domain::Net => place.push("net".into()),
+            Domain::Env => place.push("env".into()),
+            // An unknown service may be any receiver: stop at the domain.
+            Domain::Service(None) => {
+                place.push("svc".into());
+                return place;
+            }
+            Domain::Service(Some(r)) => {
+                // A service is the receiver; a typed service may be behind any receiver.
+                place.extend(svc(r));
+                if r.starts_with("type:") {
+                    return place;
+                }
+            }
+        }
+        if self.ordered {
+            return place;
+        }
+        // Targets as characters, so that a prefix of the place is a prefix of the string: a
+        // literal ends with a marker (two different literals never overlap), a `format!` prefix
+        // has none (it overlaps every string that starts with it), and a file path ends with `/`
+        // (a directory overlaps the files in it).
+        let chars = |t: &str| t.chars().map(String::from).collect::<Vec<_>>();
+        match &self.target {
+            Target::Literal(l) if self.domain == Domain::Fs => {
+                place.push("t".into());
+                place.extend(chars(&format!("{}/", l.trim_end_matches('/'))));
+            }
+            Target::Literal(l) => {
+                place.push("t".into());
+                place.extend(chars(l));
+                place.push("$end".into());
+            }
+            Target::Prefixed(p, _) => {
+                place.push("t".into());
+                place.extend(chars(p));
+            }
+            Target::Expr(..) | Target::Any => {}
+        }
+        place
+    }
+
     /// For reports: `write file "cfg.toml" (fs::write)`.
     pub fn describe(&self) -> String {
         let kind = match self.kind {

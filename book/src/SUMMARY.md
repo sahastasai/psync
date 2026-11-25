@@ -44,6 +44,7 @@
 - [Checking rewrites: `cargo psync check`](./safety/check.md)
 - [Scheduling with compiler facts: `cargo psync build`](./safety/facts.md)
 - [What psync guarantees about the outside world](./safety/world.md)
+- [Certified schedules](./safety/certificates.md)
 - [Roadmap: beyond tokens](./safety/roadmap.md)
 
 # Case studies
