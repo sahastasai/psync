@@ -85,7 +85,7 @@ cargo run -p psync-graph --features cli --bin psync-cert -- src/lib.rs > verify/
 cd verify && lake build GeneratedCerts
 ```
 
-`scripts/certify.sh` does this for the repository's own schedules: 34 regions from the graph tests,
+`scripts/certify.sh` does this for the repository's own schedules: 39 certificates from the graph tests,
 the Phase II tests, the driver fixture and `graph_suite`, checked in a few seconds. The checker is
 the same for synchronous code: a level is a set of chains, whether they run as futures or on
 threads. CI regenerates the certificates,
@@ -194,3 +194,37 @@ What the fragment leaves out, and so stays assumed for real Rust:
 - **Exit replay.** `replay_correct` in `Schedule.lean` proves the rule in general. Certificates do
   not yet record each statement's exits.
 - **The generated Rust**, which rustc type- and borrow-checks.
+
+## Exercises
+
+Each answer is what `check` returns. To try them, add the lines to a file that imports `Cert`
+and `open PsyncCert`, and run it with `lake env lean` in `verify/`:
+
+```lean
+#eval check { profilePage with levels := [[[0, 1], [2], [3]]] }
+```
+
+1. `[[[0, 1], [2], [3]]]`: `user` and `posts` as one chain, `avatar` and `friends` beside it.
+2. `[[[0], [1, 2], [3]]]`: `avatar` chained after `posts` instead of `user`.
+3. `[[[0], [1], [3]], [[2]]]`: `avatar` alone, in a second level.
+4. `[[[0, 2, 1, 3]]]`: one chain, with `avatar` moved ahead of `posts`.
+5. psync's edge reason is ``writes `self.groups` ``. Why is the place `p/self/groups`, and why
+   does it conflict with a statement that reads `self`, but not with one that reads
+   `self.mode`?
+
+<details>
+<summary>Answers</summary>
+
+1. `false`. `avatar` reads `[10]`, which `user` writes, and the two are in different chains of
+   one level.
+2. `false`, for the same reason. Chaining it after `posts` does not order it after `user`.
+3. `true`. It is slower than psync's schedule, but safe: `avatar` starts after the first level,
+   including `user`, has ended.
+4. `true`. A single chain runs in its own order, and the second question allows that order:
+   `avatar` passes only `posts`, which it is independent of. `check` accepts every safe
+   schedule, not only psync's.
+5. A place is a path of names, and two places overlap when one is a prefix of the other.
+   `p/self` is a prefix of `p/self/groups`: reading all of `self` reads `groups`. `p/self/mode`
+   and `p/self/groups` first differ at the third segment, so they are apart.
+
+</details>
