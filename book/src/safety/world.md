@@ -125,9 +125,43 @@ server-side log (the Kubernetes API server's audit log, S3 access logs) records 
 were applied in which order. If two requests that psync ran concurrently were applied in an order
 that changed the outcome, that log entry is a **counterexample to the specification**, not just a
 failed test. The benchmark harnesses already record these logs (see
-[the case studies](../case-studies/kube-datafusion.md)). The specifications above are now
-written and proved; checking the logs against them is the next step on the
-[roadmap](./roadmap.md).
+[the case studies](../case-studies/kube-datafusion.md)). `scripts/spec-check/check_logs.py` checks
+those logs against the specifications above. For every pair of requests that may have been in
+flight at once, it asks whether the spec lets them commute, using the Lean file's definitions:
+
+```sh
+scripts/spec-check/check_logs.py --kube logs/audit.log --s3 logs/garage.log
+```
+
+On the logs of the production-shaped benchmark (kube-rs against a real API server, DataFusion
+against Garage, an S3-compatible store):
+
+| Log | Requests | Pairs that may have overlapped | Allowed, and why | Not allowed |
+|---|---|---|---|---|
+| Kubernetes audit | 31,638 (31,078 `list`, 560 `get`) | 65,893 | two reads: all | **0** |
+| S3 (Garage) | 77,149 (71,168 `GET`, 5,888 `PUT`, 93 list) | 4,533,859 | two reads: 3,678,981; keys apart: 854,878 | **0** |
+
+No two requests the specification forbids were ever in flight together. For the Kubernetes log
+this is a weak result, because the benchmark only reads, and two reads always commute. For S3 it
+is a real one. While objects were being uploaded, 854,878 pairs that included a `PUT` overlapped
+another request, and every one of them was on a key apart from the other request's key.
+
+How overlap is decided matters, and the checker errs towards checking more:
+
+- An audit event records when the request was received and when its response completed, so its
+  interval is exact.
+- Garage logs only when a request starts. On one HTTP/1.1 connection, a request ends before the
+  next one starts, so the next start bounds it. The last request on a connection is bounded by
+  5 seconds. Both bounds lengthen intervals, so every pair that really overlapped is checked.
+
+The checker is tested on logs with planted violations (`scripts/spec-check/selftest.sh`, run in
+CI): a `GET` and a `PUT` of one key, a listing and a `PUT` under its prefix, two writes to one
+Kubernetes object, and a list and a create in the same namespace.
+
+What this does **not** test is the server side: that the pairs the spec allows really commute at
+the server. That needs bodies and resourceVersions, which these logs do not record (`Metadata`
+audit level). A `RequestResponse`-level audit log would show it, as would S3 access logs with
+ETags.
 
 ## What is not modelled
 

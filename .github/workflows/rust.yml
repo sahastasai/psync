@@ -48,3 +48,5 @@ jobs:
     - name: Check the proofs, the book's Lean tutorial and every certified schedule
       working-directory: verify
       run: lake build PsyncVerify GeneratedCerts
+    - name: Log checker against the specs (planted violations)
+      run: ./scripts/spec-check/selftest.sh
