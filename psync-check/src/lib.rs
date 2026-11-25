@@ -411,6 +411,8 @@ pub fn read_all<T: for<'de> Deserialize<'de>>(dir: &Path) -> Vec<T> {
 }
 
 /// Environment variables the front end passes to the driver.
+pub mod pdg;
+
 pub mod env {
     /// Directory of per-crate summary files.
     pub const SUMMARIES: &str = "PSYNC_SUMMARY_DIR";

@@ -14,6 +14,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 
+/// The label of each value a switch compares against (`None`: its `otherwise` edge).
+type Labels<'a> = Box<dyn Fn(Option<u128>) -> String + 'a>;
+
 /// An effect inside one body, with the span of the call in that body that leads to it.
 #[derive(Clone, Debug)]
 pub struct Located {
@@ -1088,6 +1091,328 @@ impl<'tcx> Analyzer<'tcx> {
         out
     }
 
+    /// The dependence graph of every annotated function and local `async fn`, and of the closures
+    /// and async blocks in them: their calls with effects (or into this crate) and their awaits,
+    /// each with the branches that decide whether it runs.
+    fn pdg(&mut self) -> psync_check::pdg::CratePdg {
+        let tcx = self.tcx;
+        let mut bodies = self.annotated();
+        for owner in tcx.hir_body_owners() {
+            let d = owner.to_def_id();
+            if matches!(tcx.def_kind(d), DefKind::Fn | DefKind::AssocFn)
+                && tcx.asyncness(d).is_async()
+            {
+                bodies.push(d);
+            }
+        }
+        let mut seen = HashSet::new();
+        let mut functions = Vec::new();
+        while let Some(def_id) = bodies.pop() {
+            if !seen.insert(def_id) || !self.has_body(def_id) {
+                continue;
+            }
+            let body = tcx.optimized_mir(def_id);
+            for data in body.basic_blocks.iter() {
+                for stmt in &data.statements {
+                    if let StatementKind::Assign(assign) = &stmt.kind
+                        && let Rvalue::Aggregate(kind, _) = &assign.1
+                        && let AggregateKind::Closure(nested, _)
+                        | AggregateKind::Coroutine(nested, _)
+                        | AggregateKind::CoroutineClosure(nested, _) = **kind
+                    {
+                        bodies.push(nested);
+                    }
+                }
+            }
+            let f = self.body_pdg(def_id, body);
+            if !f.nodes.is_empty() {
+                functions.push(f);
+            }
+        }
+        functions.sort_by(|a, b| a.path.cmp(&b.path));
+        psync_check::pdg::CratePdg {
+            crate_name: tcx.crate_name(LOCAL_CRATE).to_string(),
+            functions,
+        }
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn body_pdg(&mut self, def_id: DefId, body: &'tcx mir::Body<'tcx>) -> psync_check::pdg::FnPdg {
+        use psync_check::pdg::{Cfg, FnPdg, PdgBranch, PdgNode, control_dependence};
+        let tcx = self.tcx;
+        let typing_env = TypingEnv::post_analysis(tcx, def_id);
+        let held = Held::new(tcx, def_id, body, |op| self.string_constant(op));
+        let blocks = &body.basic_blocks;
+        let line = |span: Span| {
+            let span = span.source_callsite();
+            tcx.sess.source_map().lookup_char_pos(span.lo()).line
+        };
+        // Is `place` the coroutine's own state, `*_1` (or `*(_1.0)`, through a `Pin`)?
+        let state = |place: &mir::Place<'tcx>| {
+            place.local.as_usize() == 1
+                || {
+                    // `_7 = copy (_1.0)` then `(*_7)`: follow the copy in the first block.
+                    blocks[mir::START_BLOCK].statements.iter().any(|st| {
+                matches!(&st.kind, StatementKind::Assign(a)
+                    if a.0.local == place.local
+                        && matches!(&a.1, Rvalue::Use(Operand::Copy(p) | Operand::Move(p), ..) if p.local.as_usize() == 1))
+            })
+                }
+        };
+        // A suspended coroutine resumes through a switch on its state in the first block. Undo
+        // that: the switch is not a branch, and each suspension (`state = k; return`) continues
+        // at the block the switch sends state `k` to.
+        let mut dispatch: HashMap<u128, mir::BasicBlock> = HashMap::new();
+        if tcx.is_coroutine(def_id)
+            && let TerminatorKind::SwitchInt { discr, targets } =
+                &blocks[mir::START_BLOCK].terminator().kind
+            && let Some(local) = discr.place().map(|p| p.local)
+            && blocks[mir::START_BLOCK].statements.iter().any(|st| {
+                matches!(&st.kind, StatementKind::Assign(a)
+                    if a.0.local == local && matches!(&a.1, Rvalue::Discriminant(p) if state(p)))
+            })
+        {
+            dispatch = targets.iter().collect();
+        }
+        let suspends_to = |b: mir::BasicBlock| -> Option<mir::BasicBlock> {
+            let data = &blocks[b];
+            if !matches!(data.terminator().kind, TerminatorKind::Return) {
+                return None;
+            }
+            data.statements.iter().rev().find_map(|st| match &st.kind {
+                StatementKind::SetDiscriminant {
+                    place,
+                    variant_index,
+                } if state(place) => {
+                    let v = variant_index.as_u32() as u128;
+                    (v >= 3).then(|| dispatch.get(&v).copied()).flatten()
+                }
+                _ => None,
+            })
+        };
+        // What a switch tests, and the label of each of its values.
+        let switch = |b: mir::BasicBlock| -> Option<(String, Labels<'_>)> {
+            let data = &blocks[b];
+            let TerminatorKind::SwitchInt { discr, .. } = &data.terminator().kind else {
+                return None;
+            };
+            let local = discr.place().map(|p| p.local);
+            let of = local.and_then(|l| {
+                data.statements.iter().rev().find_map(|st| match &st.kind {
+                    StatementKind::Assign(a) if a.0.local == l => match &a.1 {
+                        Rvalue::Discriminant(p) => Some(p.ty(&body.local_decls, tcx).ty),
+                        _ => None,
+                    },
+                    _ => None,
+                })
+            });
+            // `x?`: continues when it holds a value, leaves when it holds an error.
+            if data
+                .terminator()
+                .source_info
+                .span
+                .is_desugaring(rustc_span::DesugaringKind::QuestionMark)
+                && of.is_some_and(|t| {
+                    matches!(t.kind(), ty::Adt(adt, _) if tcx.item_name(adt.did()).as_str() == "ControlFlow")
+                })
+            {
+                return Some((
+                    "`?`".into(),
+                    Box::new(|v| match v {
+                        Some(0) => "ok".into(),
+                        _ => "exits".into(),
+                    }),
+                ));
+            }
+            match of.map(|t| t.kind()) {
+                Some(ty::Adt(adt, _)) if adt.is_enum() => {
+                    let adt = *adt;
+                    let name = tcx.item_name(adt.did()).to_string();
+                    Some((
+                        format!("match on `{name}`"),
+                        Box::new(move |v| match v {
+                            Some(v) => adt
+                                .discriminants(tcx)
+                                .find(|(_, d)| d.val == v)
+                                .map(|(i, _)| adt.variant(i).name.to_string())
+                                .unwrap_or_else(|| v.to_string()),
+                            None => "otherwise".into(),
+                        }),
+                    ))
+                }
+                _ if discr.ty(&body.local_decls, tcx).is_bool() => Some((
+                    "if".into(),
+                    Box::new(|v| match v {
+                        Some(0) => "false".into(),
+                        Some(_) | None => "true".into(),
+                    }),
+                )),
+                _ => Some((
+                    "switch".into(),
+                    Box::new(|v| v.map_or("otherwise".into(), |v| v.to_string())),
+                )),
+            }
+        };
+        let mut cfg = Cfg {
+            succ: vec![Vec::new(); blocks.len()],
+        };
+        for (b, data) in blocks.iter_enumerated() {
+            if data.is_cleanup {
+                continue;
+            }
+            let succ = &mut cfg.succ[b.as_usize()];
+            if b == mir::START_BLOCK && !dispatch.is_empty() {
+                if let Some(start) = dispatch.get(&0) {
+                    succ.push((start.as_usize(), String::new()));
+                }
+                continue;
+            }
+            if let Some(resume) = suspends_to(b) {
+                succ.push((resume.as_usize(), String::new()));
+                continue;
+            }
+            // `.await` polls in a loop until `Ready`; that loop is not a branch of the program.
+            if let TerminatorKind::SwitchInt { targets, .. } = &data.terminator().kind
+                && data
+                    .terminator()
+                    .source_info
+                    .span
+                    .is_desugaring(rustc_span::DesugaringKind::Await)
+                && let Some((test, _)) = switch(b)
+                && test == "match on `Poll`"
+            {
+                if let Some(ready) = targets.iter().find(|(v, _)| *v == 0).map(|(_, t)| t) {
+                    succ.push((ready.as_usize(), String::new()));
+                }
+                continue;
+            }
+            if let TerminatorKind::SwitchInt { targets, .. } = &data.terminator().kind
+                && let Some((_, label)) = switch(b)
+            {
+                let mut by_target: Vec<(usize, Vec<String>)> = Vec::new();
+                let all = targets
+                    .iter()
+                    .map(|(v, t)| (Some(v), t))
+                    .chain([(None, targets.otherwise())]);
+                for (v, t) in all {
+                    if blocks[t].is_cleanup {
+                        continue;
+                    }
+                    match by_target.iter_mut().find(|(x, _)| *x == t.as_usize()) {
+                        Some((_, ls)) => ls.push(label(v)),
+                        None => by_target.push((t.as_usize(), vec![label(v)])),
+                    }
+                }
+                succ.extend(by_target.into_iter().map(|(t, ls)| (t, ls.join(" | "))));
+                continue;
+            }
+            for t in data.terminator().successors() {
+                if !blocks[t].is_cleanup && !succ.iter().any(|(x, _)| *x == t.as_usize()) {
+                    succ.push((t.as_usize(), String::new()));
+                }
+            }
+        }
+        let guards = control_dependence(&cfg);
+        let mut nodes = Vec::new();
+        for (b, data) in blocks.iter_enumerated() {
+            if data.is_cleanup || guards.get(b.as_usize()).is_none() {
+                continue;
+            }
+            let terminator = data.terminator();
+            let (kind, callee, effects) = if suspends_to(b).is_some() {
+                ("await", String::new(), Vec::new())
+            } else if let TerminatorKind::Call {
+                func,
+                args,
+                fn_span,
+                ..
+            } = &terminator.kind
+                && let Some((callee, gargs)) = func.const_fn_def()
+                && !fn_span.from_expansion()
+                && tcx.crate_name(callee.krate).as_str() != "psync"
+            {
+                let args: Vec<&Operand<'tcx>> = args.iter().map(|a| &a.node).collect();
+                let mut one = Summary::default();
+                // In terms of this body's parameters (a closure's or async block's: its captures).
+                let srcs: Vec<Src> = args
+                    .iter()
+                    .map(|a| held.of(a, |c| self.string_constant(c)))
+                    .collect();
+                self.call(
+                    &mut one, None, typing_env, callee, gargs, &args, &srcs, None, *fn_span,
+                );
+                if one.effects.is_empty() && !callee.is_local() {
+                    continue;
+                }
+                let effects = one
+                    .effects
+                    .iter()
+                    .map(|l| match l.effect.arg {
+                        Some(k) => format!("{} (parameter {k})", l.effect.describe()),
+                        None => l.effect.describe(),
+                    })
+                    .collect();
+                ("call", display_path(tcx, callee), effects)
+            } else {
+                continue;
+            };
+            // An await is reached through its poll loop, which is not a branch: it runs when the
+            // poll before it runs.
+            let mut at = b;
+            if kind == "await" {
+                for _ in 0..16 {
+                    match blocks.predecessors()[at].as_slice() {
+                        [p] => {
+                            at = *p;
+                            if matches!(
+                                blocks[at].terminator().kind,
+                                TerminatorKind::SwitchInt { .. }
+                            ) {
+                                break;
+                            }
+                        }
+                        _ => break,
+                    }
+                }
+            }
+            nodes.push(PdgNode {
+                block: b.as_usize(),
+                line: line(terminator.source_info.span),
+                kind: kind.into(),
+                callee,
+                effects,
+                guards: guards[at.as_usize()].clone(),
+            });
+        }
+        let mut branches: Vec<PdgBranch> = Vec::new();
+        for n in &nodes {
+            for g in &n.guards {
+                if branches.iter().any(|x| x.block == g.branch) {
+                    continue;
+                }
+                let bb = mir::BasicBlock::from_usize(g.branch);
+                branches.push(PdgBranch {
+                    block: g.branch,
+                    line: line(blocks[bb].terminator().source_info.span),
+                    test: switch(bb)
+                        .map(|(t, _)| t)
+                        .unwrap_or_else(|| "branch".into()),
+                });
+            }
+        }
+        branches.sort_by_key(|b| b.block);
+        nodes.sort_by_key(|n| (n.line, n.block));
+        FnPdg {
+            path: if tcx.is_closure_like(def_id) {
+                tcx.def_path_str(def_id)
+            } else {
+                display_path(tcx, def_id)
+            },
+            nodes,
+            branches,
+        }
+    }
+
     /// Write the summaries of every local function for crates that depend on this one.
     pub fn write_summaries(&mut self) {
         let Some(dir) = self.summary_dir.clone() else {
@@ -1140,6 +1465,20 @@ impl<'tcx> Analyzer<'tcx> {
         ));
         if let Ok(json) = serde_json::to_string(&out) {
             let _ = std::fs::write(file, json);
+        }
+        // Next to the summaries: `target/psync/pdg`, for `cargo psync pdg`.
+        if let Some(parent) = dir.parent() {
+            let pdg = self.pdg();
+            let pdg_dir = parent.join("pdg");
+            let _ = std::fs::create_dir_all(&pdg_dir);
+            let file = pdg_dir.join(format!(
+                "{}-{:?}.json",
+                pdg.crate_name,
+                tcx.stable_crate_id(LOCAL_CRATE)
+            ));
+            if let Ok(json) = serde_json::to_string(&pdg) {
+                let _ = std::fs::write(file, json);
+            }
         }
     }
 }

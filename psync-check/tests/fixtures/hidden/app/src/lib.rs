@@ -246,3 +246,14 @@ pub fn stash_tail() -> std::io::Result<()> {
     r1?;
     r2
 }
+
+/// Not rewritten: the dependence graph shows that the write runs only after the `?` and inside
+/// the `if`.
+pub async fn guarded(path: &str) -> std::io::Result<()> {
+    let n = std::fs::read_to_string(path)?.len();
+    ready().await;
+    if n > 3 {
+        std::fs::write(path, "long")?;
+    }
+    Ok(())
+}

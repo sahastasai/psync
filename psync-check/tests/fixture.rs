@@ -23,6 +23,60 @@ fn finds_effects_hidden_in_callees() {
         .iter()
         .find(|c| c.crate_name == "app")
         .expect("app was checked");
+    // The dependence graphs: which calls run only on some branch.
+    let graphs: Vec<psync_check::pdg::CratePdg> =
+        psync_check::read_all(&target.join("psync").join("pdg"));
+    let graph = graphs
+        .iter()
+        .find(|c| c.crate_name == "app")
+        .expect("app's graphs");
+    let text: String = graph
+        .functions
+        .iter()
+        .map(psync_check::pdg::render)
+        .collect();
+    // The lines of one body's graph.
+    let body = |name: &str| -> Vec<&str> {
+        text.lines()
+            .skip_while(|l| *l != name)
+            .skip(1)
+            .take_while(|l| l.starts_with("  "))
+            .collect()
+    };
+    let find = |lines: &[&str], what: &str| -> String {
+        lines
+            .iter()
+            .find(|l| l.contains(what))
+            .unwrap_or_else(|| panic!("no `{what}` in {lines:#?}\n{text}"))
+            .to_string()
+    };
+    // In `guarded` (not rewritten), what follows the read runs only when its `?` did not leave,
+    // and the write only when `n > 3` (a guard of the `if`, so through it also of the `?`).
+    let guarded = body("guarded::{closure#0}");
+    assert!(
+        find(&guarded, "call ready").contains("`?`) = ok"),
+        "{guarded:#?}"
+    );
+    assert!(
+        find(&guarded, "await").contains("`?`) = ok"),
+        "{guarded:#?}"
+    );
+    assert!(
+        find(&guarded, "call std::fs::write").contains(", if) = true"),
+        "{guarded:#?}"
+    );
+    // `keep` writes its first parameter after an await; each caller's write names its file.
+    let keep = body("keep::{closure#0}");
+    assert!(
+        find(&keep, "call std::fs::write").contains("write file (parameter 0)"),
+        "{keep:#?}"
+    );
+    assert!(
+        text.contains("call keep  [write file \"y.json\"]"),
+        "{text}"
+    );
+    // Awaits are points of their own, not branches: nothing depends on the poll loop.
+    assert!(!text.contains("`Poll`"), "{text}");
     let at = |kind: &str, line: &str| {
         app.findings
             .iter()
