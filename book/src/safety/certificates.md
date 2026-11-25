@@ -129,6 +129,50 @@ the same memory as the sequential program. The file's example is a recursive `dr
 fields of one struct, in one level. Its summary is checked against its own body, and a summary that
 forgets one write is rejected.
 
+### From real Rust, through Charon
+
+The fragment is small, but real compiler output fits it. [Charon](https://github.com/AeneasVerif/charon)
+extracts a crate's MIR, after borrow checking, as a structured program (LLBC).
+`scripts/charon/llbc2lean.py` translates that into the fragment:
+
+- `*x = *x - 1` on a `&mut u64` parameter becomes an assignment to the callee's place `x`;
+- `_4 = &mut (*s).a`, and the reborrow `_3 = &mut *_4`, are resolved to the place they borrow,
+  `s.a`, as the borrow checker names it;
+- a call `drain(move _3, move _5)` becomes `call drain σ`, with `σ` sending `drain`'s
+  parameters to `s.a` and `s.b`, and its own locals to a frame region of the caller, one per call
+  site;
+- an `if` whose branch returns early takes the rest of the block into the other branch.
+
+On the crate in `scripts/charon/drain`, the Rust version of the example above, the script writes
+`verify/CharonDrain.lean`. Lean then decides, without trusting the script, that the summaries pass
+the link check, that a certificate running both calls of `callers` in one level covers their
+footprints, and that `check` accepts it. `mir_schedule_sound` then gives the theorem for the
+compiled code. Two red checks show the pipeline can fail. If the second call is changed to
+`drain(&mut s.b, &mut s.d)`, Lean rejects the certificate. If `drain`'s summary forgets its write
+to `*y`, Lean rejects the link check.
+
+**Aeneas**, built on Charon, goes further: it turns the same LLBC into pure Lean functions, with
+each `&mut` replaced by a value passed in and returned (`scripts/charon/aeneas/Drain.lean.txt`):
+
+```lean
+def callers (s : S) : Result S := do
+  let (i, i1) ← drain s.a s.b
+  let (i2, i3) ← drain s.c s.d
+  ok { a := i, b := i1, c := i2, d := i3 }
+```
+
+There, "the two calls commute" is an ordinary equation, `callers s = callers_swapped s`. It even
+shows why psync replays exits in program order: in `Result`, if both calls failed, the two orders
+would return different errors. The cost is a second proof world. Aeneas's library needs Lean 4.36
+and Mathlib, while `verify/` uses Lean 4.22 and only Lean's core library, and every function needs
+its own functional proof. For psync, whose question is only *which places* a call touches,
+the footprint route (Charon into the fragment, then `decide`) is the one that scales. Aeneas is
+the tool for the rare call whose commutation depends on *values*.
+
+The translation itself is not proved. It is a small script, it stops with an error on anything
+outside the fragment (loops, `dyn`, by-value arguments, unwinding), and its output is checked, not
+trusted, for everything except its faithfulness to the LLBC.
+
 What the fragment leaves out, and so stays assumed for real Rust:
 
 - **References stored in memory** (`*p` where `p` was computed). The borrow checker is what lets
