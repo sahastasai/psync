@@ -90,6 +90,7 @@ async fn early(stop: bool, api: &Api) -> Result<u32, Error> {
     n1: if stop { return Ok (0) ?
     n2: b = two() [await]
     level 0: n0 || n1 || n2
+  unclassified (assumed to read; `strict` treats them as writes): one, two
 ```
 
 All three run in one level. After the join:

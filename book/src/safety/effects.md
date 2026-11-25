@@ -103,7 +103,20 @@ the receiver, in case the receiver is some other type with a method of that name
 change they were only the service read, so in synchronous code `if !p.exists() { .. }` and a
 later `fs::write(&p, ..)` could run at once (test `path_exists_reads_the_file_system`).
 
-Reads never conflict with reads. Here is what psync now builds for a read-check-recreate function:
+Reads never conflict with reads. Here is a read-check-recreate function:
+
+```rust,ignore
+#[psync::graph]
+async fn replace(api: &Api, limits: &Limits, name: &str, obj: &Obj) -> Result<(), Error> {
+    let old = api.get(name).await?;
+    let quota = limits.get(obj.ns).await?;
+    api.delete(name).await?;
+    api.create(obj).await?;
+    Ok(())
+}
+```
+
+and what psync builds for it:
 
 ```text
   region 0:
