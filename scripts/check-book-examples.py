@@ -37,7 +37,11 @@ with tempfile.TemporaryDirectory() as tmp:
         for (lang, code, pos), (next_lang, report, _) in zip(found, found[1:]):
             if not lang.startswith("rust") or next_lang != "text":
                 continue
+            # `explain` output starts with a header naming the function.
+            report = re.sub(r"\A\s*psync::graph `[^`]*`:\n", "", report)
             if not report.lstrip().startswith("region") or not re.search(r"\bfn\b", code):
+                continue
+            if "{ /* ... */ }" in code:  # the body is elided; the full function is elsewhere
                 continue
             total += 1
             where = f"{md.relative_to(root)} (offset {pos})"
