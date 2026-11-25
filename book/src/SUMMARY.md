@@ -47,6 +47,10 @@
 - [Certified schedules](./safety/certificates.md)
 - [Roadmap: beyond tokens](./safety/roadmap.md)
 
+# Phase II: synchronous code
+
+- [Design](./phase2/design.md)
+
 # Case studies
 
 - [Sixteen real-world shapes](./case-studies/graph-suite.md)

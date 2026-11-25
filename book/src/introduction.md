@@ -104,7 +104,8 @@ psync started from a research proposal with two phases:
   compiler information (HIR, THIR, MIR: types, resolved calls, aliasing, effects). The macro
   described in this book is step 2, and [`cargo psync`](./safety/check.md) is step 3.
 - **Phase II, synchronous concurrency.** Apply the same analyses to ordinary synchronous code.
-  Split independent regions into tasks, and run them on parallel workers.
+  Split independent regions into tasks, and run them on parallel workers. The
+  [design](./phase2/design.md) is written; the prototype is next.
 
 The macro sees tokens, not types. That is why it is deliberately conservative, and why some
 decisions need a hint from you. [What is checked, what is assumed](./internals/soundness.md) and
