@@ -632,6 +632,57 @@ mod tests {
         assert_eq!(level_of("node1"), level_of("node2"), "{:?}", r.levels);
     }
 
+    /// tauri-bundler's `prepare_tools`: three cached downloads, with path joins and a choice
+    /// between two string literals in between. Those bindings are pure, and a node whose edges all
+    /// come from one chain joins that chain, so the three downloads start together.
+    #[test]
+    fn path_joins_and_pure_ifs_do_not_delay_downloads() {
+        let mut f: ItemFn = syn::parse_quote! {
+            fn prepare_tools(tools_path: &Path, arch: &str) -> Result<PathBuf> {
+                let apprun = tools_path.join(format!("AppRun-{arch}"));
+                #[psync::par]
+                #[psync::independent]
+                if !apprun.exists() {
+                    let data = download("apprun")?;
+                    write_and_make_executable(&apprun, &data)?;
+                }
+                let linuxdeploy_arch = if arch == "i686" { "i386" } else { arch };
+                let linuxdeploy = tools_path.join(format!("linuxdeploy-{linuxdeploy_arch}"));
+                #[psync::par]
+                #[psync::independent]
+                #[psync::speculate]
+                if !linuxdeploy.exists() {
+                    let data = download(&format!("linuxdeploy-{linuxdeploy_arch}"))?;
+                    write_and_make_executable(&linuxdeploy, &data)?;
+                }
+                Ok(linuxdeploy)
+            }
+        };
+        let report = transform_fn(&mut f, &Options::default());
+        let r = &report.regions[0];
+        let downloads: Vec<usize> = (0..r.nodes.len())
+            .filter(|&n| r.nodes[n].label.contains("psync :: par"))
+            .map(|n| {
+                let c = r.chains.iter().position(|c| c.contains(&n)).unwrap();
+                r.levels.iter().position(|l| l.contains(&c)).unwrap()
+            })
+            .collect();
+        assert_eq!(downloads, [0, 0], "{:?}", r.levels);
+    }
+
+    /// `handle.join()` waits for a thread: unlike `path.join(name)`, it is not a pure value.
+    #[test]
+    fn thread_join_is_not_pure() {
+        let e: syn::Expr = syn::parse_quote!(handle.join());
+        assert!(!classify::is_pure(&e));
+        let e: syn::Expr = syn::parse_quote!(dir.join("a"));
+        assert!(classify::is_pure(&e));
+        let e: syn::Expr = syn::parse_quote!(if a == 1 { "x" } else { b });
+        assert!(classify::is_pure(&e));
+        let e: syn::Expr = syn::parse_quote!(if a == 1 { f() } else { b });
+        assert!(!classify::is_pure(&e));
+    }
+
     /// A loop body may end in an await without `;` (`api.put(x).await`, as in DataFusion's join
     /// fuzz tests and greptimedb's `wait_datanodes_alive`): the generated code was invalid and the
     /// macro panicked. Found by `psync-scan` over the audit corpus.

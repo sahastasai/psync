@@ -13,7 +13,8 @@ point forward in program order, so the graph is acyclic by construction.
 
 Nodes are visited in program order. Node `v` joins the chain of its predecessor `u` when:
 
-- `u` is `v`'s **only** predecessor;
+- `u` is `v`'s last predecessor, and all of `v`'s predecessors are in `u`'s chain (members of a
+  chain run in order, so when `u` has run, they all have);
 - `u` is currently the last node of its chain; and
 - either `u` has **only one** successor (`v`), or `u` does not await and every other successor of
   `u` also (transitively) waits for `v`.
@@ -27,6 +28,20 @@ cache.insert(key, resp);             // reads key, and waits for resp anyway
 ```
 
 Fusing `key` into `resp`'s chain delays nothing, and it keeps the per-item pipeline whole.
+
+The first condition allows several edges into `v` as long as they all come from one chain. In
+tauri-bundler, the second download reads both `linuxdeploy_arch` and `linuxdeploy`, which is
+computed from it:
+
+```rust,ignore
+let linuxdeploy_arch = if arch == "i686" { "i386" } else { arch };
+let linuxdeploy = tools_path.join(format!("linuxdeploy-{linuxdeploy_arch}.AppImage"));
+#[psync::par]
+if !linuxdeploy.exists() { /* download */ }   // reads both
+```
+
+The edge from `linuxdeploy_arch` is implied by the other two. Requiring a single predecessor left
+the download in a chain of its own, a level after the first download.
 
 Any other node starts a new chain.
 

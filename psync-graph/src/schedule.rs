@@ -87,14 +87,17 @@ pub(crate) fn plan(nodes: &[Node]) -> Plan {
             }
         }
     }
-    // Fuse `u -> v` when that edge is the only way into `v` and either the only way out of `u`,
-    // or `u` does not wait and everything else after `u` waits for `v` anyway (`let key = ..;`
-    // read by a request and by what uses its response): fusing then delays nothing.
+    // Fuse `u -> v` when every edge into `v` comes from the chain that ends in `u` (members of a
+    // chain run in order, so `u` running means they all have), and either that is the only way
+    // out of `u`, or `u` does not wait and everything else after `u` waits for `v` anyway
+    // (`let key = ..;` read by a request and by what uses its response): fusing then delays
+    // nothing.
     let mut chain_of = vec![usize::MAX; n];
     let mut chains: Vec<Vec<usize>> = Vec::new();
     for v in 0..n {
-        if let [u] = preds[v][..]
+        if let Some(&u) = preds[v].iter().max()
             && chains[chain_of[u]].last() == Some(&u)
+            && preds[v].iter().all(|p| chain_of[*p] == chain_of[u])
             && (succs[u].len() == 1
                 || !nodes[u].awaits && {
                     let after_v = reachable(&succs, v);
