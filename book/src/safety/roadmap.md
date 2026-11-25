@@ -42,8 +42,11 @@ and optionally after `canonicalize` (one extra syscall per path).
 
 **Status.** Built for loops and files ([Checking per-item files](../internals/loops.md#checking-per-item-files)).
 When every per-item path can be evaluated ahead, the items' paths are compared before the loop
-starts, and with a duplicate the loop runs as written. A canonicalizing option, other domains and
-the straight-line branch above are next.
+starts, and with a duplicate the loop runs as written. Straight-line asynchronous code is built
+too ([Paths compared at run time](../internals/schedule.md#paths-compared-at-run-time)). It does
+not branch between two schedules. Each dropped dependency becomes a gate that orders the two
+chains when their paths overlap. A canonicalizing option, other domains, Phase II and the
+checker's view of gates are next.
 
 ## 2. Effect contracts checked by the type system
 
@@ -257,7 +260,7 @@ tokio) is open.
 
 | Step | Closes | Effort |
 |---|---|---|
-| 1. runtime target checks (built for loop files) | the duplicate-item assumption, computed paths | small: straight-line paths and other domains next |
+| 1. runtime target checks (built for files: loops and asynchronous straight-line code) | the duplicate-item assumption, computed paths | small: other domains, Phase II, the checker next |
 | 3. effect sanitizer (middleware + differential traces) | everything the static model misses, in tests | medium |
 | 2. type-checked effect contracts | lying names | medium, ongoing per ecosystem |
 | 4. HTTP semantics | coarse service conflicts | small |

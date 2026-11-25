@@ -30,6 +30,7 @@ pub(crate) struct Scope {
 }
 
 /// A movable statement and what the analysis knows about it.
+#[derive(Clone)]
 pub(crate) struct Node {
     /// The statement as written.
     pub stmt: Stmt,

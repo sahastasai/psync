@@ -951,7 +951,7 @@ const TOTAL_METHODS: &[&str] = &[
 
 /// An expression that can be evaluated once more, ahead of the loop, for every item: it has no
 /// effect and cannot panic (no indexing, no arithmetic, no unknown call).
-fn total(e: &Expr) -> bool {
+pub(crate) fn total(e: &Expr) -> bool {
     match e {
         Expr::Lit(_) | Expr::Path(_) => true,
         Expr::Field(f) => total(&f.base),
@@ -1003,7 +1003,7 @@ fn total(e: &Expr) -> bool {
 }
 
 /// Replace the names bound by `lets` in `tokens` with their values, in parentheses.
-fn substitute(
+pub(crate) fn substitute(
     tokens: TokenStream,
     lets: &std::collections::HashMap<String, TokenStream>,
 ) -> TokenStream {

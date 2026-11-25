@@ -278,7 +278,10 @@ warnings. The findings summary covers only crates recompiled in this run.
 ## What it does not check
 
 - **Targets computed at run time.** `fs::write(&path)` writes "some file". Two such writes
-  conflict, even when the paths differ at run time.
+  conflict, even when the paths differ at run time. The macro can run them concurrently with
+  a gate that orders them when the paths overlap
+  ([Paths compared at run time](../internals/schedule.md#paths-compared-at-run-time)). The driver
+  does not see the gate in MIR, so it may report the pair as a conflict.
 - **Loop items naming different objects.** The macro assumes that targets computed from the loop
   item differ between iterations. For files whose path it can evaluate ahead, the generated code
   checks this at run time instead ([Loop rewriting](../internals/loops.md#checking-per-item-files)).

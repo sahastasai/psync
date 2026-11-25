@@ -87,7 +87,9 @@ may be the same. Targets are compared only as far as tokens allow:
   its text must start with a character other than `/` or `\`, and not with a drive letter such
   as `C:`, because `Path::join` with an absolute path replaces the base. The binding's value must
   not depend on a `mut` binding, and a later `let` of a name the value depends on forgets it.
-- Anything else computed may be anything.
+- Anything else computed may be anything. In asynchronous code, two such file paths can still run
+  concurrently, and they are compared at run time
+  ([Paths compared at run time](../internals/schedule.md#paths-compared-at-run-time)).
 
 `Path::new(x)`, `PathBuf::from(x)` and the like name what `x` names, so
 `Path::new(&format!("{dir}/one")).exists()` reads the file `{dir}/one`.

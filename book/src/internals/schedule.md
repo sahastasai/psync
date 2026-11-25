@@ -107,3 +107,67 @@ Details that matter:
   chain whose release comes later is not shadowed by a later level's chain.
 - The whole block is emitted in place of the region's statements, and the statements after it see
   the same bindings as before.
+
+## Paths compared at run time
+
+`fs::read_to_string(src)` and `fs::write(dst, ..)` conflict on tokens, because `src` and `dst`
+may name one file. In asynchronous code, when both paths can be evaluated at the start of the
+region, the macro schedules them as if differently written paths named different files, and keeps
+the order at run time instead (`psync-graph/src/gates.rs`).
+
+A path qualifies under the rules the [loop check](./loops.md#checking-per-item-files) uses:
+- it is total: names, fields, references, `format!`, `join` and the like, with no indexing, no
+  arithmetic and no other call;
+- it depends on nothing the region binds, except a `let` bound once to a total value, which is
+  substituted;
+- it depends on no `mut` binding.
+
+So its value at the start of the region is its value when the statement runs. The same expression
+written twice stays one file, and the statements stay ordered.
+
+The region is planned twice: once as written, and once with each qualifying path replaced by a
+name for its expression. Every dependency that only the second plan drops must come from qualifying
+paths. Each one becomes a **gate** between its two chains:
+
+```rust,ignore
+let __psync_overlap = |a: &dyn AsRef<Path>, b: &dyn AsRef<Path>| { /* normalize; one contains the other */ };
+let __psync_overlap1: bool = false || __psync_overlap(&(src), &(dst));
+let (__psync_taken0, __psync_taken1) = {
+    let __psync_gate2_0 = ::psync::__private::Gate::new();
+    let mut __psync_f0 = maybe_done_at::<..>(async {
+        let __psync_r = { /* chain 0: the read */ };
+        __psync_gate2_0.open();
+        __psync_r
+    });
+    let mut __psync_f1 = maybe_done_at::<..>(async {
+        if __psync_overlap1 { __psync_gate2_0.wait().await; }
+        let __psync_r = { /* chain 1: the write */ };
+        __psync_r
+    });
+    /* the join, as before */
+};
+```
+
+When the files overlap, the later chain waits for the earlier chain to end, which is the order the
+statements were written in. Paths overlap when one is the other or a directory that contains it,
+after `Path::components` (so `dir/./a` is `dir/a`). Two gated chains run in the same level. A
+dependency into a later level needs no gate, since that level starts after the earlier one ends.
+The relaxed plan is not used when:
+- a gate would wait for a chain in a later level, which would never start;
+- a gate would wait for a chain that starts later in program order. That rule makes gates
+  acyclic, so they cannot deadlock.
+
+`Gate` is an atomic flag and one waker. Every chain of a join is polled by one task, so that waker
+is the join's. It is `Sync`, so the function's future stays `Send`.
+
+Limits:
+- only file paths, and only asynchronous code. Phase II's threads would need a different gate;
+- symbolic links, hard links and case-folding file systems can make two different paths one file,
+  the same assumption psync makes for two different literals;
+- the region's certificate describes the relaxed plan, in which each qualifying path is its own
+  place, so it holds only together with the gate;
+- `cargo psync check` does not see the gate in MIR and may report the pair as a conflict.
+
+`tests/targets.rs` runs a read of `src` and a write of `dst`. With two files they overlap. With
+one file, written as `dir/./a` and `dir/a`, the write waits. Without the gate, the read returns the
+new contents.
