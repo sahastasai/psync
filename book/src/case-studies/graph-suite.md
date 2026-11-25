@@ -100,3 +100,29 @@ Two features make this loop concurrent:
   `self.client`. Those do not overlap.
 
 An error on group 99 is still returned as the first failing group, in order.
+
+## Exercises
+
+1. A P1 region awaits three independent calls of 20, 30 and 50 ms. What does it take before and
+   after the rewrite, and what is the speedup?
+2. A P2 loop looks up 6 keys at 40 ms each. What does it take with the default `bound`, and with
+   `bound = 4`?
+3. Why does the suite report a geometric mean, not an arithmetic one?
+4. Without its `speculate` hint, matrix-rust-sdk's example runs at about 1.0×. What does psync
+   keep in order there, and why does the hint make that safe?
+
+<details>
+<summary>Answers</summary>
+
+1. 100 ms before, 50 ms after (the longest wait), so 2×: the sum of the waits over the longest.
+2. 240 ms sequentially. With the default of 16 all six run at once: 40 ms, 6×. With `bound = 4`
+   the first four take 40 ms, then the last two another 40 ms: 80 ms, 3×.
+3. Speedups are ratios. A geometric mean treats 2× faster and 2× slower as cancelling out, and
+   is not dominated by one large ratio the way an arithmetic mean is.
+4. The PUTs go to distinct event types, so they do not conflict with each other. But each PUT
+   writes, and each one comes after a `?` that may leave. psync does not start a write
+   before an earlier statement that may exit, so the eight PUTs stay one after another. The PUTs
+   set account data to fixed values, so doing one that sequential code would have skipped after
+   an error is harmless. That is what `speculate` says.
+
+</details>
