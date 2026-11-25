@@ -68,5 +68,6 @@
 # Reference
 
 - [Attributes and hints](./reference/attributes.md)
+- [API reference (Rustdoc)](./reference/api.md)
 - [Environment variables and tools](./reference/tools.md)
 - [Glossary](./reference/glossary.md)

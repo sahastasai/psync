@@ -169,4 +169,5 @@ and the `priority_demo` terminal demo are not checked into this branch yet. `car
 ## Publishing
 
 The book is served at <https://psync.sahasta.com> by a Cloudflare Worker with static assets
-(`book/wrangler.jsonc`). To update it: `cd book && mdbook build && npx wrangler@4 deploy`.
+(`book/wrangler.jsonc`), with the Rustdoc of every crate under [/api/](https://psync.sahasta.com/api/). To
+update it: `scripts/build-site.sh && cd book && npx wrangler@4 deploy`.
