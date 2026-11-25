@@ -1454,8 +1454,12 @@ fn io_effect(path: &str, name: &str) -> Option<(Domain, Access, bool)> {
 /// One chain of a concurrent level, as the macro tagged it.
 struct Chain {
     body: DefId,
+    /// Its first and last statements, in program order within the region.
     order: u64,
+    last: u64,
     exits: bool,
+    /// Its first statement that may exit early (when `exits`).
+    exit_at: u64,
     spec: bool,
     indep: bool,
     /// A job of synchronous code (`job_at`), not a future: it cannot be dropped halfway.
@@ -1549,18 +1553,35 @@ impl<'a, 'tcx> Checker<'a, 'tcx> {
             match name.as_str() {
                 // A future of an async level, or a job of a synchronous one.
                 "maybe_done_at" | "job_at" => {
-                    let (Some(level), Some(order), Some(exits), Some(spec), Some(indep)) =
-                        (usize_at(0), usize_at(1), bool_at(2), bool_at(3), bool_at(4))
+                    let (
+                        Some(level),
+                        Some(order),
+                        Some(last),
+                        Some(exits),
+                        Some(exit_at),
+                        Some(spec),
+                        Some(indep),
+                    ) = (
+                        usize_at(0),
+                        usize_at(1),
+                        usize_at(2),
+                        bool_at(3),
+                        usize_at(4),
+                        bool_at(5),
+                        bool_at(6),
+                    )
                     else {
                         continue;
                     };
-                    let Some(body) = coroutine_of(gargs.type_at(5)) else {
+                    let Some(body) = coroutine_of(gargs.type_at(7)) else {
                         continue;
                     };
                     let chain = Chain {
                         body,
                         order,
+                        last,
                         exits,
+                        exit_at,
                         spec,
                         indep,
                         sync: name.as_str() == "job_at",
@@ -1633,12 +1654,29 @@ impl<'a, 'tcx> Checker<'a, 'tcx> {
                         );
                     }
                 }
-                // A write runs before an earlier statement that may exit is known not to. A
-                // panic in the earlier chain's callees (`unwrap`, `expect`, `panic!` in the user's
-                // code) is an exit too, although the macro's tokens do not show it.
-                let panics = !earlier.exits && summaries[i].panics;
-                if (earlier.exits || panics)
-                    && !later.spec
+            }
+        }
+        // A write runs before a statement that may exit, earlier in program order, is known not
+        // to: sequential code would not have run it. That needs a member of the writing chain
+        // after the exit (chains are interleaved in program order, so either may come first). A
+        // panic in a chain's callees (`unwrap`, `expect`, `panic!` in the user's code) is an exit
+        // too, although the macro's tokens do not show it, from any of its statements.
+        for (j, later) in chains.iter().enumerate() {
+            for (i, earlier) in chains.iter().enumerate() {
+                if i == j {
+                    continue;
+                }
+                let panics = summaries[i].panics;
+                let leaves_at = match (earlier.exits, panics) {
+                    (_, true) => earlier.order,
+                    (true, false) => earlier.exit_at,
+                    (false, false) => continue,
+                };
+                if later.last <= leaves_at {
+                    continue;
+                }
+                let panics = !earlier.exits && panics;
+                if !later.spec
                     && let Some(w) = summaries[j]
                         .effects
                         .iter()

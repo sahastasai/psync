@@ -175,13 +175,17 @@ Findings are kept per crate between runs, so running `check` again without chang
 ### 1. Markers in the generated code
 
 The macro now tags what it made concurrent. Each chain of a concurrent level is wrapped in
-`maybe_done_at::<LEVEL, ORDER, EXITS, SPEC, INDEP, _>(async { .. })` instead of `maybe_done`, and
+`maybe_done_at::<LEVEL, ORDER, LAST, EXITS, EXIT_AT, SPEC, INDEP, _>(async { .. })` instead of
+`maybe_done`, and
 each prefetched loop prefix in `over_at::<LOOP, TERMINATES, SPEC, INDEP, ..>`. The const
 generics record what the macro assumed:
 - `LEVEL`: which join the chain belongs to. It is numbered from 1 within each annotated function, in
   the order the macro emits joins, so it is not an index into the report's `levels`. The driver only compares it: chains with the same `LEVEL` run concurrently;
-- `ORDER`: the chain's first statement's position in its block, which orders exits;
-- whether it may exit early;
+- `ORDER` and `LAST`: the positions of the chain's first and last statements in its block;
+- whether it may exit early, and `EXIT_AT`, the position of its first statement that may. A write
+  in chain Y is speculative when another chain X may exit at a statement before Y's last one:
+  sequential code would have left before running it. Chains are interleaved in program order, so
+  X need not start first. A chain whose callees may panic may leave from its first statement;
 - whether it carries `#[psync::speculate]` or `#[psync::independent]`;
 - for loops, whether the body can end the loop.
 
@@ -229,7 +233,7 @@ program order:
 | Finding | When |
 |---|---|
 | `conflict` | two chains of one level have conflicting effects: same domain, one writes, targets may be the same, and neither is `independent` |
-| `speculative-write` | a chain writes, an earlier chain of the same level may exit (a `?`, `return`, `break` or `continue`, or a callee that panics explicitly: `unwrap`, `expect`, `panic!`, `assert!`, `unreachable!`, `todo!`), and the writer is not `speculate` |
+| `speculative-write` | a chain writes, another chain of the same level may exit at a statement before the writer's last one (a `?`, `return`, `break` or `continue`, or, from any of its statements, a callee that panics explicitly: `unwrap`, `expect`, `panic!`, `assert!`, `unreachable!`, `todo!`), and the writer is not `speculate` |
 | `loop-speculative-write` | a prefetched prefix writes, the body can end the loop, and the loop is not `speculate` |
 | `interior-mutability` (note) | two chains capture the same variable whose type, behind references, `Rc`, `Arc` or `Box`, is a `Cell`, `RefCell`, `OnceCell`, `Mutex`, `RwLock` or atomic |
 | `output-order` (note) | two chains both print |

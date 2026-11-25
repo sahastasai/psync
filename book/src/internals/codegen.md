@@ -18,7 +18,7 @@ async fn profile_page(api: &Api, user_id: u64) -> Result<Page, Error> {
 Each chain becomes an `async` block, labeled `'__psync_chainK`. Its exit slots are declared first:
 
 ```rust,ignore
-let mut __psync_f0 = ::psync::__private::maybe_done_at::<1, 0, true, false, false, _>(async {
+let mut __psync_f0 = ::psync::__private::maybe_done_at::<1, 0, 2, true, 0, false, false, _>(async {
     let mut __psync_e0_0_0 = ::core::option::Option::None;
     let mut __psync_e0_1_0 = ::core::option::Option::None;
     #[allow(unused_labels, unreachable_code, clippy::let_unit_value)]

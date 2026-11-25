@@ -136,8 +136,8 @@ Shortened, and with the paths trimmed, this is the code that comes out:
 async fn profile_page(api: &Api, user_id: u64) -> Result<Page, Error> {
     const __PSYNC_GRAPH: Option<&str> = option_env!("PSYNC_FACTS_STAMP");
     let (__psync_taken0, __psync_taken1, __psync_taken2) = {
-        // Chain 0: user -> avatar. Join 1 of this function, starts at statement 0, may exit.
-        let mut __psync_f0 = __private::maybe_done_at::<1, 0, true, false, false, _>(async {
+        // Chain 0: user -> avatar. Join 1 of this function, statements 0 to 2, may exit at 0.
+        let mut __psync_f0 = __private::maybe_done_at::<1, 0, 2, true, 0, false, false, _>(async {
             let mut __psync_e0_0_0 = None;                // where `user`'s `?` is recorded
             let mut __psync_e0_1_0 = None;                // where `avatar`'s `?` is recorded
             let __psync_out = '__psync_chain0: {
@@ -189,10 +189,10 @@ things matter here:
   the error in a slot and ends only its own chain. After the join, the slots are checked in the
   order the statements were written, so the function fails at the same `?`, with the same error,
   as the sequential code would. This is what `exits.rs` does.
-- **The macro leaves notes for the compiler.** `maybe_done_at::<1, 0, true, false, false, _>` does
-  nothing at run time beyond `maybe_done`. Its const generic arguments record which join of the
-  function the chain belongs to (they are numbered from 1), the statement the chain starts at,
-  whether it may exit, and the `speculate` and `independent` hints. Generic arguments survive all the way into MIR, so `psync-driver` can read back exactly
+- **The macro leaves notes for the compiler.** `maybe_done_at::<1, 0, 2, true, 0, false, false, _>`
+  does nothing at run time beyond `maybe_done`. Its const generic arguments record which join of
+  the function the chain belongs to (they are numbered from 1), its first and last statements,
+  whether it may exit and at which statement first, and the `speculate` and `independent` hints. Generic arguments survive all the way into MIR, so `psync-driver` can read back exactly
   what the macro assumed, and check it. The constant `__PSYNC_GRAPH` marks the function as
   rewritten. Its value, `option_env!("PSYNC_FACTS_STAMP")`, makes cargo rebuild the crate when
   the compiler facts change.

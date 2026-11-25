@@ -48,7 +48,9 @@ impl<F: Future + Unpin> MaybeDone<F> {
 pub fn job_at<
     const LEVEL: usize,
     const ORDER: usize,
+    const LAST: usize,
     const EXITS: bool,
+    const EXIT_AT: usize,
     const SPEC: bool,
     const INDEP: bool,
     F,
@@ -59,13 +61,16 @@ pub fn job_at<
 }
 
 /// [`maybe_done`], tagged for `cargo psync check`: the chain belongs to level `LEVEL` of the
-/// enclosing function, starts at statement `ORDER`, may exit early (`EXITS`), and carries the
+/// enclosing function, runs statements `ORDER` to `LAST` (of its region), may exit early (`EXITS`,
+/// first at statement `EXIT_AT`), and carries the
 /// `speculate` (`SPEC`) and `independent` (`INDEP`) hints. The tags cost nothing at run time.
 #[inline(always)]
 pub fn maybe_done_at<
     const LEVEL: usize,
     const ORDER: usize,
+    const LAST: usize,
     const EXITS: bool,
+    const EXIT_AT: usize,
     const SPEC: bool,
     const INDEP: bool,
     F: Future,

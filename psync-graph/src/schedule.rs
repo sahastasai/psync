@@ -464,7 +464,16 @@ pub(crate) fn emit(
             // `maybe_done_at` is `maybe_done` plus what the analysis assumed, as const generics,
             // for `cargo psync check` to verify against the compiled callees.
             let order = proc_macro2::Literal::usize_unsuffixed(chain_positions[0]);
+            let last = proc_macro2::Literal::usize_unsuffixed(*chain_positions.last().unwrap());
             let exits = members.iter().any(|n| n.exits);
+            // Where the chain's first early exit is, in program order (0 when it has none).
+            let exit_at = proc_macro2::Literal::usize_unsuffixed(
+                members
+                    .iter()
+                    .zip(&chain_positions)
+                    .find(|(n, _)| n.exits)
+                    .map_or(0, |(_, p)| *p),
+            );
             let spec = members.iter().any(|n| n.speculate);
             let indep = members.iter().any(|n| n.independent);
             let slot_idents = code.slot_idents();
@@ -473,7 +482,7 @@ pub(crate) fn emit(
                 // A job: the chain as a closure, run once, its panic caught with the member
                 // that raised it.
                 futures.push(quote!(let mut #f = ::core::option::Option::Some(
-                    #krate::__private::job_at::<#level_id, #order, #exits, #spec, #indep, _>(|| { #body })
+                    #krate::__private::job_at::<#level_id, #order, #last, #exits, #exit_at, #spec, #indep, _>(|| { #body })
                 );));
                 let nones = slot_idents
                     .iter()
@@ -489,7 +498,7 @@ pub(crate) fn emit(
                     };
                 });
             } else {
-                futures.push(quote!(let mut #f = #krate::__private::maybe_done_at::<#level_id, #order, #exits, #spec, #indep, _>(async { #body });));
+                futures.push(quote!(let mut #f = #krate::__private::maybe_done_at::<#level_id, #order, #last, #exits, #exit_at, #spec, #indep, _>(async { #body });));
                 takes.push(quote!(let (#(#slot_idents,)* #out_k) = #taken;));
             }
             // In synchronous code a panic is replayed like an exit, at the member that raised it.

@@ -74,8 +74,8 @@ one block:
 ```rust,ignore
 {
     let (__psync_taken0, __psync_taken1) = {
-        let mut __psync_f0 = ::psync::__private::maybe_done_at::<1, 0, true, false, false, _>(async { /* chain 0 */ });
-        let mut __psync_f1 = ::psync::__private::maybe_done_at::<1, 1, true, false, false, _>(async { /* chain 1 */ });
+        let mut __psync_f0 = ::psync::__private::maybe_done_at::<1, 0, 2, true, 0, false, false, _>(async { /* chain 0 */ });
+        let mut __psync_f1 = ::psync::__private::maybe_done_at::<1, 1, 1, true, 1, false, false, _>(async { /* chain 1 */ });
         ::core::future::poll_fn(|__psync_cx| {
             let __psync_done0 = __psync_f0.poll_step(__psync_cx);
             let __psync_done1 = __psync_f1.poll_step(__psync_cx);
