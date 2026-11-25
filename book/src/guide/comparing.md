@@ -68,3 +68,50 @@ async fn main() -> anyhow::Result<()> { /* ... */ }
 ```
 
 That is exactly how kube-rs's `dynamic_api` example was annotated for the end-to-end runs.
+
+## Exercises
+
+1. You build with `PSYNC_GRAPH=off`, then without it, and both binaries take the same time.
+   Before concluding that psync does not help, what two things do you check?
+2. Why alternate the two builds run by run, instead of running ten sequential runs and then ten
+   psync runs?
+3. Your sequential build shows three requests in flight at once. Name two possible causes.
+4. Predict what psync rewrites in this function, then check with `psync-expand` (give it the
+   line of `inner(api).await + blk.await`, or it picks the innermost function):
+
+   ```rust,ignore
+   #[psync::graph]
+   async fn outer(api: &Api) -> u32 {
+       async fn inner(api: &Api) -> u32 {
+           let a = api.get_a().await;
+           let b = api.get_b().await;
+           a + b
+       }
+       let blk = async {
+           let c = api.get_c().await;
+           let d = api.get_d().await;
+           c + d
+       };
+       inner(api).await + blk.await
+   }
+   ```
+
+<details>
+<summary>Answers</summary>
+
+1. That the "off" binary really is sequential and the other really is not: Cargo may have reused
+   one expansion for both ([Cargo does not see `PSYNC_GRAPH`](#cargo-does-not-see-psync_graph)).
+   Then that there is waiting to overlap: with no latency, or a saturated server, psync has
+   nothing to gain.
+2. The network and the machine drift: caches warm up, other load comes and goes. Alternating
+   spreads that drift over both builds equally, so it does not show up as a difference
+   between them.
+3. The expansion was reused from a psync build (touch the files, or use separate target
+   directories). Or the code was already concurrent without psync, for example through a `join!`
+   or a spawned task. The second is not a bug, but it means the sequential baseline is not
+   one request at a time.
+4. Only the async block: `c || d`. The nested `fn inner` is an item, which needs its own
+   attribute, so `a` and `b` stay sequential. The last line is the block's value, a barrier, so
+   `inner(api).await` and `blk.await` run one after the other, as written.
+
+</details>

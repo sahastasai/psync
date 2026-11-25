@@ -254,3 +254,67 @@ This is still a token-level analysis:
   a write may still run ahead of an earlier call that panics. The compiler can:
   [`cargo psync check`](./check.md) reports such a write, and with
   [compiler facts](./facts.md) the macro keeps it in order.
+
+## Exercises
+
+Predict the edges, then check with `psync-expand FILE LINE`.
+
+1. ```rust,ignore
+   async fn f1() -> std::io::Result<()> {
+       tokio::fs::remove_dir_all("out").await?;
+       let a = tokio::fs::read("out/a.txt").await?;
+       let b = tokio::fs::read("cfg.toml").await?;
+       Ok(())
+   }
+   ```
+2. ```rust,ignore
+   async fn f2(client: &Client, id: &str) -> Result<(), Error> {
+       let backup = client.get_account_data("m.megolm_backup.v1").await;
+       client.put_account_data(format!("m.secret_storage.key.{id}"), "{}").await;
+       let key = client.get_account_data("m.secret_storage.key.k1").await;
+       Ok(())
+   }
+   ```
+3. ```rust,ignore
+   async fn f3(&self, id: u64) -> Result<(), Error> {
+       let user = self.db.get_user(id).await?;
+       self.cache.put(id, &user).await;
+       let other = self.db.get_user(id + 1).await?;
+       delete_user(id).await;
+       let again = self.db.get_user(id).await?;
+       Ok(())
+   }
+   ```
+   Why does `delete_user` conflict with both `get_user(id)` and `get_user(id + 1)`?
+4. ```rust,ignore
+   async fn f4(api: &Api) -> Result<(), Error> {
+       let cfg = api.get_config("main").await;
+       let out = tokio::process::Command::new("ls").output().await;
+       let home = std::env::var("HOME");
+       let more = api.get_config("other").await;
+       Ok(())
+   }
+   ```
+
+<details>
+<summary>Answers</summary>
+
+1. One edge, ``n0 -> n1 (write file "out" (fs::remove_dir_all) vs read file "out/a.txt" (fs::read))``:
+   a directory contains the paths inside it. `cfg.toml` is neither, so the level is
+   `n0->n1 || n2`. The reads may run before `remove_dir_all` returns, because reads are not
+   held back by an earlier `?`.
+2. Only `n1 -> n2`. The template `m.secret_storage.key.{id}` keeps its literal prefix, so it cannot
+   be `m.megolm_backup.v1`, but it may be `m.secret_storage.key.k1`. The level is `n0 || n1->n2`.
+3. Three edges into `delete_user` (`n3`), from `n0`, `n1` and `n2`, and one out of it, to
+   `again`. An awaited free function
+   reaches an unknown service (``write service `id` (delete_user)``), which may be behind any
+   receiver. Its target `id` is computed, and so are `id` and `id + 1`, which tokens cannot tell
+   apart, so it conflicts with every read and write around it. The
+   `cache.put` waits for `user` (data), and `get_user(id)` and `get_user(id + 1)` run together.
+   The levels are `n0 || n2`, then `n1`, then `n3->n4`.
+4. A process conflicts with every domain: it could read or write anything. So
+   `n0 -> n1`, `n1 -> n2` and `n1 -> n3`. The levels are `n0->n1`, then `n2 || n3`. The two
+   `get_config` reads would have run together without the command. (`cargo psync check` knows
+   more, and lets the environment read through.)
+
+</details>

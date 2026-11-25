@@ -83,10 +83,15 @@ pub(crate) fn relax(
     if keys.iter().flatten().filter(|k| k.is_some()).count() < 2 {
         return None;
     }
-    // Differently written keys stand for different files; the same key, for the same file.
+    // Differently written keys stand for different files; the same key, for the same file. A
+    // literal path keeps its target: two literals already compare exactly, and a literal against
+    // a computed path still differs here, so that pair is compared at run time.
     let mut relaxed: Vec<Node> = nodes.to_vec();
     for (n, ks) in relaxed.iter_mut().zip(&keys) {
         for (e, k) in n.effects.iter_mut().zip(ks) {
+            if matches!(e.target, Target::Literal(_)) {
+                continue;
+            }
             if let Some(k) = k {
                 e.target =
                     Target::Literal(format!("`{}` (compared at run time)", k.to_token_stream()));
