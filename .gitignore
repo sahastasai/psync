@@ -3,3 +3,7 @@ rustc-ice-*.txt
 
 # Lean build output
 verify/.lake/
+
+# Charon output
+scripts/charon/*/target/
+*.llbc
