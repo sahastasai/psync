@@ -42,6 +42,7 @@ names:
 | network | `TcpStream`, `UdpSocket`, `TcpListener`, `UnixStream`, `net::` | `connect`, `bind`, ... | `send_to`, `send`, `write`, `write_all` | the address |
 | environment | `env::` | `env::var`, ... | `set_var`, `remove_var`, `set_current_dir` | the variable name |
 | process | `Command::new`, `process::` | | always a write | conflicts with *every* domain (`cargo psync check`, which knows more, exempts a read of the environment) |
+| SQL | an awaited chain with an SQL statement as a string literal: `sqlx::query("..")`, `sqlx::query!("..")`, `client.query("..", &[])`, `client.execute("..", &[])` | `SELECT`, `SHOW`, `EXPLAIN`, `VALUES`, and a `WITH` that only selects | every other statement (`INSERT`, `UPDATE`, `DELETE`, DDL, `BEGIN`, `SET`, ...), and reads that lock or write (`FOR UPDATE`, `INTO`, `nextval`, `EXPLAIN ANALYZE`) | none: an SQL write conflicts with every service call |
 | service | any other **awaited** call | its name starts with a read verb: `get`, `list`, `head`, `fetch`, `query`, `describe`, ... | its name starts with a write verb: `create`, `put`, `post`, `patch`, `delete`, `upload`, `insert`, `update`, `commit`, ... | the receiver path (`api`, `self.s3`) is the domain; the verb's first argument is the target |
 
 Some details:
@@ -59,6 +60,38 @@ Some details:
   receiver from another statement's, even with the same name.
 - **Plain synchronous calls count only when they reach a known domain.** `std::fs::write(..)` is a
   write. `map.get(k)` is not a service call, because it is not awaited.
+
+- **SQL is decided by the statement.** `query` is a read verb, so until this rule
+  `sqlx::query("DELETE FROM t").execute(db).await` counted as a read, and ran at the same time as a
+  `SELECT` on the same table. Now the statement's first word decides, and the name of the method
+  does not. A statement psync cannot read, in a call it knows runs SQL (`sqlx::query(&sql)`,
+  `diesel::sql_query(s)`), may be anything, so it is a write. The database may be behind any
+  receiver, and the statement's tables are not compared, so an SQL write is ordered with every
+  service call around it (test `sql_statements_decide_read_or_write`).
+
+  ```rust,ignore
+  #[psync::graph]
+  async fn purge(db: &Pool) -> Result<(), Error> {
+      let old = sqlx::query("SELECT id FROM jobs WHERE done").fetch_all(db).await?;
+      let n = sqlx::query("SELECT count(*) FROM jobs").fetch_one(db).await?;
+      sqlx::query("DELETE FROM jobs WHERE done").execute(db).await?;
+      Ok(())
+  }
+  ```
+
+  ```text
+    region 0:
+      n0: old = fetch_all()? [await] {read service (sqlx::query: SELECT)}
+      n1: n = fetch_one()? [await] {read service (sqlx::query: SELECT)}
+      n2: execute()? [await] {write service (sqlx::query: DELETE)}
+      n0 -> n2 (write service (sqlx::query: DELETE) vs read service (sqlx::query: SELECT))
+      n1 -> n2 (write service (sqlx::query: DELETE) vs read service (sqlx::query: SELECT))
+      level 0: n0 || n1
+      level 1: n2
+  ```
+
+  The two `SELECT`s run together, and the `DELETE` waits for both. (It would wait anyway, for
+  their `?`s, but the `SELECT` edge is also the reason under `speculate`.)
 
 The lists live in `psync-graph/src/effects.rs`.
 

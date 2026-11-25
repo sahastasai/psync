@@ -1107,6 +1107,11 @@ impl Finder<'_> {
         if any && complete {
             return;
         }
+        // SQL decides by its statement, not by the method's name: `query("DELETE ..")` writes.
+        if let Some((kind, what)) = sql_of_chain(e, &calls) {
+            self.push(Domain::Service(None), kind, Target::Any, what, false);
+            return;
+        }
         // `e` is the chain's root; a root that is itself a call (`Command::new(..)`,
         // `File::open(..)`, `fetch(x)`) is classified by `visit_expr_call`.
         if let Expr::Call(c) = e
@@ -1262,6 +1267,176 @@ impl<'ast> Visit<'ast> for Finder<'_> {
     fn visit_item(&mut self, _: &'ast syn::Item) {}
 }
 
+/// Statements that only read, by their first word. `EXPLAIN` without `ANALYZE` only plans.
+const SQL_READS: &[&str] = &[
+    "SELECT", "SHOW", "EXPLAIN", "DESCRIBE", "DESC", "VALUES", "TABLE", "PRAGMA",
+];
+
+/// Statements that change the database or the session, by their first word.
+const SQL_WRITES: &[&str] = &[
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "MERGE",
+    "UPSERT",
+    "REPLACE",
+    "CREATE",
+    "DROP",
+    "ALTER",
+    "TRUNCATE",
+    "GRANT",
+    "REVOKE",
+    "COPY",
+    "CALL",
+    "EXEC",
+    "EXECUTE",
+    "DO",
+    "LOCK",
+    "BEGIN",
+    "START",
+    "COMMIT",
+    "ROLLBACK",
+    "SAVEPOINT",
+    "RELEASE",
+    "SET",
+    "RESET",
+    "VACUUM",
+    "ANALYZE",
+    "REINDEX",
+    "CLUSTER",
+    "REFRESH",
+    "COMMENT",
+    "DISCARD",
+    "LISTEN",
+    "NOTIFY",
+    "UNLISTEN",
+    "PREPARE",
+    "DEALLOCATE",
+    "ATTACH",
+    "DETACH",
+    "LOAD",
+    "IMPORT",
+];
+
+/// Words that make a reading statement write or lock: `SELECT .. FOR UPDATE`, `SELECT .. INTO`,
+/// `nextval(..)`, a data-modifying `WITH`, `EXPLAIN ANALYZE` (which runs the statement).
+const SQL_WRITE_WORDS: &[&str] = &[
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "MERGE",
+    "INTO",
+    "NEXTVAL",
+    "SETVAL",
+    "LOCK",
+    "ANALYZE",
+    "PG_ADVISORY_LOCK",
+    "PG_ADVISORY_XACT_LOCK",
+    "GET_LOCK",
+];
+
+/// Read or write, if `text` is an SQL statement: its first word is a statement keyword and
+/// more follows. `None` for any other string.
+pub(crate) fn sql_kind(text: &str) -> Option<Kind> {
+    let words: Vec<String> = text
+        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .filter(|w| !w.is_empty())
+        .map(str::to_ascii_uppercase)
+        .collect();
+    let first = words.first()?;
+    if words.len() < 2 {
+        return None;
+    }
+    let writes_inside = || {
+        words[1..]
+            .iter()
+            .any(|w| SQL_WRITE_WORDS.contains(&w.as_str()))
+    };
+    if first == "WITH" {
+        // A common table expression reads unless it modifies data.
+        return Some(if writes_inside() {
+            Kind::Write
+        } else {
+            Kind::Read
+        });
+    }
+    if SQL_READS.contains(&first.as_str()) {
+        return Some(if writes_inside() {
+            Kind::Write
+        } else {
+            Kind::Read
+        });
+    }
+    SQL_WRITES.contains(&first.as_str()).then_some(Kind::Write)
+}
+
+/// The SQL statement in an awaited chain, if any: a string literal argument of its root call
+/// (`sqlx::query("..")`), its root macro (`sqlx::query!("..")`) or one of its methods
+/// (`client.execute("..", &[])`). A statement psync cannot read in a call it knows is SQL
+/// (`sqlx::query(&sql)`, `diesel::sql_query(s)`) may be anything, so it writes.
+fn sql_of_chain(root: &Expr, calls: &[&syn::ExprMethodCall]) -> Option<(Kind, String)> {
+    let literal = |e: &Expr| match e {
+        Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(s),
+            ..
+        }) => Some(s.value()),
+        _ => None,
+    };
+    let found = |text: String, op: &str| {
+        let kind = sql_kind(&text)?;
+        let first = text
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .to_ascii_uppercase();
+        Some((kind, format!("{op}: {first}")))
+    };
+    match root {
+        Expr::Call(c) => {
+            if let Expr::Path(p) = &*c.func {
+                let segs: Vec<String> = p
+                    .path
+                    .segments
+                    .iter()
+                    .map(|s| s.ident.to_string())
+                    .collect();
+                let op = segs[segs.len().saturating_sub(2)..].join("::");
+                if let Some(r) = c
+                    .args
+                    .iter()
+                    .find_map(|a| literal(a).and_then(|t| found(t, &op)))
+                {
+                    return Some(r);
+                }
+                let sql_fn = (segs.iter().any(|s| s == "sqlx")
+                    && segs.last().is_some_and(|l| l.starts_with("query")))
+                    || segs.last().is_some_and(|l| l == "sql_query");
+                if sql_fn && c.args.first().is_some_and(|a| literal(a).is_none()) {
+                    return Some((Kind::Write, format!("{op}: statement not known")));
+                }
+            }
+        }
+        Expr::Macro(m) => {
+            let name = m.mac.path.segments.last().map(|s| s.ident.to_string())?;
+            let first = m.mac.tokens.clone().into_iter().find_map(|t| match t {
+                proc_macro2::TokenTree::Literal(l) => syn::parse_str::<syn::LitStr>(&l.to_string())
+                    .ok()
+                    .map(|s| s.value()),
+                _ => None,
+            });
+            if let Some(r) = first.and_then(|t| found(t, &format!("{name}!"))) {
+                return Some(r);
+            }
+        }
+        _ => {}
+    }
+    calls.iter().find_map(|m| {
+        m.args
+            .iter()
+            .find_map(|a| literal(a).and_then(|t| found(t, &m.method.to_string())))
+    })
+}
+
 fn contains_await(ts: TokenStream) -> bool {
     ts.into_iter().any(|t| match t {
         proc_macro2::TokenTree::Ident(i) => i == "await",
@@ -1277,6 +1452,77 @@ mod tests {
 
     fn effects(stmt: syn::Stmt) -> Vec<Effect> {
         of_stmt(&stmt, &Config::default()).effects
+    }
+
+    #[test]
+    fn sql_statements_decide_read_or_write() {
+        let kind = |stmt: syn::Stmt| {
+            let e = effects(stmt);
+            assert_eq!(e.len(), 1, "{e:?}");
+            e[0].kind
+        };
+        // `query` is a read verb, but the statement decides.
+        assert_eq!(
+            kind(parse_quote!(let r = sqlx::query("SELECT * FROM t").fetch_all(db).await?;)),
+            Kind::Read
+        );
+        assert_eq!(
+            kind(parse_quote!(sqlx::query("DELETE FROM t").execute(db).await?;)),
+            Kind::Write
+        );
+        assert_eq!(
+            kind(
+                parse_quote!(let r = sqlx::query!("insert into t values ($1)", x).execute(db).await?;)
+            ),
+            Kind::Write
+        );
+        assert_eq!(
+            kind(parse_quote!(let r = client.query("SELECT 1", &[]).await?;)),
+            Kind::Read
+        );
+        assert_eq!(
+            kind(parse_quote!(client.execute("UPDATE t SET a = 1", &[]).await?;)),
+            Kind::Write
+        );
+        // Reading statements that write or lock.
+        assert_eq!(
+            kind(parse_quote!(let r = client.query("SELECT * FROM t FOR UPDATE", &[]).await?;)),
+            Kind::Write
+        );
+        assert_eq!(
+            kind(parse_quote!(let r = client.query("SELECT nextval('s')", &[]).await?;)),
+            Kind::Write
+        );
+        assert_eq!(
+            kind(
+                parse_quote!(let r = client.query("WITH d AS (DELETE FROM t RETURNING *) SELECT * FROM d", &[]).await?;)
+            ),
+            Kind::Write
+        );
+        assert_eq!(
+            kind(
+                parse_quote!(let r = client.query("WITH x AS (SELECT 1) SELECT * FROM x", &[]).await?;)
+            ),
+            Kind::Read
+        );
+        // A statement psync cannot read, in a call it knows runs SQL.
+        assert_eq!(
+            kind(parse_quote!(sqlx::query(&sql).execute(db).await?;)),
+            Kind::Write
+        );
+        // Ordinary strings are not SQL.
+        assert_eq!(sql_kind("select"), None);
+        assert_eq!(sql_kind("https://example.com/select"), None);
+        // Two reads overlap; a read and a write keep their order.
+        let clash = |a: syn::Stmt, b: syn::Stmt| conflicts(&effects(a), &effects(b)).is_some();
+        assert!(!clash(
+            parse_quote!(let a = sqlx::query("SELECT a FROM t").fetch_one(db).await?;),
+            parse_quote!(let b = sqlx::query("SELECT b FROM u").fetch_one(db).await?;),
+        ));
+        assert!(clash(
+            parse_quote!(let a = sqlx::query("SELECT a FROM t").fetch_one(db).await?;),
+            parse_quote!(sqlx::query("DELETE FROM t").execute(db).await?;),
+        ));
     }
 
     #[test]
