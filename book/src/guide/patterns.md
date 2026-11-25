@@ -55,9 +55,22 @@ pub async fn two_queries(pool: &mut Pool) -> u32 {
 }
 ```
 
-`query` is not a name psync knows, so it is assumed to read, and the two queries go into two
-concurrent chains. Both chains now need `conn` mutably at once, and rustc rejects the generated
-code:
+`query` is a read verb, so psync takes the two calls for reads of `conn`, and reads never
+conflict:
+
+```text
+  region 0:
+    n0: conn = pool . conn ()
+    n1: a = query() [await] {read `conn` `1` (query)}
+    n2: b = query() [await] {read `conn` `2` (query)}
+    n0 -> n1 (reads `conn`)
+    n0 -> n2 (reads `conn`)
+    level 0: n0
+    level 1: n1 || n2
+```
+
+The two queries go into two concurrent chains. Both chains now need `conn` mutably at once, and
+rustc rejects the generated code:
 
 ```text
 error[E0524]: two closures require unique access to `*conn` at the same time
@@ -155,5 +168,41 @@ overlap, and a saturated server has no waiting left to overlap.
 ## Memory
 
 Prefetched loops buffer every item's prefix result until the rest of the body runs. kube-rs's
-`dynamic_api` went from 32 to 66 MB peak RSS, and from 118 to 262 MB on the 5× cluster. Choose
-`bound` with memory in mind for very long loops.
+`dynamic_api` went from 32 to 66 MB peak RSS, and from 118 to 262 MB on the 5× cluster.
+
+`bound` does not change this. It limits how many prefixes are in flight, but the generated code
+creates every item's future before the first one starts, and keeps every result until the join
+ends. Peak memory grows with the number of items, whatever the bound. For a very long loop over
+large results, split the input into batches yourself and loop over the batches, or keep the loop
+sequential with `#[psync::seq]`.
+
+## Exercises
+
+1. Add `#[psync::seq]` to the second query in `two_queries`. What does the report say, and is the
+   function changed at all?
+2. A command spends 90% of its sequential run in one loop. psync makes that loop 10× faster. What
+   end-to-end speedup does Amdahl's law predict? What might make the measured speedup smaller?
+3. An outer loop with `#[psync::graph(bound = 4)]` has an inner loop over files that is also
+   prefetched. How many requests can be in flight at once? How would you cap it at 16?
+4. A prefetched loop runs over 100,000 keys with `bound = 8`, and each prefix returns about 50 KB.
+   Roughly how much memory do the buffered results take at the peak?
+
+<details>
+<summary>Answers</summary>
+
+1. ``barrier: line 5: `# [psync :: seq] let b = conn . query (2) . await ;`: marked #[psync::seq]``,
+   and `changed` is `false`. The marked statement is a barrier that splits the block. The region
+   before it holds one await, and the region after it none, so there is nothing to overlap. The output is the
+   function as written, which compiles.
+2. 1 / (0.1 + 0.9 / 10) = 1 / 0.19 ≈ 5.3×. It is less when the work after the waits is CPU-bound:
+   once all the responses arrive at once, parsing them runs on one core
+   ([Overlap moves the bottleneck to the CPU](#overlap-moves-the-bottleneck-to-the-cpu)). New
+   connections, server limits and memory can cost more too.
+3. Each loop has its own bound, and the function's `bound = 4` applies to both, so 4 × 4 = 16
+   are already the cap. With the default of 16 it would be 256. To cap a nested pair at N, give
+   the function a bound of about √N, or leave one loop sequential with `#[psync::seq]` and
+   give the other the full N. psync has no budget across loops yet.
+4. About 100,000 × 50 KB = 5 GB. `bound` limits the requests in flight, not the results: every
+   result is kept until the rest of the body runs ([Memory](#memory)). Batch the keys.
+
+</details>

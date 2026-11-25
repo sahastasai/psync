@@ -43,7 +43,11 @@ with tempfile.TemporaryDirectory() as tmp:
             where = f"{md.relative_to(root)} (offset {pos})"
             file = pathlib.Path(tmp) / f"{md.stem}-{pos}.rs"
             file.write_text(textwrap.dedent(code))
-            line = next(i for i, l in enumerate(code.splitlines(), 1) if re.search(r"\bfn\b", l))
+            # The annotated function if there is one, else the first function.
+            lines = code.splitlines()
+            marked = [i for i, l in enumerate(lines) if re.match(r"\s*#\[(psync::)?graph", l)]
+            start = marked[0] if marked else 0
+            line = next(i for i, l in enumerate(lines[start:], start + 1) if re.search(r"\bfn\b", l))
             run = subprocess.run([expand, file, str(line + 1)], capture_output=True, text=True)
             try:
                 got = json.loads(run.stdout)["explain"]

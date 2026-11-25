@@ -61,8 +61,10 @@ Three things to know about this shape:
   error, as the sequential loop would. But keys 4 to 7 (and every later key) were still looked up.
   That is the speculation the attribute allows. For reads it does not matter. For writes, see
   [Side effects](../safety/effects.md).
-- **All results are buffered.** The loop holds every item's prefix output until the rest of the
-  body runs. For very long loops, choose a `bound` and think about memory.
+- **All results are buffered.** The loop holds every item's prefix output (and creates every
+  item's future up front) until the rest of the body runs. `bound` does not reduce this. For very
+  long loops over large results, batch the input yourself
+  ([Memory](./patterns.md#memory)).
 
 `bound` defaults to 16. You set it per function: `#[psync::graph(bound = 4)]`.
 
