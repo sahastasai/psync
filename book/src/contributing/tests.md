@@ -9,7 +9,9 @@ test answers:
 | Does the rewritten function return the same thing, and overlap what it should? | `tests/graph.rs` | `cargo test --no-default-features --test graph` |
 | Do the executors schedule as documented? | `tests/scheduling.rs`, `tests/multi.rs` | `cargo test --no-default-features`; `--features std --test multi` |
 | Does the driver find this effect, report this finding, compute these facts? | the fixture, `psync-check/tests/fixture.rs` | `cd psync-check && cargo test` |
+| Does a synchronous function keep its results, errors and panics on threads? | `tests/sync.rs` | `cargo test --no-default-features --features std --test sync` |
 | Is this real-world shape faster, and still correct? | `examples/graph_suite/` | `cargo run --example graph_suite --no-default-features -- --brief` |
+| How much do synchronous shapes gain, over real sockets? | `examples/phase2.rs` | `cargo run --release --example phase2 --no-default-features --features std` |
 | Is the scheduling argument right? | `verify/Schedule.lean` | `lean verify/Schedule.lean` |
 | Is it right against a server, relative to a spec? | `verify/World.lean` | `lean verify/World.lean` |
 | Is *this* schedule safe? | certificates, `verify/Cert.lean` | `scripts/certify.sh` (regenerate `verify/Certs.lean`, then `lake build`) |

@@ -278,6 +278,20 @@ pub(crate) fn chain_code(
     k: usize,
     extra: &[(Ident, bool)],
 ) -> ChainCode {
+    chain_code_with(krate, fresh, members, needed, k, extra, None)
+}
+
+/// [`chain_code`], optionally storing the index of the member about to run in the atomic
+/// `progress` (synchronous code: a panic is replayed at the member that raised it).
+pub(crate) fn chain_code_with(
+    krate: &TokenStream,
+    fresh: &std::collections::BTreeMap<String, (Ident, TokenStream)>,
+    members: &[&Node],
+    needed: &Set,
+    k: usize,
+    extra: &[(Ident, bool)],
+    progress: Option<&Ident>,
+) -> ChainCode {
     let label = syn::Lifetime::new(&format!("'__psync_chain{k}"), Span::call_site());
     // Bindings are only mutated after the chain hands them back, so `mut` is dropped inside the
     // chain unless the chain itself writes them (the handed-back binding keeps it).
@@ -295,6 +309,10 @@ pub(crate) fn chain_code(
         }
         let mut rewriter = ExitRewriter::new(&label, format!("{k}_{m}"), krate);
         rewriter.visit_stmt_mut(&mut stmt);
+        if let Some(p) = progress {
+            let m = proc_macro2::Literal::usize_unsuffixed(m);
+            stmts.push(quote!(#p.store(#m, ::core::sync::atomic::Ordering::Relaxed);));
+        }
         stmts.push(stmt.into_token_stream());
         slots.push(rewriter.slots);
     }
@@ -345,7 +363,9 @@ pub(crate) fn chain_code(
 
 /// Generate a region's statements from its plan. `positions` are the nodes' statement indices
 /// in the block and `mentions` what each statement of the block mentions.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn emit(
+    sync: bool,
     krate: &TokenStream,
     fresh: &std::collections::BTreeMap<String, (Ident, TokenStream)>,
     nodes: Vec<Node>,
@@ -404,11 +424,21 @@ pub(crate) fn emit(
                 .filter(|(i, _)| *i > chain_positions[0] && !chain_positions.contains(i))
                 .flat_map(|(_, m)| m.iter().cloned())
                 .collect();
-            let code = chain_code(krate, fresh, &members, &needed, chain_no, &[]);
+            let progress = format_ident!("__psync_at{}", chain_no);
+            let code = chain_code_with(
+                krate,
+                fresh,
+                &members,
+                &needed,
+                chain_no,
+                &[],
+                sync.then_some(&progress),
+            );
             let (f, out_k) = (
                 format_ident!("__psync_f{}", k),
                 format_ident!("__psync_out{}", chain_no),
             );
+            let panic = format_ident!("__psync_panic{}", chain_no);
             chain_no += 1;
             let at = plan.release[c];
             let body = &code.body;
@@ -418,21 +448,55 @@ pub(crate) fn emit(
             let exits = members.iter().any(|n| n.exits);
             let spec = members.iter().any(|n| n.speculate);
             let indep = members.iter().any(|n| n.independent);
-            futures.push(quote!(let mut #f = #krate::__private::maybe_done_at::<#level_id, #order, #exits, #spec, #indep, _>(async { #body });));
             let slot_idents = code.slot_idents();
             let taken = format_ident!("__psync_taken{}", k);
-            takes.push(quote!(let (#(#slot_idents,)* #out_k) = #taken;));
+            if sync {
+                // A job: the chain as a closure, run once, its panic caught with the member
+                // that raised it.
+                futures.push(quote!(let mut #f = ::core::option::Option::Some(|| { #body });));
+                let nones = slot_idents
+                    .iter()
+                    .map(|_| quote!(::core::option::Option::None));
+                takes.push(quote! {
+                    let mut #panic = ::core::option::Option::None;
+                    let (#(#slot_idents,)* #out_k) = match #taken {
+                        (::core::result::Result::Ok(v), _) => v,
+                        (::core::result::Result::Err(p), at) => {
+                            #panic = ::core::option::Option::Some((at, p));
+                            (#(#nones,)* ::core::option::Option::None)
+                        }
+                    };
+                });
+            } else {
+                futures.push(quote!(let mut #f = #krate::__private::maybe_done_at::<#level_id, #order, #exits, #spec, #indep, _>(async { #body });));
+                takes.push(quote!(let (#(#slot_idents,)* #out_k) = #taken;));
+            }
+            // In synchronous code a panic is replayed like an exit, at the member that raised it.
+            let panic_at = |m: usize| {
+                let m = proc_macro2::Literal::usize_unsuffixed(m);
+                quote! {
+                    if ::core::matches!(&#panic, ::core::option::Option::Some((#m, _))) {
+                        ::std::panic::resume_unwind(#panic.take().unwrap().1);
+                    }
+                }
+            };
             let pattern = code.binding_pattern();
             let bind = quote!(#[allow(unused_mut)] let #pattern = #out_k.unwrap(););
-            if at == l {
-                for (slots, pos) in code.slots.iter().zip(chain_positions) {
-                    reraises.push((pos, slots.reraise(krate)));
+            for (m, (slots, pos)) in code.slots.iter().zip(chain_positions).enumerate() {
+                let mut r = TokenStream::new();
+                if sync {
+                    r.extend(panic_at(m));
                 }
+                r.extend(slots.reraise(krate));
+                if at == l {
+                    reraises.push((pos, r));
+                } else {
+                    late_reraises.push((at, pos, r));
+                }
+            }
+            if at == l {
                 binds.push(bind);
             } else {
-                for (slots, pos) in code.slots.iter().zip(chain_positions) {
-                    late_reraises.push((at, pos, slots.reraise(krate)));
-                }
                 late_binds.push((at, bind));
             }
         }
@@ -445,21 +509,54 @@ pub(crate) fn emit(
             .collect();
         let fs: Vec<Ident> = fs.collect();
         let taken = (0..level.len()).map(|k| format_ident!("__psync_taken{}", k));
-        // The futures live in an inner block: they (and whatever they borrow) are dropped as soon
-        // as their outputs are taken, so later statements may move what the branches borrowed.
-        let tokens = quote! {{
-            let (#(#taken,)*) = {
-                #(#futures)*
-                ::core::future::poll_fn(|__psync_cx| {
-                    #(let #done = #fs.poll_step(__psync_cx);)*
-                    if true #(&& #done)* { ::core::task::Poll::Ready(()) } else { ::core::task::Poll::Pending }
-                }).await;
-                (#(#fs.take(),)*)
-            };
-            #(#takes)*
-            #(#reraises)*
-            #(#binds)*
-        }};
+        let progress: Vec<Ident> = (chain_no - level.len()..chain_no)
+            .map(|c| format_ident!("__psync_at{}", c))
+            .collect();
+        // Synchronous code: the chains run as jobs, the first on this thread and the others on
+        // psync's pool; each job's result and the member it reached are taken in an inner block,
+        // so the closures' borrows end with it.
+        let tokens = if sync {
+            let results: Vec<Ident> = (0..level.len())
+                .map(|k| format_ident!("__psync_r{}", k))
+                .collect();
+            quote! {{
+                let (#(#taken,)*) = {
+                    #(let #progress = ::core::sync::atomic::AtomicUsize::new(0);)*
+                    #(#futures)*
+                    #(let mut #results = ::core::option::Option::None;)*
+                    #krate::__private::par_run(&mut [#(
+                        &mut || {
+                            #results = ::core::option::Option::Some(::std::panic::catch_unwind(
+                                ::core::panic::AssertUnwindSafe(#fs.take().unwrap()),
+                            ));
+                        }
+                    ),*]);
+                    (#((
+                        #results.unwrap(),
+                        #progress.load(::core::sync::atomic::Ordering::Relaxed),
+                    ),)*)
+                };
+                #(#takes)*
+                #(#reraises)*
+                #(#binds)*
+            }}
+        } else {
+            // The futures live in an inner block: they (and whatever they borrow) are dropped as
+            // soon as their outputs are taken, so later statements may move what they borrowed.
+            quote! {{
+                let (#(#taken,)*) = {
+                    #(#futures)*
+                    ::core::future::poll_fn(|__psync_cx| {
+                        #(let #done = #fs.poll_step(__psync_cx);)*
+                        if true #(&& #done)* { ::core::task::Poll::Ready(()) } else { ::core::task::Poll::Pending }
+                    }).await;
+                    (#(#fs.take(),)*)
+                };
+                #(#takes)*
+                #(#reraises)*
+                #(#binds)*
+            }}
+        };
         let block: syn::Block =
             syn::parse2(tokens).expect("psync::graph generated an invalid level");
         out.extend(block.stmts);

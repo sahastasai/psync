@@ -210,3 +210,5 @@ pub fn tick(ticks: &core::sync::atomic::AtomicU32, every: u32) -> bool {
 }
 
 pub use crate::future::yield_now;
+#[cfg(feature = "std")]
+pub use crate::par::par_run;

@@ -1,7 +1,9 @@
 # Phase II design: concurrency in synchronous code
 
-> **Status: design.** Nothing in this chapter is implemented yet. It is the plan for the
-> prototype (#159) and the audit (#166), and it records the measurements and decisions behind it.
+> **Status: prototype.** Regions of synchronous code run on threads (see
+> [Synchronous code](./using.md) for how to use it and what it measured). Not yet built: loops,
+> adaptive loops, compiler facts for blocking callees, the *thread* effect and the micro-step
+> proof. This chapter is the plan, and it records the measurements and decisions behind it.
 
 Phase I makes independent *awaits* overlap. A lot of Rust waits without awaiting: build tools and
 CLIs call `std::fs`, run `Command::output`, and download with `ureq` or `reqwest::blocking`, one
@@ -68,8 +70,8 @@ Statements fall into three cost classes:
 | **local I/O**: files | `std::fs` paths, or a fact that the callee reaches the file system | overlap in loops, adaptively (below); pairs only with a hint |
 | **CPU** | everything else | only with a hint, `#[psync::par]` |
 
-The verb heuristics of Phase I are **not** used in synchronous code: `map.get(k)` is not a
-request. That leaves names like `download` unrecognized without compiler facts, which is why
+The verb heuristics of Phase I do **not** decide what blocks in synchronous code:
+`map.get(k)` is not a request. They do still decide effects, which can only add conflicts. That leaves names like `download` unrecognized without compiler facts, which is why
 `cargo psync build` matters more in Phase II. The driver knows that `download`'s body calls
 `ureq::Request::call`.
 

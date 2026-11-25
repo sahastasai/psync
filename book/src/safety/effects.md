@@ -55,7 +55,8 @@ Some details:
   their targets.
 - **Different receivers are different services.** `self.cache` and `self.db` do not conflict. An
   awaited *free* function (`delete_user(id).await`) reaches an unknown service, which may be behind
-  any receiver.
+  any receiver. A receiver bound inside one statement (its own socket or client) is a different
+  receiver from another statement's, even with the same name.
 - **Plain synchronous calls count only when they reach a known domain.** `std::fs::write(..)` is a
   write. `map.get(k)` is not a service call, because it is not awaited.
 
@@ -71,6 +72,14 @@ may be the same. Targets are compared only as far as tokens allow:
   `read("out/a.txt")`.
 - `format!("prefix{x}")` keeps its literal prefix. `format!("m.secret_storage.key.{id}")` cannot
   equal `"m.megolm_backup.v1"`, but may equal `"m.secret_storage.key.k1"`.
+- Two `format!` strings whose placeholders are plain names or fields are compared piece by piece.
+  `format!("{dir}/AppRun")` and `format!("{dir}/linuxdeploy")` agree up to `{dir}/` and then
+  differ in their text, so they name different files. Within one region a name has one value
+  (a statement that rebinds or changes it is ordered with both), so this is exact. They still
+  conflict if they first differ at a placeholder (`{dir}` against `{other}`, which may hold the
+  same text), if one is a directory of the other (`{dir}/a` and `{dir}/a/b`), if the format specs
+  differ (`{dir:?}`), or if a placeholder is computed (`{}` of `self.base()`, which may return
+  something new each call).
 - Anything else computed may be anything.
 
 Reads never conflict with reads. Here is what psync now builds for a read-check-recreate function:

@@ -27,17 +27,21 @@ open PsyncWorld
 /-! ## Certificates -/
 
 /-- A client place, as a path of interned segments: `self.groups` might be `[3, 7]`. Two places
-overlap when one is a prefix of the other (`self` and `self.groups`). -/
+overlap when one is a prefix of the other (`self` and `self.groups`).
+
+Some segments are **holes**: the placeholders of a `format!` target, such as `{dir}` in
+`format!("{dir}/cache.json")`. A hole may stand for any text, so two places that first differ
+where either has a hole overlap; two that first differ at ordinary segments do not. Without holes
+this is exactly the prefix relation. -/
 abbrev Place := List Nat
 
-def isPrefix : Place → Place → Bool
+def overlap (holes : List Nat) : Place → Place → Bool
   | [], _ => true
-  | _ :: _, [] => false
-  | a :: as, b :: bs => a == b && isPrefix as bs
+  | _, [] => true
+  | a :: as, b :: bs => if a == b then overlap holes as bs else holes.contains a || holes.contains b
 
-def overlap (p q : Place) : Bool := isPrefix p q || isPrefix q p
-
-def anyOverlap (xs ys : List Place) : Bool := xs.any fun p => ys.any fun q => overlap p q
+def anyOverlap (holes : List Nat) (xs ys : List Place) : Bool :=
+  xs.any fun p => ys.any fun q => overlap holes p q
 
 /-- One statement as the certificate describes it: the places it may read and write. Every one of
 psync's edge rules is a place (`schedule::depends`; the emitter is `cert_nodes` in `schedule.rs`):
@@ -60,19 +64,21 @@ structure Node where
   deriving Repr, Inhabited
 
 /-- No edge between two statements: neither writes a place the other reads or writes. -/
-def indep (a b : Node) : Bool :=
-  !anyOverlap a.writes (b.reads ++ b.writes) && !anyOverlap b.writes a.reads
+def indep (holes : List Nat) (a b : Node) : Bool :=
+  !anyOverlap holes a.writes (b.reads ++ b.writes) && !anyOverlap holes b.writes a.reads
 
 /-- A certificate: the statements in program order (node `i` is the `i`-th), and the schedule as
 levels of chains of node indices. -/
 structure Cert where
   nodes : List Node
   levels : List (List (List Nat))
+  /-- The segments that are holes. -/
+  holes : List Nat := []
   deriving Repr
 
 def Cert.node (c : Cert) (i : Nat) : Node := c.nodes.getD i default
 
-def Cert.ind (c : Cert) (i j : Nat) : Bool := indep (c.node i) (c.node j)
+def Cert.ind (c : Cert) (i j : Nat) : Bool := indep c.holes (c.node i) (c.node j)
 
 /-! ## The checker -/
 
@@ -230,5 +236,20 @@ theorem profilePage_ok : check profilePage = true := by decide
 def profilePageWrong : Cert := { profilePage with levels := [[[0], [2], [1], [3]]] }
 
 theorem profilePageWrong_rejected : check profilePageWrong = false := by decide
+
+/-- Holes: two writes to `format!("{dir}/a")` and `format!("{dir}/b")` (places `t {dir} / a /` and
+`t {dir} / b /`, with `{dir}` the hole `[7]`) may run side by side; a write to
+`format!("{other}/a")` may not run beside the first, since `{other}` may equal `{dir}`. -/
+def holesOK : Cert where
+  nodes := [{ reads := [], writes := [[1, 7, 2, 3, 2]] }, { reads := [], writes := [[1, 7, 2, 4, 2]] }]
+  levels := [[[0], [1]]]
+  holes := [7, 8]
+
+theorem holesOK_ok : check holesOK = true := by decide
+
+def holesClash : Cert :=
+  { holesOK with nodes := [{ reads := [], writes := [[1, 7, 2, 3, 2]] }, { reads := [], writes := [[1, 8, 2, 3, 2]] }] }
+
+theorem holesClash_rejected : check holesClash = false := by decide
 
 end PsyncCert

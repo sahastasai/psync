@@ -174,7 +174,11 @@ fn exits_wait_for_earlier_statements_in_later_levels() {
         ([true, false], Err(Error("three")), vec![3]),
     ] {
         let log = Box::leak(Box::new(RefCell::new(Vec::new())));
-        assert_eq!(run(exit_after_later_level(fail, log)).0, expected, "{fail:?}");
+        assert_eq!(
+            run(exit_after_later_level(fail, log)).0,
+            expected,
+            "{fail:?}"
+        );
         assert_eq!(*log.borrow(), ran, "{fail:?}");
     }
 }

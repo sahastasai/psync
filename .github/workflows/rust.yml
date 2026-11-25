@@ -20,9 +20,11 @@ jobs:
       run: cargo build --verbose
     - name: Run tests
       run: cargo test --verbose
+    - name: Run the threaded tests (MultiExecutor, Phase II)
+      run: cargo test --verbose --no-default-features --features std --test multi --test sync --lib
     - name: Certificates are up to date with the macro
       run: |
-        cargo run -q -p psync-graph --features cli --bin psync-cert -- tests/graph.rs psync-check/tests/fixtures/hidden/app/src/lib.rs examples/graph_suite/*.rs > verify/Certs.lean
+        cargo run -q -p psync-graph --features cli --bin psync-cert -- tests/graph.rs tests/sync.rs psync-check/tests/fixtures/hidden/app/src/lib.rs examples/graph_suite/*.rs > verify/Certs.lean
         git diff --exit-code verify/Certs.lean
 
   psync-check:

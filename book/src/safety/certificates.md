@@ -26,7 +26,12 @@ prefix of the other:
 | `effect order` | `e`: written by every ordinary effect statement |
 
 Targets are spelled out character by character. That makes a `format!("m.key.{id}")` prefix
-overlap exactly the strings that start with `m.key.`, as psync's own rule says. Where psync's rule
+overlap exactly the strings that start with `m.key.`, as psync's own rule says. A placeholder in a
+`format!` target is a **hole** segment (the certificate lists which segments are holes). Two
+places overlap if they agree until one ends, or if they first differ where either has a hole,
+since a hole may stand for any text. Without holes, that is exactly "one is a prefix of the
+other". `format!("{dir}/a")` and `format!("{dir}/b")` agree up to `{dir}/` and then differ in
+plain characters, so they do not overlap. Where psync's rule
 is finer than prefixes (services named by type, ordered writes), the place is cut short, so the
 certificate only ever has *more* conflicts than psync. The property test
 `certificates_cover_every_edge` checks that over every annotated function in the tests, the driver
@@ -80,8 +85,10 @@ cargo run -p psync-graph --features cli --bin psync-cert -- src/lib.rs > verify/
 cd verify && lake build GeneratedCerts
 ```
 
-`scripts/certify.sh` does this for the repository's own schedules: 29 regions from the graph tests,
-the driver fixture and `graph_suite`, checked in a few seconds. CI regenerates the certificates,
+`scripts/certify.sh` does this for the repository's own schedules: 34 regions from the graph tests,
+the Phase II tests, the driver fixture and `graph_suite`, checked in a few seconds. The checker is
+the same for synchronous code: a level is a set of chains, whether they run as futures or on
+threads. CI regenerates the certificates,
 fails if they changed without being committed, and checks them with Lean.
 
 Building the certificates found one false alarm, and no unsafe schedule. The first version of the

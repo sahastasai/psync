@@ -37,3 +37,11 @@ panic = "abort"
 [[test]]
 name = "multi"
 required-features = ["std"]
+
+[[test]]
+name = "sync"
+required-features = ["std"]
+
+[[example]]
+name = "phase2"
+required-features = ["std"]

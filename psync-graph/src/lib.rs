@@ -244,6 +244,8 @@ pub struct CertNode {
 pub struct NodeReport {
     pub label: String,
     pub awaits: bool,
+    /// Synchronous code: it blocks, and may run on another thread.
+    pub blocks: bool,
     pub effect: bool,
     pub exits: bool,
     pub line: usize,
@@ -258,6 +260,7 @@ impl From<&classify::Node> for NodeReport {
         Self {
             label: n.label.clone(),
             awaits: n.awaits,
+            blocks: n.blocks,
             effect: n.effect,
             exits: n.exits,
             line: n.line,
@@ -316,6 +319,7 @@ pub fn transform_fn(function: &mut ItemFn, options: &Options) -> Report {
         handles: Default::default(),
         fresh: Default::default(),
         effects: options.effects.clone(),
+        sync: function.sig.asyncness.is_none(),
     };
     for input in &function.sig.inputs {
         match input {
@@ -348,7 +352,8 @@ pub fn transform_fn(function: &mut ItemFn, options: &Options) -> Report {
         options,
         scope,
         report: Report::default(),
-        in_async: function.sig.asyncness.is_some(),
+        // In a synchronous function the body itself is rewritten (Phase II).
+        in_async: true,
         fresh: 0,
         refusal: None,
     };
@@ -487,7 +492,13 @@ pub fn explain(report: &Report) -> String {
             out += &format!(
                 "    n{i}: {}{}{}\n",
                 n.label,
-                if n.awaits { " [await]" } else { "" },
+                if n.blocks {
+                    " [blocks]"
+                } else if n.awaits {
+                    " [await]"
+                } else {
+                    ""
+                },
                 if n.effects.is_empty() {
                     String::new()
                 } else {
@@ -550,10 +561,71 @@ mod tests {
     /// between the two nodes' places, so `verify/Cert.lean` can only reject what psync accepted,
     /// not accept what psync would not. Checked over every annotated function of the graph
     /// tests, the driver fixture and `graph_suite`.
+    /// Synchronous code (Phase II): a blocking call is classified by its verb as an awaited one is,
+    /// so a delete and a get of one name keep their order; a receiver bound inside a statement is
+    /// that statement's own, so two downloads over their own sockets do not conflict.
+    #[test]
+    fn synchronous_calls_have_effects() {
+        let r = report(
+            Options::default(),
+            syn::parse_quote! {
+                fn recreate(client: &Client, name: &str) -> Result<u32, E> {
+                    #[psync::par]
+                    client.delete(name)?;
+                    #[psync::par]
+                    let v = client.get(name)?;
+                    Ok(v)
+                }
+            },
+        );
+        assert!(
+            edges(&r).iter().any(|e| e.contains("delete")),
+            "{:?}",
+            edges(&r)
+        );
+        assert!(!r.regions[0].changed);
+        let r = report(
+            Options::default(),
+            syn::parse_quote! {
+                fn two(addr: Addr) -> std::io::Result<usize> {
+                    let a = { let mut s = TcpStream::connect(addr)?; s.read_to_end(&mut v1)? };
+                    let b = { let mut s = TcpStream::connect(addr)?; s.read_to_end(&mut v2)? };
+                    Ok(a + b)
+                }
+            },
+        );
+        assert!(edges(&r).is_empty(), "{:?}", edges(&r));
+        assert!(r.regions[0].changed);
+    }
+
+    /// `let x: u32 = ..` inside a statement binds `x`; it does not write `u32` (a false edge
+    /// between every two statements with such an annotation).
+    #[test]
+    fn annotated_bindings_are_not_assignments() {
+        let r = report(
+            Options::default(),
+            syn::parse_quote! {
+                async fn f(api: &Api) -> u32 {
+                    let a = { let x: u32 = api.one().await; x };
+                    let b = { let y: u32 = api.two().await; y };
+                    a + b
+                }
+            },
+        );
+        assert!(edges(&r).is_empty(), "{:?}", edges(&r));
+        assert!(r.regions[0].changed);
+    }
+
     #[test]
     fn certificates_cover_every_edge() {
         use proc_macro2::TokenTree;
-        let overlap = |p: &Vec<String>, q: &Vec<String>| p.starts_with(q) || q.starts_with(p);
+        // As `overlap` in `verify/Cert.lean`: agree until one ends, or first differ at a hole.
+        let overlap = |p: &Vec<String>, q: &Vec<String>| {
+            p.iter()
+                .zip(q)
+                .find(|(a, b)| a != b)
+                .is_none_or(|(a, b)| a.starts_with("$hole:") || b.starts_with("$hole:"))
+        };
         let touches = |ws: &[Vec<String>], others: &[Vec<String>]| {
             ws.iter().any(|w| others.iter().any(|o| overlap(w, o)))
         };
@@ -564,6 +636,7 @@ mod tests {
         let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
         let mut files = vec![
             format!("{root}/tests/graph.rs"),
+            format!("{root}/tests/sync.rs"),
             format!("{root}/psync-check/tests/fixtures/hidden/app/src/lib.rs"),
         ];
         for f in std::fs::read_dir(format!("{root}/examples/graph_suite")).unwrap() {

@@ -230,7 +230,12 @@ pub(crate) fn scan(tokens: TokenStream, mutable: &Set, handles: &Set, acc: &mut 
                     || (i >= 2
                         && matches!(&tts[i - 1], TokenTree::Ident(m) if m == "mut")
                         && matches!(&tts[i - 2], TokenTree::Ident(k) if k == "let"));
+                // `let x: u32 = ..`: the type of an annotation is not assigned.
+                let annotation = i >= 1
+                    && is_punct(tts.get(i - 1), ':')
+                    && !(i >= 2 && is_punct(tts.get(i - 2), ':'));
                 let assign = !binding
+                    && !annotation
                     && method.is_none()
                     && op.ends_with('=')
                     && !matches!(op.as_str(), "==" | "<=" | ">=" | "!=" | "=>");

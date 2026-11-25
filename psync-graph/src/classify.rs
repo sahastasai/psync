@@ -24,6 +24,9 @@ pub(crate) struct Scope {
     pub fresh: std::collections::BTreeMap<String, (Ident, TokenStream)>,
     /// Effect settings from the attribute (`strict`, `speculate`, `effects(..)`).
     pub effects: effects::Config,
+    /// A synchronous function (Phase II): statements that block on the outside world, or carry
+    /// `#[psync::par]`, play the part of awaits, and levels run on threads.
+    pub sync: bool,
 }
 
 /// A movable statement and what the analysis knows about it.
@@ -34,8 +37,10 @@ pub(crate) struct Node {
     pub defs: Vec<(Ident, bool)>,
     /// What it reads and writes.
     pub acc: Access,
-    /// It awaits (outside nested closures and async blocks).
+    /// It awaits (outside nested closures and async blocks), or, in synchronous code, blocks.
     pub awaits: bool,
+    /// Synchronous code: it blocks on the network or a process, or carries `#[psync::par]`.
+    pub blocks: bool,
     /// An ordinary statement with possible side effects: it keeps its order relative to other
     /// effects, and if it can exit early, later nodes wait for it.
     pub effect: bool,
@@ -104,6 +109,55 @@ fn reads_clock(tokens: TokenStream) -> bool {
             !deferred && reads_clock(g.stream())
         }
         _ => false,
+    })
+}
+
+/// Synchronous calls that wait on the network or a process (Phase II): in a synchronous function,
+/// a statement making one plays the part of an await. Matched by path segment; `reqwest` only
+/// through `reqwest::blocking`.
+const BLOCKING_PATHS: &[&str] = &["ureq", "TcpStream", "UdpSocket", "Command"];
+
+/// Methods whose result, bound by a `let`, is a guard held afterwards (synchronous locks and
+/// `RefCell` borrows; `read` and `write` only without arguments, as on `RwLock`).
+const GUARD_METHODS: &[&str] = &["lock", "try_lock", "borrow", "borrow_mut", "read", "write"];
+
+/// Scans tokens outside closures and async blocks, which decide for themselves when they run.
+fn any_token(tokens: TokenStream, f: &dyn Fn(&[TokenTree], usize) -> bool) -> bool {
+    let tokens: Vec<TokenTree> = tokens.into_iter().collect();
+    tokens.iter().enumerate().any(|(i, t)| match t {
+        TokenTree::Group(g) => {
+            let deferred = tokens[..i].iter().rev().take(2).any(|p| {
+                matches!(p, TokenTree::Punct(c) if c.as_char() == '|')
+                    || matches!(p, TokenTree::Ident(k) if k == "async" || k == "move")
+            });
+            !deferred && any_token(g.stream(), f)
+        }
+        _ => f(&tokens, i),
+    })
+}
+
+/// A synchronous call to the network or a process.
+fn blocks_on_world(tokens: TokenStream) -> bool {
+    any_token(tokens, &|ts, i| match &ts[i] {
+        TokenTree::Ident(id) if BLOCKING_PATHS.contains(&id.to_string().as_str()) => true,
+        TokenTree::Ident(id) if id == "reqwest" => {
+            matches!(ts.get(i + 3), Some(TokenTree::Ident(b)) if b == "blocking")
+        }
+        _ => false,
+    })
+}
+
+/// `.lock()`, `.borrow_mut()`, `.read()` and the like: the value may be a guard.
+fn takes_guard(tokens: TokenStream) -> bool {
+    any_token(tokens, &|ts, i| {
+        matches!(
+            (&ts[i], ts.get(i + 1), i.checked_sub(1).map(|p| &ts[p])),
+            (TokenTree::Ident(m), Some(TokenTree::Group(g)), Some(TokenTree::Punct(dot)))
+                if dot.as_char() == '.'
+                    && g.delimiter() == Delimiter::Parenthesis
+                    && g.stream().is_empty()
+                    && GUARD_METHODS.contains(&m.to_string().as_str())
+        )
     })
 }
 
@@ -391,7 +445,7 @@ pub(crate) fn pat_has_ref(pat: &Pat) -> bool {
 }
 
 /// The hint attributes psync reads and removes from its output.
-pub(crate) const HINTS: &[&str] = &["seq", "fresh", "independent", "speculate"];
+pub(crate) const HINTS: &[&str] = &["seq", "fresh", "independent", "speculate", "par"];
 
 /// The attributes of an expression statement (`#[psync::speculate] api.delete(x).await?;`).
 pub(crate) fn expr_attrs(e: &Expr) -> &[Attribute] {
@@ -596,8 +650,23 @@ pub(crate) fn classify(stmt: &Stmt, scope: &Scope, relaxed: bool) -> Class {
             "awaits `{m}`, whose position is meaningful"
         )));
     }
+    // Phase II: in synchronous code a blocking statement is what overlaps, as an await is in
+    // async code, and a guard held by a binding keeps its place as an awaited lock does.
+    let blocks = scope.sync
+        && (attrs.iter().any(|a| is_psync_attr(a, "par"))
+            || blocks_on_world(stmt.to_token_stream()));
+    if scope.sync
+        && let Stmt::Local(l) = stmt
+        && l.init
+            .as_ref()
+            .is_some_and(|i| takes_guard(i.expr.to_token_stream()))
+    {
+        return Class::Barrier(None);
+    }
+    let awaits = x.awaits || blocks;
+    let shaped = shaped || blocks;
     let pure_value = value.is_some_and(is_pure) || matches!(stmt, Stmt::Macro(_));
-    let mut effect = !shaped || (!x.awaits && !relaxed && !pure_value);
+    let mut effect = !shaped || (!awaits && !relaxed && !pure_value);
     let mut defs = Vec::new();
     if let Some(p) = pat {
         pat_idents(p, &mut defs);
@@ -637,7 +706,47 @@ pub(crate) fn classify(stmt: &Stmt, scope: &Scope, relaxed: bool) -> Class {
         }
         effect = false;
     }
-    let found = effects::of_stmt(stmt, &scope.effects);
+    let mut found = effects::of_stmt_in(stmt, &scope.effects, scope.sync);
+    // A blocking statement whose calls psync cannot classify is what an unclassified awaited call
+    // is in async code: reported, and under `strict` a write to anything.
+    if blocks && found.effects.is_empty() {
+        let mut v = value;
+        while let Some(e) = v {
+            v = match e {
+                Expr::Try(t) => Some(&*t.expr),
+                Expr::MethodCall(m)
+                    if matches!(m.method.to_string().as_str(), "unwrap" | "expect") =>
+                {
+                    Some(&*m.receiver)
+                }
+                _ => break,
+            };
+        }
+        let op = v.map_or_else(|| "statement".to_string(), callee);
+        if scope.effects.strict {
+            found.effects.push(effects::Effect {
+                domain: effects::Domain::Unknown,
+                kind: effects::Kind::Write,
+                target: effects::Target::Any,
+                op: op.clone(),
+                ordered: true,
+            });
+        }
+        found.unclassified.push(op);
+    }
+    // A receiver bound inside the statement (`let mut s = TcpStream::connect(..)?; s.write_all(..)`)
+    // is that statement's own: different receivers are different services, so it is named
+    // apart from another statement's `s`. Identical statements keep the same name, and conflict.
+    for e in &mut found.effects {
+        if let effects::Domain::Service(Some(r)) = &mut e.domain
+            && inner.contains(crate::access::root(r))
+        {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            stmt.to_token_stream().to_string().hash(&mut h);
+            *r = format!("{r}@{:x}", h.finish() & 0xffff_ffff);
+        }
+    }
     let speculate = scope.effects.speculate || attrs.iter().any(|a| is_psync_attr(a, "speculate"));
     Class::Node(Box::new(Node {
         effects: found.effects,
@@ -649,7 +758,8 @@ pub(crate) fn classify(stmt: &Stmt, scope: &Scope, relaxed: bool) -> Class {
         label: label_for(&defs, stmt, &x),
         defs,
         acc,
-        awaits: x.awaits,
+        awaits,
+        blocks: blocks && !x.awaits,
         effect,
         exits: x.exits,
         line: line_of(stmt.span()),

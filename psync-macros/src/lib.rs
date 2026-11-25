@@ -64,6 +64,15 @@ pub fn independent(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// of an earlier `?`, `return` or `break`, or for later loop items before an earlier item ends the
 /// loop. The programmer asserts that performing them when sequential code would not have is
 /// harmless (idempotent uploads, cache fills). Outside `#[psync::graph]` it does nothing.
+/// Hint on a statement of a synchronous `#[psync::graph]` function: it is worth a thread (a
+/// slow call psync cannot recognize by its path, such as a helper that downloads a file). psync
+/// may then run it on another thread beside independent statements. Outside a synchronous
+/// `#[psync::graph]` function it does nothing.
+#[proc_macro_attribute]
+pub fn par(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    item
+}
+
 #[proc_macro_attribute]
 pub fn speculate(_attr: TokenStream, item: TokenStream) -> TokenStream {
     item

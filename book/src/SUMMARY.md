@@ -49,6 +49,7 @@
 
 # Phase II: synchronous code
 
+- [Synchronous code](./phase2/using.md)
 - [Design](./phase2/design.md)
 
 # Case studies

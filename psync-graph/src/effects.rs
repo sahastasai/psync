@@ -99,14 +99,162 @@ pub(crate) enum Target {
     Literal(String),
     /// `format!("prefix{x}..")`: a computed string that starts with known text.
     Prefixed(String, Set),
+    /// `format!("{dir}/cache.json")`: text with holes, each a plain expression (a name or a
+    /// field), and the names it mentions. Within one region an expression has one value, so two
+    /// templates that agree piece by piece and then differ in their text name different strings.
+    Template(Vec<Piece>, Set),
     /// A computed value: its tokens and the names it mentions.
     Expr(String, Set),
     /// Unknown: the whole domain.
     Any,
 }
 
+/// One piece of a [`Target::Template`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Piece {
+    Char(char),
+    /// A placeholder: the expression and its format spec (`dir:?`).
+    Hole(String),
+}
+
+/// A template's pieces, ended as a place ends: a file path with `/` (a directory overlaps the
+/// files in it), any other string with an end marker (it overlaps only itself).
+fn ended(pieces: &[Piece], fs: bool) -> Vec<Option<Piece>> {
+    let mut v: Vec<Option<Piece>> = pieces.iter().cloned().map(Some).collect();
+    if fs {
+        while matches!(v.last(), Some(Some(Piece::Char('/')))) {
+            v.pop();
+        }
+        v.push(Some(Piece::Char('/')));
+    } else {
+        v.push(None);
+    }
+    v
+}
+
+/// Two ended templates may name the same string: they agree until one runs out (one is a prefix
+/// of the other), or they first differ where either has a hole (a hole may be any text).
+fn templates_alias(a: &[Option<Piece>], b: &[Option<Piece>]) -> bool {
+    for (x, y) in a.iter().zip(b) {
+        if x != y {
+            return matches!(x, Some(Piece::Hole(_))) || matches!(y, Some(Piece::Hole(_)));
+        }
+    }
+    true
+}
+
+/// `format!("..", args..)` as a template, if every placeholder is a plain expression.
+fn template(tokens: TokenStream) -> Option<Vec<Piece>> {
+    use syn::punctuated::Punctuated;
+    let args =
+        syn::parse::Parser::parse2(Punctuated::<Expr, syn::Token![,]>::parse_terminated, tokens)
+            .ok()?;
+    let mut args = args.into_iter();
+    let Some(Expr::Lit(syn::ExprLit {
+        lit: syn::Lit::Str(text),
+        ..
+    })) = args.next()
+    else {
+        return None;
+    };
+    /// A name or a field path, which has one value within a region.
+    fn plain(e: &Expr) -> Option<String> {
+        match e {
+            Expr::Path(p) if p.qself.is_none() => Some(p.to_token_stream().to_string()),
+            Expr::Field(f) => {
+                plain(&f.base)?;
+                Some(f.to_token_stream().to_string())
+            }
+            Expr::Reference(r) => plain(&r.expr),
+            Expr::Paren(p) => plain(&p.expr),
+            _ => None,
+        }
+    }
+    let (mut positional, mut named) = (Vec::new(), std::collections::HashMap::new());
+    for a in args {
+        match a {
+            Expr::Assign(x) => {
+                let Expr::Path(name) = &*x.left else {
+                    return None;
+                };
+                named.insert(name.to_token_stream().to_string(), plain(&x.right)?);
+            }
+            e => positional.push(plain(&e)?),
+        }
+    }
+    let (mut pieces, mut next) = (Vec::new(), 0usize);
+    let mut chars = text
+        .value()
+        .chars()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '{' | '}' if chars.peek() == Some(&c) => {
+                chars.next();
+                pieces.push(Piece::Char(c));
+            }
+            '{' => {
+                let inner: String = chars.by_ref().take_while(|&c| c != '}').collect();
+                let (arg, spec) = inner.split_once(':').unwrap_or((&inner, ""));
+                // Widths and precisions taken from arguments are not followed.
+                if spec.contains('$') || spec.contains('*') {
+                    return None;
+                }
+                let expr = if arg.is_empty() {
+                    next += 1;
+                    positional.get(next - 1)?.clone()
+                } else if let Ok(n) = arg.parse::<usize>() {
+                    positional.get(n)?.clone()
+                } else if let Some(e) = named.get(arg) {
+                    e.clone()
+                } else if arg.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                    arg.to_string()
+                } else {
+                    return None;
+                };
+                pieces.push(Piece::Hole(format!("{expr}:{spec}")));
+            }
+            '}' => return None,
+            c => pieces.push(Piece::Char(c)),
+        }
+    }
+    Some(pieces)
+}
+
 impl Target {
+    /// A template as the coarser target it refines: the text before its first hole.
+    fn coarse(&self) -> Target {
+        match self {
+            Target::Template(pieces, names) => {
+                let prefix: String = pieces
+                    .iter()
+                    .map_while(|p| match p {
+                        Piece::Char(c) => Some(*c),
+                        Piece::Hole(_) => None,
+                    })
+                    .collect();
+                if prefix.is_empty() {
+                    Target::Expr(String::new(), names.clone())
+                } else {
+                    Target::Prefixed(prefix, names.clone())
+                }
+            }
+            t => t.clone(),
+        }
+    }
+
     fn may_alias(&self, other: &Target, fs: bool) -> bool {
+        match (self, other) {
+            (Target::Template(a, _), Target::Template(b, _)) => {
+                return templates_alias(&ended(a, fs), &ended(b, fs));
+            }
+            (Target::Template(..), _) | (_, Target::Template(..)) => {
+                return self.coarse().may_alias(&other.coarse(), fs);
+            }
+            _ => {}
+        }
         match (self, other) {
             // Known text that cannot start the same way names different strings.
             (Target::Prefixed(p, _), Target::Literal(l))
@@ -130,7 +278,7 @@ impl Target {
 
     /// The target is computed from one of `names` (per-iteration bindings).
     pub fn mentions_any(&self, names: &Set) -> bool {
-        matches!(self, Target::Expr(_, m) | Target::Prefixed(_, m) if m.iter().any(|n| names.contains(n)))
+        matches!(self, Target::Expr(_, m) | Target::Prefixed(_, m) | Target::Template(_, m) if m.iter().any(|n| names.contains(n)))
     }
 }
 
@@ -205,6 +353,17 @@ impl Effect {
                 place.push("t".into());
                 place.extend(chars(p));
             }
+            // Holes are marked, for the checker: places that first differ at a hole overlap.
+            Target::Template(pieces, _) => {
+                place.push("t".into());
+                for p in ended(pieces, self.domain == Domain::Fs) {
+                    place.push(match p {
+                        Some(Piece::Char(c)) => c.to_string(),
+                        Some(Piece::Hole(h)) => format!("$hole:{h}"),
+                        None => "$end".into(),
+                    });
+                }
+            }
             Target::Expr(..) | Target::Any => {}
         }
         place
@@ -220,6 +379,16 @@ impl Effect {
             Target::Literal(l) => format!(" {l:?}"),
             Target::Expr(e, _) => format!(" `{}`", short(e)),
             Target::Prefixed(p, _) => format!(" {p:?}…"),
+            Target::Template(pieces, _) => {
+                let text: String = pieces
+                    .iter()
+                    .map(|p| match p {
+                        Piece::Char(c) => c.to_string(),
+                        Piece::Hole(h) => format!("{{{}}}", h.trim_end_matches(':')),
+                    })
+                    .collect();
+                format!(" {text:?}")
+            }
             Target::Any => String::new(),
         };
         format!("{kind} {}{target} ({})", self.domain.name(), self.op)
@@ -531,6 +700,21 @@ fn target_of(arg: Option<&Expr>) -> Target {
         // `&format!("key.{id}")`: keep the literal text before the first placeholder.
         Some(Expr::Macro(m)) if m.mac.path.is_ident("format") => {
             let tokens = m.mac.tokens.clone();
+            if let Some(pieces) = template(tokens.clone()) {
+                return if pieces.iter().any(|p| matches!(p, Piece::Hole(_))) {
+                    Target::Template(pieces, mentions(tokens))
+                } else {
+                    Target::Literal(
+                        pieces
+                            .iter()
+                            .map(|p| match p {
+                                Piece::Char(c) => *c,
+                                Piece::Hole(_) => unreachable!(),
+                            })
+                            .collect(),
+                    )
+                };
+            }
             let first = syn::parse2::<syn::LitStr>(tokens.clone().into_iter().take(1).collect());
             let names = mentions(tokens.clone());
             match first {
@@ -585,10 +769,21 @@ pub(crate) struct Found {
 
 /// Find the effects in `node` (a statement's tokens, parsed by the caller).
 pub(crate) fn of_stmt(stmt: &syn::Stmt, config: &Config) -> Found {
+    of_stmt_in(stmt, config, false)
+}
+
+/// [`of_stmt`], in synchronous code when `sync` is set (Phase II): there a call blocks instead of
+/// being awaited, so every method chain and free function is classified by its verb as an awaited
+/// one is. A call without a known verb has no effect, and is not reported: in synchronous code
+/// most calls are computations (`len`, `Vec::new`).
+pub(crate) fn of_stmt_in(stmt: &syn::Stmt, config: &Config, sync: bool) -> Found {
     let mut v = Finder {
         config,
         found: Found::default(),
         awaited: 0,
+        sync,
+        quiet: false,
+        chained: Default::default(),
     };
     v.visit_stmt(stmt);
     v.found
@@ -599,6 +794,12 @@ struct Finder<'a> {
     found: Found,
     /// Depth of `.await` bases being visited: method chains count as service calls only there.
     awaited: usize,
+    /// Synchronous code: method chains and free functions count as service calls everywhere.
+    sync: bool,
+    /// Classifying a synchronous call: a call without a verb is no effect and no report.
+    quiet: bool,
+    /// Method calls already classified as part of a longer chain (by address).
+    chained: std::collections::HashSet<usize>,
 }
 
 impl Finder<'_> {
@@ -732,6 +933,9 @@ impl Finder<'_> {
     }
 
     fn unclassified(&mut self, op: String) {
+        if self.quiet {
+            return;
+        }
         if self.config.strict {
             self.push(Domain::Unknown, Kind::Write, Target::Any, op.clone(), true);
         }
@@ -846,17 +1050,50 @@ impl<'ast> Visit<'ast> for Finder<'_> {
     }
 
     fn visit_expr_method_call(&mut self, m: &'ast syn::ExprMethodCall) {
-        // Synchronous method calls only have effects psync knows of through the compiler.
-        self.fact(m.method.span(), &m.method.to_string());
+        if self.sync && self.awaited == 0 {
+            // The outermost call of a chain classifies the whole chain, as an await would.
+            if self.chained.insert(m as *const _ as usize) {
+                let mut r = &*m.receiver;
+                loop {
+                    match r {
+                        Expr::MethodCall(inner) => {
+                            self.chained.insert(inner as *const _ as usize);
+                            r = &inner.receiver;
+                        }
+                        Expr::Try(t) => r = &t.expr,
+                        Expr::Paren(p) => r = &p.expr,
+                        _ => break,
+                    }
+                }
+                let quiet = std::mem::replace(&mut self.quiet, true);
+                self.awaited += 1;
+                self.awaited_chain(&Expr::MethodCall(m.clone()));
+                self.awaited -= 1;
+                self.quiet = quiet;
+            }
+        } else {
+            // Synchronous method calls in async code only have effects psync knows of through
+            // the compiler.
+            self.fact(m.method.span(), &m.method.to_string());
+        }
         syn::visit::visit_expr_method_call(self, m);
     }
 
     fn visit_expr_call(&mut self, c: &'ast syn::ExprCall) {
         // Awaited free functions are handled by `awaited_chain`; plain calls only count when they
-        // reach a known domain (`std::fs::write`), so `HashMap::new()` stays effect-free.
-        let saved = std::mem::replace(&mut self.awaited, 0);
-        self.path_call(c);
-        self.awaited = saved;
+        // reach a known domain (`std::fs::write`), so `HashMap::new()` stays effect-free. In
+        // synchronous code a free function named by a verb is a service call too.
+        if self.sync && self.awaited == 0 {
+            let quiet = std::mem::replace(&mut self.quiet, true);
+            self.awaited = 1;
+            self.path_call(c);
+            self.awaited = 0;
+            self.quiet = quiet;
+        } else {
+            let saved = std::mem::replace(&mut self.awaited, 0);
+            self.path_call(c);
+            self.awaited = saved;
+        }
         syn::visit::visit_expr_call(self, c);
     }
 
@@ -900,6 +1137,56 @@ mod tests {
 
     fn effects(stmt: syn::Stmt) -> Vec<Effect> {
         of_stmt(&stmt, &Config::default()).effects
+    }
+
+    #[test]
+    fn format_templates_with_the_same_holes() {
+        let clash = |a: syn::Stmt, b: syn::Stmt| conflicts(&effects(a), &effects(b)).is_some();
+        // Same placeholders, then different text: different files.
+        assert!(!clash(
+            parse_quote!(std::fs::write(format!("{dir}/AppRun"), a)?;),
+            parse_quote!(std::fs::write(format!("{dir}/linuxdeploy"), b)?;),
+        ));
+        // Positional and named arguments name the same placeholder.
+        assert!(!clash(
+            parse_quote!(std::fs::write(format!("{}/a", self.dir), a)?;),
+            parse_quote!(std::fs::write(format!("{d}/b", d = self.dir), b)?;),
+        ));
+        // Keys of a service: different fields of one user.
+        assert!(!clash(
+            parse_quote!(kv.set(&format!("user.{id}.name"), n).await?;),
+            parse_quote!(kv.set(&format!("user.{id}.email"), e).await?;),
+        ));
+        // Still conflicts: a different placeholder may hold the same text,
+        assert!(clash(
+            parse_quote!(std::fs::write(format!("{dir}/a"), a)?;),
+            parse_quote!(std::fs::write(format!("{other}/a"), b)?;),
+        ));
+        // a directory and a file in it,
+        assert!(clash(
+            parse_quote!(std::fs::remove_dir_all(format!("{dir}/a"))?;),
+            parse_quote!(std::fs::write(format!("{dir}/a/b"), b)?;),
+        ));
+        // the same template,
+        assert!(clash(
+            parse_quote!(std::fs::write(format!("{dir}/a"), a)?;),
+            parse_quote!(std::fs::write(format!("{dir}/a"), b)?;),
+        ));
+        // a different format spec (`{dir:?}` is not `{dir}`),
+        assert!(clash(
+            parse_quote!(std::fs::write(format!("{dir:?}/a"), a)?;),
+            parse_quote!(std::fs::write(format!("{dir}/b"), b)?;),
+        ));
+        // a computed placeholder, which may differ between calls,
+        assert!(clash(
+            parse_quote!(std::fs::write(format!("{}/a", self.base()), a)?;),
+            parse_quote!(std::fs::write(format!("{}/b", self.base()), b)?;),
+        ));
+        // and a placeholder against text it may contain.
+        assert!(clash(
+            parse_quote!(std::fs::write(format!("{dir}/a"), a)?;),
+            parse_quote!(std::fs::write("out/a", b)?;),
+        ));
     }
 
     #[test]

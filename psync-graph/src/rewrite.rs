@@ -37,15 +37,20 @@ pub(crate) struct Rewriter<'a> {
 
 impl VisitMut for Rewriter<'_> {
     fn visit_expr_async_mut(&mut self, e: &mut syn::ExprAsync) {
+        // Inside an async block, even one in a synchronous function, awaits are what overlap.
         let outer = std::mem::replace(&mut self.in_async, true);
+        let outer_sync = std::mem::replace(&mut self.scope.sync, false);
         syn::visit_mut::visit_expr_async_mut(self, e);
         self.in_async = outer;
+        self.scope.sync = outer_sync;
     }
 
     fn visit_expr_closure_mut(&mut self, e: &mut syn::ExprClosure) {
         let outer = std::mem::replace(&mut self.in_async, e.asyncness.is_some());
+        let outer_sync = std::mem::replace(&mut self.scope.sync, false);
         syn::visit_mut::visit_expr_closure_mut(self, e);
         self.in_async = outer;
+        self.scope.sync = outer_sync;
     }
 
     // Nested functions are separate code; they need their own attribute.
@@ -57,7 +62,8 @@ impl VisitMut for Rewriter<'_> {
             match &mut stmt {
                 // Loops are rewritten from their original bodies (the loop code visits the parts
                 // it keeps); other statements have their inner blocks rewritten first.
-                Stmt::Expr(Expr::ForLoop(f), semi) if self.in_async => {
+                // Loops of synchronous code are not prefetched yet.
+                Stmt::Expr(Expr::ForLoop(f), semi) if self.in_async && !self.scope.sync => {
                     self.visit_expr_mut(&mut f.expr);
                     if let Some(rewritten) = self.rewrite_loop(f) {
                         stmts.push(Stmt::Expr(rewritten, *semi));
@@ -65,7 +71,7 @@ impl VisitMut for Rewriter<'_> {
                     }
                     self.visit_block_mut(&mut f.body);
                 }
-                Stmt::Expr(Expr::While(w), semi) if self.in_async => {
+                Stmt::Expr(Expr::While(w), semi) if self.in_async && !self.scope.sync => {
                     if let Some(rewritten) = self.rewrite_while(w) {
                         stmts.push(Stmt::Expr(rewritten, *semi));
                         continue;
@@ -199,6 +205,7 @@ impl Rewriter<'_> {
             return nodes.into_iter().map(|n| n.stmt).collect();
         }
         emit(
+            self.scope.sync,
             &self.options.krate,
             &self.scope.fresh,
             nodes,
