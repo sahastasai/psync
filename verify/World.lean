@@ -31,6 +31,16 @@ a counterexample to the spec.
 
 namespace PsyncWorld
 
+/-! ## Notation used in the theorem statements
+
+* $T$ is a transition system (`Sys`): $\mathrm{run}_a$ is step $a$, and $a \mathrel{I_T} b$ is $T$'s
+  independence; $[\![ xs ]\!]_T(s)$ runs $xs$ in order.
+* A world $w = (c, \sigma, \mathit{log})$ is the client state $c$, the server state $\sigma$ and the
+  response of every call so far. $\mathit{step}$ is the server; $\mathit{spec}$ says which calls
+  commute; $\mathrm{Sound}(\mathit{step}, \mathit{spec})$ means every pair the spec allows really
+  commutes at the server (same server state, same responses).
+-/
+
 /-! ## Kernel: reduction for any state and any commuting relation -/
 
 section Kernel
@@ -48,12 +58,14 @@ def Sys.runAll (T : Sys S A) : List A → S → S
   | [], s => s
   | a :: as, s => T.runAll as (T.run a s)
 
+/-- $$[\![ xs \mathbin{+\!\!+} ys ]\!]_T(s) = [\![ ys ]\!]_T\bigl([\![ xs ]\!]_T(s)\bigr)$$ -/
 theorem Sys.runAll_append (T : Sys S A) (xs ys : List A) (s : S) :
     T.runAll (xs ++ ys) s = T.runAll ys (T.runAll xs s) := by
   induction xs generalizing s with
   | nil => rfl
   | cons x xs ih => exact ih _
 
+/-- $$(\forall x \in xs,\ x \mathrel{I_T} y) \implies [\![ xs ]\!]_T(\mathrm{run}_y(s)) = \mathrm{run}_y\bigl([\![ xs ]\!]_T(s)\bigr)$$ -/
 theorem Sys.commute_list (T : Sys S A) (y : A) (xs : List A) (h : ∀ x ∈ xs, T.Ind x y) (s : S) :
     T.runAll xs (T.run y s) = T.run y (T.runAll xs s) := by
   induction xs generalizing s with
@@ -68,6 +80,7 @@ inductive Interleave : List A → List A → List A → Prop
   | left {x a b m} : Interleave a b m → Interleave (x :: a) b (x :: m)
   | right {y a b m} : Interleave a b m → Interleave a (y :: b) (y :: m)
 
+/-- $$(\forall x \in a,\ \forall y \in b,\ x \mathrel{I_T} y) \;\wedge\; m \in a \parallel b \implies [\![ m ]\!]_T(s) = [\![ a \mathbin{+\!\!+} b ]\!]_T(s)$$ -/
 theorem Sys.interleave_correct (T : Sys S A) {a b m : List A}
     (hab : ∀ x ∈ a, ∀ y ∈ b, T.Ind x y) (hm : Interleave a b m) (s : S) :
     T.runAll m s = T.runAll (a ++ b) s := by
@@ -84,6 +97,7 @@ inductive InterleaveAll : List (List A) → List A → Prop
   | nil : InterleaveAll [] []
   | cons {c cs m r} : InterleaveAll cs r → Interleave c r m → InterleaveAll (c :: cs) m
 
+/-- $$m \in a \parallel b \implies \forall z \in m,\ z \in a \vee z \in b$$ -/
 theorem interleave_mem {a b m : List A} (hi : Interleave a b m) : ∀ z ∈ m, z ∈ a ∨ z ∈ b := by
   induction hi with
   | nil => intro z hz; cases hz
@@ -98,6 +112,7 @@ theorem interleave_mem {a b m : List A} (hi : Interleave a b m) : ∀ z ∈ m, z
     | head => exact Or.inr (List.mem_cons_self ..)
     | tail _ hz => exact (ih z hz).imp id (List.mem_cons_of_mem _)
 
+/-- $$m \in \textstyle\Vert_{c \in cs}\, c \implies \forall y \in m,\ \exists c \in cs,\ y \in c$$ -/
 theorem interleaveAll_mem {cs : List (List A)} {m : List A}
     (h : InterleaveAll cs m) : ∀ y ∈ m, ∃ c ∈ cs, y ∈ c := by
   induction h with
@@ -113,6 +128,7 @@ def Sys.PairwiseInd (T : Sys S A) : List (List A) → Prop
   | [] => True
   | c :: cs => (∀ c' ∈ cs, ∀ x ∈ c, ∀ y ∈ c', T.Ind x y) ∧ T.PairwiseInd cs
 
+/-- $$\mathrm{PairwiseInd}_T(cs) \;\wedge\; m \in \textstyle\Vert_{c \in cs}\, c \implies [\![ m ]\!]_T(s) = [\![ c_1 \mathbin{+\!\!+} \cdots \mathbin{+\!\!+} c_k ]\!]_T(s)$$ -/
 theorem Sys.level_correct (T : Sys S A) {cs : List (List A)} {m : List A}
     (hp : T.PairwiseInd cs) (hm : InterleaveAll cs m) (s : S) :
     T.runAll m s = T.runAll cs.flatten s := by
@@ -131,7 +147,9 @@ inductive Sys.Runs (T : Sys S A) : List (List (List A)) → List (List A) → Pr
   | cons {cs m levels ms} :
       T.PairwiseInd cs → InterleaveAll cs m → T.Runs levels ms → T.Runs (cs :: levels) (m :: ms)
 
-/-- Any execution of a schedule of levels equals running every chain in order. -/
+/-- $$\mathrm{Runs}_T(\mathit{levels}, ms) \implies [\![ \mathrm{flatten}(ms) ]\!]_T(s) = [\![ \mathrm{flatten}(\mathrm{map}\ \mathrm{flatten}\ \mathit{levels}) ]\!]_T(s)$$
+
+Any execution of a schedule of levels equals running every chain in order. -/
 theorem Sys.levels_correct (T : Sys S A) {levels : List (List (List A))} {ms : List (List A)}
     (h : T.Runs levels ms) (s : S) :
     T.runAll ms.flatten s = T.runAll (levels.map List.flatten).flatten s := by
@@ -146,7 +164,9 @@ inductive Sys.Reorders (T : Sys S A) : List A → List A → Prop
   | cons {x P A' B} : (∀ y ∈ A', T.Ind y x) → T.Reorders P (A' ++ B) →
       T.Reorders (x :: P) (A' ++ x :: B)
 
-/-- Moving steps earlier only past independent ones preserves the result. -/
+/-- $$\mathrm{Reorders}_T(P, L) \implies [\![ L ]\!]_T(s) = [\![ P ]\!]_T(s)$$
+
+Moving steps earlier only past independent ones preserves the result. -/
 theorem Sys.reorders_correct (T : Sys S A) {P L : List A} (h : T.Reorders P L) (s : S) :
     T.runAll L s = T.runAll P s := by
   induction h generalizing s with
@@ -218,12 +238,16 @@ def CIndep (spec : L → L → Prop) (a b : COp Loc Val L Rsp) : Prop :=
   ((∀ l, a.W l → ¬ b.R l ∧ ¬ b.W l) ∧ (∀ l, b.W l → ¬ a.R l)) ∧ a.id ≠ b.id ∧
   ∀ c c' la lb, a.req c = some la → b.req c' = some lb → spec la lb
 
-/-- `b`'s update does not change what `a` reads, so `a` sends the same request. -/
+/-- $$(\forall l,\ l \in W_b \Rightarrow l \notin R_a) \implies \mathrm{req}_a\bigl(\mathrm{upd}_b(o, c)\bigr) = \mathrm{req}_a(c)$$
+
+`b`'s update does not change what `a` reads, so `a` sends the same request. -/
 theorem req_stable (a b : COp Loc Val L Rsp) (h : ∀ l, b.W l → ¬ a.R l) (o : Option Rsp)
     (c : Loc → Val) : a.req (b.upd o c) = a.req c :=
   a.req_dep _ _ (fun l hr => b.frame o c l (fun hw => h l hw hr))
 
-/-- The client updates of two statements with disjoint footprints commute, whatever the
+/-- $$a \mathrel{I} b \implies \mathrm{upd}_b\bigl(o_b, \mathrm{upd}_a(o_a, c)\bigr) = \mathrm{upd}_a\bigl(o_a, \mathrm{upd}_b(o_b, c)\bigr)$$
+
+The client updates of two statements with disjoint footprints commute, whatever the
 responses (`commute` of `Schedule.lean`). -/
 theorem upd_comm (a b : COp Loc Val L Rsp)
     (h : (∀ l, a.W l → ¬ b.R l ∧ ¬ b.W l) ∧ (∀ l, b.W l → ¬ a.R l))
@@ -241,6 +265,7 @@ theorem upd_comm (a b : COp Loc Val L Rsp)
         (fun l' hr => a.frame oa c l' (fun hw => (h.1 l' hw).1 hr)) l hb
     · rw [b.frame _ _ _ hb, a.frame _ _ _ ha, a.frame _ _ _ ha, b.frame _ _ _ hb]
 
+/-- $$i \neq j \implies \mathit{log}[i \mapsto r_i][j \mapsto r_j] = \mathit{log}[j \mapsto r_j][i \mapsto r_i]$$ -/
 theorem record_comm (log : Nat → Option Rsp) {i j : Nat} (hij : i ≠ j) (ri rj : Rsp) :
     record (record log i ri) j rj = record (record log j rj) i ri := by
   funext k
@@ -249,7 +274,9 @@ theorem record_comm (log : Nat → Option Rsp) {i j : Nat} (hij : i ≠ j) (ri r
   · simp [hj, Ne.symm hij]
   · simp [hj]
 
-/-- **Independent statements commute in the world**: same client state, same server state, same
+/-- $$\mathrm{Sound}(\mathit{step}, \mathit{spec}) \;\wedge\; a \mathrel{I_{\mathit{spec}}} b \implies \mathrm{run}_b(\mathrm{run}_a(w)) = \mathrm{run}_a(\mathrm{run}_b(w)) \quad \text{for every world } w = (c, \sigma, \mathit{log})$$
+
+**Independent statements commute in the world**: same client state, same server state, same
 response for every call. The server part is exactly the spec's soundness. -/
 theorem world_commute (step : Server L Rsp σ) (spec : L → L → Prop) (hs : Sound step spec)
     (a b : COp Loc Val L Rsp) (h : CIndep spec a b) (w : World Loc Val Rsp σ) :
@@ -285,7 +312,9 @@ def worldSys (step : Server L Rsp σ) (spec : L → L → Prop) (hs : Sound step
   Ind := CIndep spec
   comm := fun a b h w => world_commute step spec hs a b h w
 
-/-- **The theorem.** If the commutativity specification is sound for the server, then whatever
+/-- $$\mathrm{Sound}(\mathit{step}, \mathit{spec}) \;\wedge\; \mathrm{Runs}(\mathit{levels}, ms) \implies [\![ \mathrm{flatten}(ms) ]\!](w) = [\![ \mathrm{flatten}(\mathrm{map}\ \mathrm{flatten}\ \mathit{levels}) ]\!](w)$$
+
+**The theorem.** If the commutativity specification is sound for the server, then whatever
 interleaving each level of psync's schedule takes, the run ends exactly as the sequential program
 does: the same client state, the same server state, and the same response for every call. -/
 theorem world_levels_correct (step : Server L Rsp σ) (spec : L → L → Prop) (hs : Sound step spec)
@@ -295,7 +324,9 @@ theorem world_levels_correct (step : Server L Rsp σ) (spec : L → L → Prop) 
       (worldSys step spec hs).runAll (levels.map List.flatten).flatten w :=
   (worldSys step spec hs).levels_correct h w
 
-/-- With no specification at all (`spec := fun _ _ => False`, psync's default for an unknown
+/-- $$\mathrm{Sound}\bigl(\mathit{step},\ \lambda\,a\,b.\ \bot\bigr) \quad \text{for every server } \mathit{step}$$
+
+With no specification at all (`spec := fun _ _ => False`, psync's default for an unknown
 service: every two calls to it conflict), the theorem holds for every server: only statements that
 send no request, or send none to that server, may overlap. -/
 theorem empty_spec_sound (step : Server L Rsp σ) : Sound step (fun _ _ => False) :=
@@ -327,11 +358,14 @@ def kvSpec : Req → Req → Prop
   | .get _, .get _ => True
   | _, _ => False
 
+/-- $$\mathrm{Sound}(\mathrm{kv}, \mathrm{kvSpec})$$ -/
 theorem kvSpec_sound : Sound kv kvSpec := by
   intro a b h s
   cases a <;> cases b <;> simp_all [kvSpec, kv]
 
-/-- A `get` and a `count` really do not commute: `count`'s answer depends on whether the `get`
+/-- $$\neg\,\mathrm{Commutes}_{\mathrm{kv}}(\mathrm{get}\ 0,\ \mathrm{count})$$
+
+A `get` and a `count` really do not commute: `count`'s answer depends on whether the `get`
 came first. A spec that allowed them would be unsound, and the theorem would not apply. -/
 theorem get_count_not_commute : ¬ Commutes kv (.get 0) .count := by
   intro h
@@ -369,14 +403,18 @@ def kvEff : Req → Eff
   | .get k => ⟨0, .read, some k⟩
   | .count => ⟨0, .read, none⟩
 
-/-- **The professor's point, proved.** For a server whose reads change its state, psync's
+/-- $$\neg\,\mathrm{Sound}\bigl(\mathrm{kv},\ \lambda\,a\,b.\ \mathrm{psyncSpec}(\mathrm{eff}(a), \mathrm{eff}(b))\bigr)$$
+
+**The professor's point, proved.** For a server whose reads change its state, psync's
 built-in rule is not sound: it lets a `get` and a `count` overlap, and they do not commute. So
 the guarantee is relative to the spec, and a counting server needs a spec that says so (here
 `kvSpec`, or `#[psync::seq]`, or `effects(write(fetch_count))`). -/
 theorem psync_rule_unsound_for_counters : ¬ Sound kv (fun a b => psyncSpec (kvEff a) (kvEff b)) :=
   fun h => get_count_not_commute (h (.get 0) .count (Or.inr (Or.inl ⟨rfl, rfl⟩)))
 
-/-- And it is sound when the server's reads do not change what other requests see: two `get`s. -/
+/-- $$\forall k\,k',\ \mathrm{Commutes}_{\mathrm{kv}}(\mathrm{get}\ k,\ \mathrm{get}\ k')$$
+
+And it is sound when the server's reads do not change what other requests see: two `get`s. -/
 theorem psync_rule_sound_for_gets (k k' : Nat) : Commutes kv (.get k) (.get k') :=
   kvSpec_sound _ _ trivial
 
