@@ -1,0 +1,27 @@
+[package]
+name = "psync-check"
+version = "0.1.0"
+edition = "2024"
+description = "`cargo psync check`: verifies #[psync::graph] rewrites against the compiled bodies of callees"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "cargo-psync"
+path = "src/bin/cargo-psync.rs"
+test = false
+
+[[bin]]
+name = "psync-driver"
+path = "src/bin/psync-driver.rs"
+# Links librustc_driver; it has no unit tests (see tests/fixture.rs).
+test = false
+
+[dependencies]
+psync-graph = { path = "../psync-graph" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[package.metadata.rust-analyzer]
+rustc_private = true

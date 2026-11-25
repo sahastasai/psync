@@ -1,0 +1,9 @@
+[package]
+name = "app"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+psync = { path = "../../../../..", default-features = false }
+helpers = { path = "../helpers" }

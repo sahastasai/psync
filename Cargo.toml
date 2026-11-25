@@ -3,8 +3,24 @@ name = "psync"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = ["psync-graph", "psync-macros"]
+# Built with its own pinned nightly toolchain (it links rustc's internals).
+exclude = ["psync-check"]
+
+[dependencies]
+psync-macros = { path = "psync-macros", version = "0.1.0" }
+
+[dev-dependencies]
+# For the graph_suite example, which prints the code `#[psync::graph]` generates.
+psync-graph = { path = "psync-graph" }
+prettyplease = "0.2"
+syn = { version = "2", features = ["full"] }
+
 [features]
 default = ["rp235x"]
+# `MultiExecutor`: worker threads (host targets).
+std = []
 rp235x = ["dep:embedded-alloc", "dep:rp235x-hal", "dep:cortex-m-rt", "dep:cortex-m"]
 
 [target.'cfg(all(target_os = "none", target_arch = "arm"))'.dependencies]
@@ -13,11 +29,19 @@ rp235x-hal = { version = "0.4.0", optional = true, features = ["rt", "critical-s
 cortex-m-rt = { version = "0.7", optional = true }
 cortex-m = { version = "0.7", optional = true }
 
-[[example]]
-name = "rp2350"
-required-features = ["rp235x"]
-
 [profile.release]
 lto = true
 codegen-units = 1
 panic = "abort"
+
+[[test]]
+name = "multi"
+required-features = ["std"]
+
+[[test]]
+name = "sync"
+required-features = ["std"]
+
+[[example]]
+name = "phase2"
+required-features = ["std"]

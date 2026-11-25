@@ -1,0 +1,6 @@
+[toolchain]
+# `psync-check` links rustc's internal crates, which change between nightlies. Bump together with
+# fixes to `src/`.
+channel = "nightly-2026-11-20"
+components = ["rustc-dev", "llvm-tools", "rust-src"]
+profile = "minimal"
