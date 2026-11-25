@@ -12,7 +12,7 @@ contributors read them.
 | [psync-check](/api/check/psync_check/index.html) | the effect model, summary files, the link step, facts for the macro |
 | [psync-driver](/api/check/psync_driver/index.html) | the rustc driver: MIR summaries and the checks |
 | [cargo-psync](/api/check/cargo_psync/index.html) | `cargo psync check`, `build`, `fix`, `summaries` |
-| [Lean proofs](/api/lean/index.html) (doc-gen4) | every theorem of `verify/`, each with its statement in mathematical notation: [Schedule](/api/lean/Schedule.html), [World](/api/lean/World.html), [Cert](/api/lean/Cert.html), [Certs](/api/lean/Certs.html), [Tutorial](/api/lean/Tutorial.html) |
+| [Lean proofs](/api/lean/index.html) (doc-gen4) | every theorem of `verify/`, each with its statement in mathematical notation: [Schedule](/api/lean/Schedule.html), [World](/api/lean/World.html), [Cert](/api/lean/Cert.html), [Footprint](/api/lean/Footprint.html), [Certs](/api/lean/Certs.html), [Tutorial](/api/lean/Tutorial.html) |
 
 The [index page](/api/index.html) links them all. To build the site yourself:
 `scripts/build-site.sh`. It builds the book, runs `cargo doc --document-private-items` for the

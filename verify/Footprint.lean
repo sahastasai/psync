@@ -35,6 +35,19 @@ correspondence between real MIR and this fragment.
 
 namespace PsyncFootprint
 
+/-! ## Notation used in the theorem statements
+
+* A place $p = (p_1, p_2)$ is a local and a path of projections; $p \sqsubseteq q$ (`pre`): $p$ is a
+  prefix of $q$, so writing $p$ may change $q$.
+* ${\downarrow}xs$ (`under`): the places at or below some place of $xs$;
+  $\mathrm{covers}(xs, ys)$: ${\downarrow}ys \subseteq {\downarrow}xs$.
+* $p[\sigma]$ substitutes the arguments $\sigma$ for a callee's parameters.
+* $\mathrm{fp}_S(s) = (R_S(s), W_S(s))$ is statement $s$'s footprint computed with the summaries
+  $S$, and $T_S(s) = R_S(s) \mathbin{+\!\!+} W_S(s)$ is everything it touches.
+* $\mathrm{exec}^n_P(s, m)$ runs $s$ from memory $m$ with fuel $n$ in program $P$;
+  $\mathrm{Valid}(S, P)$ is the link check: every summary covers its body's footprint.
+-/
+
 open PsyncWorld PsyncCert
 
 /-! ## Places and prefixes -/
@@ -48,6 +61,7 @@ def lpre : List Nat → List Nat → Bool
   | _ :: _, [] => false
   | a :: as, b :: bs => a == b && lpre as bs
 
+/-- $$\mathrm{lpre}(a, b) = \mathsf{true} \iff \exists t,\ b = a \mathbin{+\!\!+} t$$ -/
 theorem lpre_iff : ∀ (a b : List Nat), lpre a b = true ↔ ∃ t, b = a ++ t
   | [], b => by simp [lpre]
   | a :: as, [] => by simp [lpre]
@@ -61,11 +75,14 @@ theorem lpre_iff : ∀ (a b : List Nat), lpre a b = true ↔ ∃ t, b = a ++ t
 /-- `pre p q`: place `p` contains place `q` (`_3` contains `_3.0.1`). -/
 def pre (p q : Pl) : Bool := p.1 == q.1 && lpre p.2 q.2
 
+/-- $$p \sqsubseteq q \iff p_1 = q_1 \wedge \exists t,\ q_2 = p_2 \mathbin{+\!\!+} t$$ -/
 theorem pre_iff (p q : Pl) : pre p q = true ↔ p.1 = q.1 ∧ ∃ t, q.2 = p.2 ++ t := by
   simp [pre, lpre_iff]
 
+/-- $$p \sqsubseteq p$$ -/
 theorem pre_refl (p : Pl) : pre p p = true := (pre_iff p p).2 ⟨rfl, [], by simp⟩
 
+/-- $$p \sqsubseteq q \wedge q \sqsubseteq r \implies p \sqsubseteq r$$ -/
 theorem pre_trans {p q r : Pl} (h1 : pre p q = true) (h2 : pre q r = true) : pre p r = true := by
   obtain ⟨e1, t1, h1⟩ := (pre_iff _ _).1 h1
   obtain ⟨e2, t2, h2⟩ := (pre_iff _ _).1 h2
@@ -77,12 +94,14 @@ def under (ps : List Pl) (l : Pl) : Prop := ∃ p ∈ ps, pre p l = true
 /-- Every place of `ys` is contained in a place of `xs`. -/
 def covers (xs ys : List Pl) : Prop := ∀ y ∈ ys, ∃ x ∈ xs, pre x y = true
 
+/-- $$\mathrm{covers}(xs, ys) \wedge l \in {\downarrow}ys \implies l \in {\downarrow}xs$$ -/
 theorem under_of_covers {xs ys : List Pl} (h : covers xs ys) {l : Pl} (hl : under ys l) :
     under xs l := by
   obtain ⟨y, hy, hyl⟩ := hl
   obtain ⟨x, hx, hxy⟩ := h y hy
   exact ⟨x, hx, pre_trans hxy hyl⟩
 
+/-- $$l \in {\downarrow}(xs \mathbin{+\!\!+} ys) \iff l \in {\downarrow}xs \vee l \in {\downarrow}ys$$ -/
 theorem under_append {xs ys : List Pl} {l : Pl} : under (xs ++ ys) l ↔ under xs l ∨ under ys l := by
   simp only [under, List.mem_append]
   constructor
@@ -93,11 +112,13 @@ theorem under_append {xs ys : List Pl} {l : Pl} : under (xs ++ ys) l ↔ under x
     · exact ⟨p, Or.inl hp, h⟩
     · exact ⟨p, Or.inr hp, h⟩
 
+/-- $$ys \subseteq xs \wedge l \in {\downarrow}ys \implies l \in {\downarrow}xs$$ -/
 theorem under_mono {xs ys : List Pl} (h : ∀ p ∈ ys, p ∈ xs) {l : Pl} (hl : under ys l) :
     under xs l := by
   obtain ⟨p, hp, hpl⟩ := hl
   exact ⟨p, h p hp, hpl⟩
 
+/-- $$l \in {\downarrow}[p] \iff p \sqsubseteq l$$ -/
 theorem under_single {p l : Pl} : under [p] l ↔ pre p l = true := by simp [under]
 
 /-! ## Substitution: a callee's places in the caller's terms -/
@@ -106,10 +127,12 @@ theorem under_single {p l : Pl} : under [p] l ↔ pre p l = true := by simp [und
 caller places for its temporaries). The callee's `_k.f` becomes `σ k` followed by `.f`. -/
 def subst (σ : Nat → Pl) (p : Pl) : Pl := ((σ p.1).1, (σ p.1).2 ++ p.2)
 
+/-- $$p[\tau][\sigma] = p\bigl[k \mapsto \tau(k)[\sigma]\bigr]$$ -/
 theorem subst_comp (σ τ : Nat → Pl) (p : Pl) :
     subst σ (subst τ p) = subst (fun k => subst σ (τ k)) p := by
   simp [subst, List.append_assoc]
 
+/-- $$p \sqsubseteq q \implies p[\sigma] \sqsubseteq q[\sigma]$$ -/
 theorem pre_subst (σ : Nat → Pl) {p q : Pl} (h : pre p q = true) :
     pre (subst σ p) (subst σ q) = true := by
   obtain ⟨e, t, ht⟩ := (pre_iff _ _).1 h
@@ -117,6 +140,7 @@ theorem pre_subst (σ : Nat → Pl) {p q : Pl} (h : pre p q = true) :
   · simp [subst, e]
   · simp [subst, e, ht, List.append_assoc]
 
+/-- $$\mathrm{covers}(xs, ys) \implies \mathrm{covers}(xs[\sigma], ys[\sigma])$$ -/
 theorem covers_map (σ : Nat → Pl) {xs ys : List Pl} (h : covers xs ys) :
     covers (xs.map (subst σ)) (ys.map (subst σ)) := by
   intro y hy
@@ -196,11 +220,14 @@ def fp (S : Nat → Fp) : Stmt → Fp
   | .while c b => (c :: (fp S b).1, (fp S b).2)
   | .call f σ => ((S f).1.map (subst σ), (S f).2.map (subst σ))
 
+/-- $$R(o[\sigma]) = R(o)[\sigma]$$ -/
 theorem Op.reads_subst (σ : Nat → Pl) (o : Op) :
     (o.subst σ).reads = o.reads.map (PsyncFootprint.subst σ) := by
   cases o <;> rfl
 
-/-- The footprint of a substituted statement is the substituted footprint. -/
+/-- $$\mathrm{fp}_S(s[\sigma]) = \bigl(R_S(s)[\sigma],\ W_S(s)[\sigma]\bigr)$$
+
+The footprint of a substituted statement is the substituted footprint. -/
 theorem fp_subst (S : Nat → Fp) (σ : Nat → Pl) :
     ∀ s : Stmt, fp S (s.subst σ) = ((fp S s).1.map (subst σ), (fp S s).2.map (subst σ))
   | .nop => rfl
@@ -220,6 +247,7 @@ def Valid (S : Nat → Fp) (P : Nat → Stmt) : Prop :=
 result there depends on the old value. -/
 def touched (S : Nat → Fp) (s : Stmt) : List Pl := (fp S s).1 ++ (fp S s).2
 
+/-- $$\mathrm{Valid}(S, P) \implies \mathrm{covers}\bigl(W_S(\mathrm{call}\ f\ \sigma),\ W_S(P_f[\sigma])\bigr) \wedge \mathrm{covers}\bigl(T_S(\mathrm{call}\ f\ \sigma),\ T_S(P_f[\sigma])\bigr)$$ -/
 theorem call_covers {S : Nat → Fp} {P : Nat → Stmt} (hv : Valid S P) (f : Nat) (σ : Nat → Pl) :
     covers (fp S (.call f σ)).2 (fp S ((P f).subst σ)).2 ∧
     covers (touched S (.call f σ)) (touched S ((P f).subst σ)) := by
@@ -247,7 +275,9 @@ macro "mem_tac" : tactic => `(tactic| (
 
 variable {S : Nat → Fp} {P : Nat → Stmt}
 
-/-- **Frame.** A statement changes no place outside its writes. -/
+/-- $$\mathrm{Valid}(S, P) \wedge l \notin {\downarrow}W_S(s) \implies \mathrm{exec}^n_P(s, m)(l) = m(l)$$
+
+**Frame.** A statement changes no place outside its writes. -/
 theorem frame (hv : Valid S P) :
     ∀ (n : Nat) (s : Stmt) (m : Mem) (l : Pl), ¬ under (fp S s).2 l → exec P n s m l = m l
   | 0, _, _, _, _ => rfl
@@ -280,7 +310,9 @@ theorem frame (hv : Valid S P) :
     simp only [exec]
     exact frame hv n _ m l (fun h' => h (under_of_covers (call_covers hv f σ).1 h'))
 
-/-- **Dependence.** Take any set of places `X` containing everything a statement touches. If two
+/-- $$\mathrm{Valid}(S, P) \wedge {\downarrow}T_S(s) \subseteq X \wedge m|_X = m'|_X \implies \mathrm{exec}^n_P(s, m)|_X = \mathrm{exec}^n_P(s, m')|_X$$
+
+**Dependence.** Take any set of places `X` containing everything a statement touches. If two
 memories agree on `X` before the statement, they agree on `X` after it. -/
 theorem dep (hv : Valid S P) :
     ∀ (n : Nat) (s : Stmt) (X : Pl → Prop), (∀ l, under (touched S s) l → X l) →
@@ -337,6 +369,7 @@ def Disjoint (S : Nat → Fp) (a b : Stmt) : Prop :=
   (∀ l, under (fp S a).2 l → ¬ under (touched S b) l ∧ ¬ under (fp S b).2 l) ∧
   (∀ l, under (fp S b).2 l → ¬ under (touched S a) l)
 
+/-- $$l \in {\downarrow}W_S(s) \implies l \in {\downarrow}T_S(s)$$ -/
 theorem under_touched_of_write {s : Stmt} {l : Pl} (h : under (fp S s).2 l) :
     under (touched S s) l :=
   under_mono (fun _ hp => List.mem_append.2 (Or.inr hp)) h
@@ -371,6 +404,7 @@ def CoversNode (nd : Node) (f : Fp) : Prop :=
   (∀ p ∈ f.2, ∃ q ∈ nd.writes, lpre q (enc p) = true) ∧
   (∀ p ∈ f.1, ∃ q ∈ nd.reads ++ nd.writes, lpre q (enc p) = true)
 
+/-- $$a \mathbin{+\!\!+} t = b \mathbin{+\!\!+} t' \implies \mathrm{overlap}_{\mathit{holes}}(a, b) = \mathsf{true}$$ -/
 theorem overlap_common (holes : List Nat) :
     ∀ (a b t t' : List Nat), a ++ t = b ++ t' → overlap holes a b = true
   | [], _, _, _, _ => by simp [overlap]
@@ -380,6 +414,7 @@ theorem overlap_common (holes : List Nat) :
     obtain ⟨rfl, h⟩ := h
     simp [overlap, overlap_common holes xs ys t t' h]
 
+/-- $$\mathrm{lpre}(q, \mathrm{enc}(p)) \wedge p \sqsubseteq l \implies \exists t,\ \mathrm{enc}(l) = q \mathbin{+\!\!+} t$$ -/
 theorem enc_ext {q : Place} {p l : Pl} (hq : lpre q (enc p) = true) (hp : pre p l = true) :
     ∃ t, enc l = q ++ t := by
   obtain ⟨t1, h1⟩ := (lpre_iff _ _).1 hq
@@ -388,12 +423,14 @@ theorem enc_ext {q : Place} {p l : Pl} (hq : lpre q (enc p) = true) (hp : pre p 
   have : enc l = enc p ++ t2 := by simp [enc, e, h2]
   rw [this, h1, List.append_assoc]
 
+/-- $$\mathrm{CoversNode}(nd, f) \wedge l \in {\downarrow}W_f \implies \exists q \in nd.\mathrm{writes},\ \exists t,\ \mathrm{enc}(l) = q \mathbin{+\!\!+} t$$ -/
 theorem write_place {nd : Node} {f : Fp} (hc : CoversNode nd f) {l : Pl} (h : under f.2 l) :
     ∃ q ∈ nd.writes, ∃ t, enc l = q ++ t := by
   obtain ⟨p, hp, hpl⟩ := h
   obtain ⟨q, hq, hqp⟩ := hc.1 p hp
   exact ⟨q, hq, enc_ext hqp hpl⟩
 
+/-- $$\mathrm{CoversNode}(nd, f) \wedge l \in {\downarrow}(R_f \mathbin{+\!\!+} W_f) \implies \exists q \in nd.\mathrm{reads} \mathbin{+\!\!+} nd.\mathrm{writes},\ \exists t,\ \mathrm{enc}(l) = q \mathbin{+\!\!+} t$$ -/
 theorem touch_place {nd : Node} {f : Fp} (hc : CoversNode nd f) {l : Pl} (h : under (f.1 ++ f.2) l) :
     ∃ q ∈ nd.reads ++ nd.writes, ∃ t, enc l = q ++ t := by
   rcases under_append.1 h with h | h
@@ -403,11 +440,14 @@ theorem touch_place {nd : Node} {f : Fp} (hc : CoversNode nd f) {l : Pl} (h : un
   · obtain ⟨q, hq, t, ht⟩ := write_place hc h
     exact ⟨q, List.mem_append.2 (Or.inr hq), t, ht⟩
 
+/-- $$a \in xs \wedge b \in ys \wedge a \mathbin{+\!\!+} t = b \mathbin{+\!\!+} t' \implies \mathrm{anyOverlap}_{\mathit{holes}}(xs, ys) = \mathsf{true}$$ -/
 theorem anyOverlap_of {holes : List Nat} {xs ys : List Place} {a b : Place} (ha : a ∈ xs)
     (hb : b ∈ ys) {t t' : List Nat} (h : a ++ t = b ++ t') : anyOverlap holes xs ys = true :=
   List.any_eq_true.2 ⟨a, ha, List.any_eq_true.2 ⟨b, hb, overlap_common holes a b t t' h⟩⟩
 
-/-- **`hind`, proved.** If every certificate node covers its statement's footprint, the
+/-- $$\bigl(\forall i,\ \mathrm{CoversNode}(c_i, \mathrm{fp}_S(st_i))\bigr) \implies \bigl(\forall i\,j,\ c.\mathrm{ind}(i, j) \Rightarrow \mathrm{Disjoint}_S(st_i, st_j)\bigr)$$
+
+**`hind`, proved.** If every certificate node covers its statement's footprint, the
 certificate's independence implies disjoint footprints. -/
 theorem hind_of_cover {c : Cert} {st : Nat → Stmt}
     (hcov : ∀ i, CoversNode (c.node i) (fp S (st i))) :
@@ -433,7 +473,9 @@ theorem hind_of_cover {c : Cert} {st : Nat → Stmt}
       (hbt.symm.trans hat)
     rw [h1] at this; exact Bool.false_ne_true this
 
-/-- **Certified schedules of MIR, with nothing about footprints assumed.** For a program whose
+/-- $$\mathrm{Valid}(S, P) \wedge \bigl(\forall i,\ \mathrm{CoversNode}(c_i, \mathrm{fp}_S(st_i))\bigr) \wedge \mathrm{check}(c) = \mathsf{true} \wedge \mathrm{Execs}(st(c.\mathit{levels}), ms) \implies [\![ \mathrm{flatten}(ms) ]\!]_{\mathrm{mem}}(m) = [\![ st_0, \ldots, st_{n-1} ]\!]_{\mathrm{mem}}(m)$$
+
+**Certified schedules of MIR, with nothing about footprints assumed.** For a program whose
 summaries pass the link check, and a certificate whose nodes cover the statements' footprints, if
 `check` accepts the certificate then every run of its schedule, in any interleaving of each
 level, ends with the same memory as the statements run in order. -/
@@ -455,6 +497,7 @@ def Program.sum (p : Program) (f : Nat) : Fp := (p.fns.getD f (.nop, ([], []))).
 
 def coversB (xs ys : List Pl) : Bool := ys.all fun y => xs.any fun x => pre x y
 
+/-- $$\mathrm{coversB}(xs, ys) = \mathsf{true} \implies \mathrm{covers}(xs, ys)$$ -/
 theorem covers_of_coversB {xs ys : List Pl} (h : coversB xs ys = true) : covers xs ys := by
   intro y hy
   have := List.all_eq_true.1 h y hy
@@ -465,6 +508,7 @@ theorem covers_of_coversB {xs ys : List Pl} (h : coversB xs ys = true) : covers 
 def Program.validB (p : Program) : Bool :=
   p.fns.all fun e => coversB e.2.2 (fp p.sum e.1).2 && coversB (e.2.1 ++ e.2.2) (fp p.sum e.1).1
 
+/-- $$p.\mathrm{validB} = \mathsf{true} \implies \mathrm{Valid}(p.\mathrm{sum}, p.\mathrm{body})$$ -/
 theorem Program.valid (p : Program) (h : p.validB = true) : Valid p.sum p.body := by
   intro f
   simp only [Program.body, Program.sum, List.getD_eq_getElem?_getD]
@@ -490,9 +534,12 @@ def drainSum : Fp := ([], [(0, []), (1, [])])
 
 def prog : Program := ⟨[(drain, drainSum)]⟩
 
+/-- $$\mathtt{prog}.\mathrm{validB} = \mathsf{true}$$ -/
 theorem prog_valid : prog.validB = true := by decide
 
-/-- A summary that forgets the write to `_1` is rejected by the link check. -/
+/-- $$\mathrm{validB}\bigl(\mathtt{drain} : R = \emptyset,\ W = \{\_0\}\bigr) = \mathsf{false}$$
+
+A summary that forgets the write to `_1` is rejected by the link check. -/
 theorem prog_wrong_invalid : (Program.validB ⟨[(drain, ([], [(0, [])]))]⟩) = false := by decide
 
 /-- The caller: `drain(&mut s.a, &mut s.b)` and `drain(&mut s.c, &mut s.d)`, with `s` local 5.
@@ -506,8 +553,10 @@ def callersCert : Cert where
   nodes := [⟨[], [[5, 0], [5, 1]]⟩, ⟨[], [[5, 2], [5, 3]]⟩]
   levels := [[[0], [1]]]
 
+/-- $$\mathrm{check}(\mathtt{callersCert}) = \mathsf{true}$$ -/
 theorem callersCert_ok : check callersCert = true := by decide
 
+/-- $$\forall i,\ \mathrm{CoversNode}\bigl(\mathtt{callersCert}_i,\ \mathrm{fp}(\mathtt{callers}_i)\bigr)$$ -/
 theorem callers_cover : ∀ i, CoversNode (callersCert.node i) (fp prog.sum (callers i)) := by
   intro i
   match i with
@@ -515,7 +564,9 @@ theorem callers_cover : ∀ i, CoversNode (callersCert.node i) (fp prog.sum (cal
   | 1 => unfold CoversNode; decide
   | _ + 2 => exact ⟨fun _ h => by simp [callers, fp] at h, fun _ h => by simp [callers, fp] at h⟩
 
-/-- Both calls in parallel equal both in order, for every fuel, with no hypothesis left. -/
+/-- $$\mathrm{Execs}(\mathtt{callers}(\mathtt{callersCert}.\mathit{levels}), ms) \implies [\![ \mathrm{flatten}(ms) ]\!]_{\mathrm{mem}}(m) = [\![ \mathtt{callers}_0, \mathtt{callers}_1 ]\!]_{\mathrm{mem}}(m) \quad \text{for every fuel}$$
+
+Both calls in parallel equal both in order, for every fuel, with no hypothesis left. -/
 theorem callers_sound (n : Nat) {ms : List (List Stmt)}
     (hx : Execs (callersCert.levels.map (List.map (List.map callers))) ms) (m : Mem) :
     (memSys (prog.valid prog_valid) n).runAll ms.flatten m =

@@ -38,7 +38,7 @@ a{color:#006d77}li{margin:.4rem 0}@media(prefers-color-scheme:dark){body{backgro
 <li><a href="check/psync_check/index.html">psync-check</a>: the effect model, summaries, link step, facts</li>
 <li><a href="check/psync_driver/index.html">psync-driver</a>: the rustc driver (MIR summaries and checks)</li>
 <li><a href="check/cargo_psync/index.html">cargo-psync</a>: the cargo subcommand</li>
-<li><a href="lean/index.html">Lean proofs</a> (doc-gen4): every theorem with its statement in mathematical notation; start at <a href="lean/Schedule.html">Schedule</a>, <a href="lean/World.html">World</a>, <a href="lean/Cert.html">Cert</a></li>
+<li><a href="lean/index.html">Lean proofs</a> (doc-gen4): every theorem with its statement in mathematical notation; start at <a href="lean/Schedule.html">Schedule</a>, <a href="lean/World.html">World</a>, <a href="lean/Cert.html">Cert</a>, <a href="lean/Footprint.html">Footprint</a></li>
 </ul>
 HTML
 echo "site built in book/book (book + api/)"
