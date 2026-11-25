@@ -92,3 +92,39 @@ by a rule above:
 - **Method names are conventions.** A method called `get_and_increment` starts with `get`.
   Read-only prefixes only apply to receivers already known to be mutable, so this mostly matters
   for `mut` bindings.
+
+## Exercises
+
+Predict the edges, then check with `psync-expand FILE LINE`:
+
+```rust,ignore
+async fn f(&mut self, api: &Api) -> usize {
+    let mut seen = Vec::new();
+    let a = self.client.fetch(1).await;
+    self.groups.push(a);
+    let n = seen.len();
+    let b = self.client.fetch(2).await;
+    seen.push(b);
+    let c = api.three(format!("{n}")).await;
+    n + c
+}
+```
+
+1. `self` is `&mut`. Why can the second `fetch` run while `self.groups.push(a)` writes `self`?
+2. Which edge keeps `seen.push(b)` after `let n = seen.len();`, and what is its reason?
+3. `three` takes `format!("{n}")`. Is there an edge from `n`?
+4. Why does `seen.push(b)` wait for `self.groups.push(a)`, although they touch different places?
+
+<details>
+<summary>Answers</summary>
+
+1. Paths are compared by prefix: `self.groups` does not overlap `self.client`. And `fetch` is a
+   read-only prefix, so a call through `self.client` reads it, although `self` is `&mut`.
+2. ``n3 -> n5 (writes `seen`)``: `len` reads `seen` and `push` writes it, an anti-dependence.
+   Reordering them would change `n`.
+3. Yes, ``n3 -> n6 (reads `n`)``. Names inside `format!` strings count as reads.
+4. ``n2 -> n5 (effect order)``: both are ordinary statements, and ordinary statements never change
+   order relative to each other, whatever they touch. The level is
+   `n0->n3 || n1->n2 || n4`, then `n5 || n6`.
+
+</details>
