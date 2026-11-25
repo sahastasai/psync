@@ -49,7 +49,9 @@ pub(crate) fn depends(a: &Node, b: &Node) -> Option<String> {
         && !b.speculate
         && let Some(w) = b.effects.iter().find(|e| e.writes())
     {
-        return Some(format!("may exit before `{}` runs", w.op));
+        // The call's name; where the effect came from is said with the effect itself.
+        let op = w.op.strip_suffix(", per the compiler").unwrap_or(&w.op);
+        return Some(format!("may exit before `{op}` runs"));
     }
     // Ordinary statements keep their order relative to each other. A binding or await may still
     // run ahead of one that might leave the block: that is the speculation the attribute allows,

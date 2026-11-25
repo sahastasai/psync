@@ -293,3 +293,70 @@ warnings. The findings summary covers only crates recompiled in this run.
   so. The driver classifies other crates' I/O by name, not by following them down to the socket:
   at that level, every HTTP request is a write.
 - **Panics** count as exits only when they are explicit and in your own code (`unwrap`, `expect`, `panic!`, `assert!`, `unreachable!`, `todo!`). Panics inside libraries, and bounds and overflow checks, are not counted.
+
+## Exercises
+
+Start from the walkthrough crate. The answers come from running `cargo psync check` on each
+variant (delete `target/psync` between runs, or cargo replays the last findings).
+
+1. Make `motd` read `"cache.json"` too. How many warnings does `check` report? What schedule does
+   `cargo psync build` produce?
+2. Instead, add a helper that may panic, and call it first:
+
+   ```rust,ignore
+   async fn banner_or_panic() -> String { std::fs::read_to_string("motd.txt").unwrap() }
+
+   #[graph]
+   pub async fn start() -> io::Result<(String, String)> {
+       let banner = banner_or_panic().await;
+       refresh().await?;
+       let cache = load().await?;
+       Ok((cache, banner))
+   }
+   ```
+
+   Which findings are there now, and why could the macro not see either?
+3. Would `cargo psync fix` on exercise 2 keep any concurrency?
+4. A colleague's `refresh` writes the file through a `Box<dyn Fn()>` stored in a struct. What
+   does `check` report, and where would you look?
+
+<details>
+<summary>Answers</summary>
+
+1. Two warnings, both `conflict`: `load` and `motd` each read the file that `refresh` writes.
+   `build` orders both after `refresh`, and they still run together:
+
+   ```text
+       n0 -> n1 (write file "cache.json" (refresh, per the compiler) vs read file "cache.json" (load, per the compiler))
+       n0 -> n2 (write file "cache.json" (refresh, per the compiler) vs read file "cache.json" (motd, per the compiler))
+       level 0: n0
+       level 1: n1 || n2
+   ```
+
+   Then the check of the new schedule reports 0 warnings.
+2. Two warnings. The `conflict` between `refresh` and `load`, as before. And a
+   `speculative-write`: ``psync starts this before knowing whether an earlier statement may
+   panic, and it does `write file "cache.json"` (via refresh -> std::fs::write)``. Sequential code
+   never writes the cache if `banner_or_panic` panics. From tokens, `banner_or_panic().await` has
+   no `?`, so the macro takes it for a statement that cannot exit. The `unwrap` is in its body.
+3. It inserts two `#[psync::seq]`, one before `refresh` (the speculative write) and one before
+   `load` (the conflict). Nothing overlaps any more. Here `cargo psync build` ends in the same
+   place, because the compiler's facts include the panic:
+
+   ```text
+     region 0 (unchanged):
+       n0: banner = banner_or_panic() [await] {read file "motd.txt" (banner_or_panic, per the compiler)}
+       n1: refresh()? [await] {write file "cache.json" (refresh, per the compiler)}
+       n2: cache = load()? [await] {read file "cache.json" (load, per the compiler)}
+       n0 -> n1 (may exit before `refresh` runs)
+       n1 -> n2 (write file "cache.json" (refresh, per the compiler) vs read file "cache.json" (load, per the compiler))
+       level 0: n0->n1->n2
+   ```
+
+   Every statement waits for the one before it. `build` still has the advantage that the source
+   needs no hints, and the schedule follows the code when it changes.
+4. Possibly nothing. A call through a function pointer or `dyn` without a summary is *opaque*: the
+   driver cannot see what it does, so it reports no effect. `cargo psync summaries --all` lists
+   opaque calls. Look there, and declare the effect with `effects(write(refresh))`.
+
+</details>
