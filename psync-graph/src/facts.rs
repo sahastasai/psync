@@ -96,6 +96,7 @@ pub(crate) fn parse(text: &str) -> HashMap<String, Fact> {
                         },
                         op: format!("{name}, per the compiler"),
                         ordered,
+                        source: None,
                     },
                     arg,
                 ))

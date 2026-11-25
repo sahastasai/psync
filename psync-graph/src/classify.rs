@@ -785,6 +785,7 @@ pub(crate) fn classify(stmt: &Stmt, scope: &Scope, relaxed: bool) -> Class {
                 target: effects::Target::Any,
                 op: op.clone(),
                 ordered: true,
+                source: None,
             });
         }
         found.unclassified.push(op);

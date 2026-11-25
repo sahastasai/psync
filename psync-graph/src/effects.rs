@@ -293,6 +293,9 @@ pub(crate) struct Effect {
     /// The order of these operations is observable even on different targets (`send`, `append`,
     /// `publish`): two of them on one domain never reorder.
     pub ordered: bool,
+    /// The target's expression as written in the call (a file path), when there is one: the
+    /// runtime check of a loop's targets evaluates it for each item.
+    pub source: Option<String>,
 }
 
 impl Effect {
@@ -921,6 +924,7 @@ impl Finder<'_> {
             let mut e = e.clone();
             if let Some(j) = arg {
                 e.target = args.get(*j).map_or(Target::Any, |a| target_of(Some(a)));
+                e.source = args.get(*j).map(|a| a.to_token_stream().to_string());
             }
             self.found.effects.push(e);
         }
@@ -950,7 +954,15 @@ impl Finder<'_> {
             target,
             op,
             ordered,
+            source: None,
         });
+    }
+
+    /// Record the expression the last effect's target was taken from.
+    fn sourced(&mut self, arg: Option<&Expr>) {
+        if let (Some(e), Some(a)) = (self.found.effects.last_mut(), arg) {
+            e.source = Some(a.to_token_stream().to_string());
+        }
     }
 
     /// `std::fs::write(p, ..)`, `File::create(p)`, `env::set_var(..)`, `Command::new(..)`, and
@@ -983,6 +995,7 @@ impl Finder<'_> {
                 Kind::Write
             };
             self.push(Domain::Fs, kind, target_of(arg0), op.clone(), false);
+            self.sourced(arg0);
             // `rename(from, to)`, `copy(from, to)`, `hard_link(src, dst)` also touch the second.
             if kind == Kind::Write
                 && c.args.len() >= 2
@@ -998,6 +1011,7 @@ impl Finder<'_> {
                     op,
                     false,
                 );
+                self.sourced(c.args.iter().nth(1));
             }
             return true;
         }
@@ -1117,6 +1131,7 @@ impl Finder<'_> {
             if m.args.is_empty() && PATH_FS_READS.contains(&m.method.to_string().as_str()) {
                 let target = target_of(Some(&m.receiver));
                 self.push(Domain::Fs, Kind::Read, target, m.method.to_string(), false);
+                self.sourced(Some(&m.receiver));
             }
         }
         let domain = Domain::Service(receiver_path(e));

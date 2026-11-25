@@ -50,7 +50,8 @@ When you add `#[psync::graph]`, you assert:
 3. **Names mean what they say.** `get`, `list` and `head` read; `put`, `delete` and `create` write;
    on `mut` receivers, read-only prefixes like `get` and `is_` are taken as reads.
 4. **Loop items name different objects.** A write target computed from the loop item is assumed to
-   differ between iterations.
+   differ between iterations. For files whose path can be evaluated ahead this is checked at run
+   time, and with a duplicate the loop runs as written ([Loop rewriting](./loops.md#checking-per-item-files)).
 5. **Hints are true.** `#[psync::independent]`, `#[psync::fresh]` and `#[psync::speculate]` turn
    checks off.
 

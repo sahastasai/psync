@@ -42,6 +42,10 @@ required-features = ["std"]
 name = "sync"
 required-features = ["std"]
 
+[[test]]
+name = "targets"
+required-features = ["std"]
+
 [[example]]
 name = "phase2"
 required-features = ["std"]
