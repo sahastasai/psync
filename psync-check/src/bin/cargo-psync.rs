@@ -125,8 +125,11 @@ fn pass(opts: &Opts<'_>, dir: &Path, facts: bool) -> Result<bool, ExitCode> {
         eprintln!("cargo psync: `psync-driver` must be installed next to `cargo-psync`");
         return Err(ExitCode::from(2));
     };
+    // Findings persist across runs, one file per crate: cargo does not re-run the driver for a
+    // crate it considers unchanged, and that crate's findings must still count (a second
+    // `check`, `fix` or `--deny` would otherwise see none). The driver rewrites or removes a
+    // crate's file whenever it checks the crate.
     let findings_dir = dir.join("findings");
-    let _ = std::fs::remove_dir_all(&findings_dir);
     let lib = Path::new(env!("PSYNC_SYSROOT")).join("lib");
     // The driver links the toolchain's `librustc_driver`. On NixOS, the libraries that library
     // needs (zlib) come from nix-ld's path, which only binaries using nix-ld's loader see.
@@ -208,7 +211,7 @@ fn report(dir: &Path, label: &str) -> usize {
          crate(s): {warnings} warning(s), {notes} note(s){}",
         crates.len(),
         if crates.is_empty() {
-            " (unchanged crates are not re-checked; touch a file or `cargo clean -p` to re-run)"
+            " (no `#[psync::graph]` code made anything concurrent)"
         } else {
             ""
         }

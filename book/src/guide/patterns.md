@@ -35,18 +35,70 @@ repositories, with timings.
 ## `&mut` in two branches does not compile
 
 psync tracks `&mut` handles and `mut` bindings, and keeps their uses in order. It does not see
-types, though. A method taking `&mut self` behind a shared-looking binding can slip through. When
-that happens, the generated code borrows the same value mutably in two concurrent futures, and
-rustc rejects it:
+types, though, so a `&mut` returned by a method slips through:
 
-```text
-error[E0499]: cannot borrow `*conn` as mutable more than once at a time
+```rust,ignore
+pub struct Pool { conn: Conn }
+impl Pool {
+    pub fn conn(&mut self) -> &mut Conn { &mut self.conn }
+}
+impl Conn {
+    pub async fn query(&mut self, q: u32) -> u32 { /* .. */ }
+}
+
+#[psync::graph]
+pub async fn two_queries(pool: &mut Pool) -> u32 {
+    let conn = pool.conn();          // a `&mut Conn`, but nothing in the tokens says so
+    let a = conn.query(1).await;
+    let b = conn.query(2).await;
+    a + b
+}
 ```
 
-That is the intended failure mode: **a missed dependency becomes a compile error, not a race.** Fix
-it with `#[psync::seq]` on one of the statements. Or, if each branch can get its own value,
-with `#[psync::fresh]`. In the audit, one finding could not be done at all, because it needs
-`&mut self` in both branches.
+`query` is not a name psync knows, so it is assumed to read, and the two queries go into two
+concurrent chains. Both chains now need `conn` mutably at once, and rustc rejects the generated
+code:
+
+```text
+error[E0524]: two closures require unique access to `*conn` at the same time
+  --> src/lib.rs:10:1
+   |
+10 | #[psync::graph]
+   | ^^^^^^^^^^^^^^^
+   | |
+   | closures are constructed here in different iterations of loop
+   | first borrow later captured here by closure
+...
+13 |     let a = conn.query(1).await;
+   |             ---- first borrow occurs due to use of `*conn` in coroutine
+14 |     let b = conn.query(2).await;
+   |             ---- second borrow occurs due to use of `*conn` in coroutine
+```
+
+(The "different iterations of loop" is rustc describing the generated join. There is no loop in
+your code. Other shapes give `E0499: cannot borrow .. as mutable more than once`. Both mean the
+same thing.)
+
+That is the intended failure mode: **a missed dependency becomes a compile error, not a race.**
+Two fixes:
+
+- **`#[psync::seq]`** on the second query keeps it in place. This always works, and here it is
+  the right fix: the two queries share one connection, so they could not overlap anyway.
+
+  ```rust,ignore
+  let a = conn.query(1).await;
+  #[psync::seq]
+  let b = conn.query(2).await;
+  ```
+
+- **`#[psync::fresh]`** on `let conn = ..` gives each branch its own connection, by running the
+  initializer once per branch. It works only when the initializer itself can run twice at once.
+  Here it cannot: each branch would call `pool.conn()`, which borrows `pool` mutably, and the
+  error moves to `pool` (``two closures require unique access to `*pool` ``). `fresh` is for
+  initializers like `context.pool()` that hand out a new value from a shared reference, as in
+  [Hints](./hints.md#psyncfresh).
+
+In the audit, one finding could not be done at all, because it needs `&mut self` in both branches.
 
 ## `Send` futures
 

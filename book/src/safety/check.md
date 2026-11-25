@@ -103,6 +103,73 @@ That is eight in all, counting the `--notes` one. Functions with nothing to repo
 `sizes` and `walk_then_read` read files nobody writes. The test
 (`psync-check/tests/fixture.rs`) checks each finding and the total.
 
+## Walkthrough: check, fix, build
+
+A small crate, from scratch. One helper's name hides a file write:
+
+```rust,ignore
+async fn refresh() -> io::Result<()> { std::fs::write("cache.json", b"{}") }
+async fn load() -> io::Result<String> { std::fs::read_to_string("cache.json") }
+async fn motd() -> io::Result<String> { std::fs::read_to_string("motd.txt") }
+
+#[graph]
+pub async fn start() -> io::Result<(String, String)> {
+    refresh().await?;
+    let cache = load().await?;
+    let banner = motd().await?;
+    Ok((cache, banner))
+}
+```
+
+From tokens, `refresh`, `load` and `motd` say nothing, so the macro runs all three at once.
+
+**1. `cargo psync check`** compiles the crate with the driver and reports what the schedule got
+wrong:
+
+```text
+warning: psync runs this concurrently with other work that has a conflicting effect: this does
+         `read file "cache.json"` (via load -> std::fs::read_to_string), the other does
+         `write file "cache.json"` (via refresh -> std::fs::write)
+psync check: 1 concurrent level(s) and 0 prefetched loop(s) checked in 1 crate(s): 1 warning(s), 0 note(s)
+```
+
+(On a first run the warning can appear twice: the driver checks, links the summaries, and checks
+again. The summary line counts each finding once.)
+
+**2a. `cargo psync fix`** inserts one `#[psync::seq]` per warning:
+
+```diff
+     refresh().await?;
++    #[psync::seq]
+     let cache = load().await?;
+```
+
+Run `check` again and it reports nothing concurrent at all: a `seq` statement is a barrier, so
+`motd` can no longer overlap `refresh` either. `fix` is the smallest edit that is certainly safe,
+not the fastest one.
+
+**2b. `cargo psync build`**, on the original code, does better. It hands the macro the compiler's
+facts, and the macro schedules with them. With `#[graph(explain)]`:
+
+```text
+psync::graph `start`:
+  region 0:
+    n0: refresh()? [await] {write file "cache.json" (refresh, per the compiler)}
+    n1: cache = load()? [await] {read file "cache.json" (load, per the compiler)}
+    n2: banner = motd()? [await] {read file "motd.txt" (motd, per the compiler)}
+    n0 -> n1 (write file "cache.json" (refresh, per the compiler) vs read file "cache.json" (load, per the compiler))
+    level 0: n0->n1 || n2
+psync build (with compiler facts): 1 concurrent level(s) and 0 prefetched loop(s) checked in 1 crate(s): 0 warning(s), 0 note(s)
+```
+
+`load` waits for `refresh`, and `motd` still overlaps both. No hint in the source, and the check of
+the new schedule finds nothing. Use `build` (and `check --facts` in CI) when you can, and `fix`
+when the code must also be right under a plain `cargo build`.
+
+Findings are kept per crate between runs, so running `check` again without changing anything, or
+`fix` straight after `check`, sees the same findings. (Before this was fixed, a second run reported
+"0 warning(s)" for a crate cargo did not recompile, and `--deny` passed.)
+
 ## How it works
 
 ### 1. Markers in the generated code

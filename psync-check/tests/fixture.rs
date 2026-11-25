@@ -81,6 +81,28 @@ fn finds_effects_hidden_in_callees() {
     assert_eq!(app.findings.len(), 8, "{:#?}", app.findings);
     assert!(stderr.contains("concurrent level(s)"));
 
+    // A second run finds nothing to recompile. Its findings must still be the same, and
+    // `--deny` must still fail: they persist per crate across runs.
+    let summary = |stderr: &str| {
+        stderr
+            .lines()
+            .rev()
+            .find(|l| l.starts_with("psync check:"))
+            .map(str::to_string)
+    };
+    let again = Command::new(env!("CARGO_BIN_EXE_cargo-psync"))
+        .args(["psync", "check", "--notes", "--deny"])
+        .current_dir(&fixture)
+        .env("CARGO_TARGET_DIR", &target)
+        .output()
+        .expect("run cargo psync again");
+    let again_stderr = String::from_utf8_lossy(&again.stderr);
+    assert_eq!(summary(&again_stderr), summary(&stderr), "{again_stderr}");
+    assert!(
+        !again.status.success(),
+        "--deny passed on a cached run: {again_stderr}"
+    );
+
     // With the compiler's facts, the macro schedules safely by itself and gains concurrency
     // where names were too pessimistic.
     let output = Command::new(env!("CARGO_BIN_EXE_cargo-psync"))
@@ -103,7 +125,15 @@ fn finds_effects_hidden_in_callees() {
     );
     // `warm`/`load`, `check`/`get_token` and `checkpoint`/`inspect_db` now run in order; the
     // loop whose prefix writes is no longer prefetched.
-    for sequential in ["start", "login", "snapshot", "sync_dirs", "tour", "release", "boot"] {
+    for sequential in [
+        "start",
+        "login",
+        "snapshot",
+        "sync_dirs",
+        "tour",
+        "release",
+        "boot",
+    ] {
         assert!(
             !app.functions.contains_key(sequential),
             "{:?}",

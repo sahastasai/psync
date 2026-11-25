@@ -1211,11 +1211,7 @@ impl<'a, 'tcx> Checker<'a, 'tcx> {
                         .iter()
                         .find(|l| l.effect.writes() && l.effect.domain != Domain::Output)
                 {
-                    let how = if panics {
-                        "may panic"
-                    } else {
-                        "exits early"
-                    };
+                    let how = if panics { "may panic" } else { "exits early" };
                     self.report(
                         Severity::Warning,
                         "speculative-write",
@@ -1386,11 +1382,13 @@ impl<'a, 'tcx> Checker<'a, 'tcx> {
         let Some(dir) = std::env::var_os(env::FINDINGS).map(PathBuf::from) else {
             return;
         };
+        let file = dir.join(format!("{}.json", self.findings.crate_name));
+        // A crate with nothing concurrent left must not keep findings from an earlier run.
         if self.findings.checked_levels == 0 && self.findings.checked_loops == 0 {
+            let _ = std::fs::remove_file(file);
             return;
         }
         let _ = std::fs::create_dir_all(&dir);
-        let file = dir.join(format!("{}.json", self.findings.crate_name));
         if let Ok(json) = serde_json::to_string_pretty(&self.findings) {
             let _ = std::fs::write(file, json);
         }
