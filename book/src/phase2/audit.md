@@ -1,7 +1,6 @@
 # The audit: where Phase II helps
 
-> **Status: in progress.** The corpus scan below is complete. Measurements on real projects
-> follow as they are built.
+> **Status: in progress.** The corpus scan and rustic are done; a second project is next.
 
 The question is not whether threads can make synchronous code faster: they can. It is how often
 psync, as built, finds a place where they do, and whether that place is worth it. This chapter
@@ -67,8 +66,56 @@ all fixed:
 
 ## Measured on real code
 
+### rustic, built with psync
+
+rustic at commit `143d073`, built twice: as released, and with the edits a user would make
+(`scripts/audit/rustic/`):
+
+- `repoinfo`: the struct literal `Infos { files: .., index: .. }` becomes two `let`s marked
+  `#[psync::par]`, because psync schedules statements, not struct fields. `repo.open(..)` takes
+  the repository by value while the other statement borrows it, so it opens a clone:
+  `Repo(repo.0.clone()).open(..)`.
+- `diff`: the two snapshot lookups are marked `#[psync::par]`.
+
+Both run against a REST repository of 20 snapshots, behind toxiproxy, which adds latency to every
+response. Both binaries print the same output at every latency, and the harness checks this before
+timing. Medians of 11 runs, on the shared 32-thread machine (load average about 45):
+
+| Added latency | `repoinfo` sequential | psync | Speedup | `diff` sequential | psync | Speedup |
+|---|---|---|---|---|---|---|
+| 0 ms | 372 ms | 366 ms | 1.02× | 384 ms | 390 ms | 0.98× |
+| 5 ms | 408 ms | 440 ms | 0.93× | 594 ms | 551 ms | 1.08× |
+| 20 ms | 578 ms | 539 ms | 1.07× | 951 ms | 961 ms | 0.99× |
+| 50 ms | 867 ms | 668 ms | **1.30×** | 1725 ms | 1740 ms | 0.99× |
+
+These are smaller than the 2.00× of the `repoinfo` shape in `examples/phase2.rs`, and the reason
+is the point of this audit:
+
+- **`repoinfo` gains 1.30× at 50 ms, and nothing on a local disk.** Both statements run in
+  parallel, but the command also opens the repository (config, keys, snapshot list) before them,
+  and that part stays sequential. The shape in `examples/phase2.rs` had only the two statements.
+- **`diff` gains nothing.** The server's log shows 46 requests, the same 46 for both binaries.
+  The two lookups psync overlaps are 2 of them. The remaining 18 data reads come from comparing
+  the two trees, inside `diff(repo.ls(&node1)?, repo.ls(&node2)?, ..)`, which streams one tree
+  against the other, and psync cannot split a stream. At most one round trip is saved, about 3%,
+  which is less than the noise.
+
+The `diff` edit also exposed a psync miss, now fixed. `let path2 = path2.unwrap_or(path1);`
+sits between the two lookups and feeds the second one. psync did not know `unwrap_or`, so the
+statement was its own chain, and it pushed the second lookup into a later level than the first.
+`unwrap_or` with pure arguments is now pure (test `cheap_statements_do_not_delay_waits`).
+
+### The shapes
+
 The audit's ten synchronous findings, rebuilt as shapes over real sockets in
 `examples/phase2.rs`, are in [Synchronous code](./using.md#measurements): 2.0× to 3.0× where
 the downloads or reads are independent, 1.00× (correctly) for tauri's code as written, and a
-slowdown where a statement is cheaper than a thread. Building the projects themselves with psync
-is the next step of this audit.
+slowdown where a statement is cheaper than a thread.
+
+## What this means
+
+Phase II works: the code it runs in parallel is correct, and the overlap is real. But it helps
+real synchronous code much less than Phase I helps async code. It needs hints to find anything,
+and where it finds something, other sequential work in the same command dilutes the gain. The
+largest gains sit where a command is a few independent requests and little else, as in tauri's
+`prepare_tools` (3 downloads, 2.98× as a shape).
