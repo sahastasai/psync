@@ -36,6 +36,7 @@
 - [Generated code](./internals/codegen.md)
 - [Loop rewriting](./internals/loops.md)
 - [Runtime support](./internals/runtime.md)
+- [From MIR to summaries across crates](./internals/compiler.md)
 - [What is checked, what is assumed](./internals/soundness.md)
 
 # Safety

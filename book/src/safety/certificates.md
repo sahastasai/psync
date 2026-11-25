@@ -101,7 +101,7 @@ writes to `m.megolm_backup.v1` and five others. The character encoding fixed it.
 `check_sound` assumes that a certificate's places are right: if the certificate says statement 3
 writes only `s.a`, then it really does. `verify/Footprint.lean` proves that assumption for a small
 language shaped like MIR, the compiler's simplest form of a function
-([The Rust compiler](../foundations/rustc.md) introduces MIR):
+([From MIR to summaries across crates](../internals/compiler.md) explains how psync reads MIR):
 
 - **Places** are a local and a path of fields: `_5.0.1` is field 1 of field 0 of local 5.
 - **Statements** assign the result of an operation on places and constants (`_1 = _1 + 1`),

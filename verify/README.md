@@ -63,6 +63,17 @@ reference, with per-function summaries.
 | `mir_schedule_sound` | `check_sound` with `hind` discharged: valid summaries, covering certificate, `check` accepts, so every run of the schedule equals the sequential one |
 | `Program.valid`, `prog_valid`, `callers_sound` | the link check decided for a finite program; a recursive callee called on two fields, in one level, proved equal to the calls in order |
 
+`Specs.lean` gives HTTP (RFC 9110), S3 and the Kubernetes API as server models and proves
+commutativity specifications sound for them.
+
+| Theorem | Statement |
+|---|---|
+| `httpSpec_sound` | two safe requests, or two non-`POST` requests on paths apart, commute, whatever `POST` does |
+| `http_put_twice_not_commute` | idempotent is not commutative: two identical `PUT`s differ in their responses (`201`, then `200`) |
+| `s3Spec_sound`, `s3_puts_differ_not_commute` | S3: the same, plus identical `PUT`s and `DELETE`s; `PUT`s of different bodies to one key do not commute |
+| `kube_writes_not_commute` | Kubernetes writes to different objects do not commute exactly: the global `resourceVersion` |
+| `kube_simulation`, `kubeSpec_sound`, `kube_commutes_up_to_rv` | erasing resourceVersions is a simulation; on the erased server the spec is sound, so allowed requests commute up to resourceVersions |
+
 ```sh
 lean verify/Schedule.lean      # Lean 4.22; prints nothing when every proof checks
 lean verify/Tutorial.lean      # the book's Lean introduction (Foundations, "Proofs") and its exercise solutions
