@@ -22,6 +22,8 @@ are doing.
 
 **Closed world.** The assumption that the analysed build contains every implementation that can run. Facts hold for the build they were computed in.
 
+**Commutativity specification.** Which requests to a server commute: in either order, the server ends in the same state and each gets the same response. psync's schedules are proven correct relative to one; psync's built-in rule is one. See [the outside world](../safety/world.md).
+
 **Conflict.** Two effects that must keep their order: one writes, they are in the same domain, and their targets may be the same.
 
 **Coroutine.** The state machine an `async fn` or block compiles to. Each `.await` is a point where it can suspend.
@@ -54,6 +56,8 @@ the awaited work after it.
 
 **Hoisting.** Moving an await out of a larger statement (scrutinee, argument, receiver, branch,
 tail) into its own binding, while keeping evaluation order.
+
+**Labelled transition system.** A model of a server: each request (the label) takes its state to a new state and a response. Reads that change state are ordinary transitions.
 
 **Level.** A set of chains joined together. Each level waits for the one before it.
 

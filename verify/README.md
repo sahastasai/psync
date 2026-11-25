@@ -21,9 +21,25 @@ which `cargo psync check` verifies against the compiled callees.
 
 Not modeled: the generated Rust (rustc type- and borrow-checks it).
 
+## The outside world: `World.lean`
+
+`Schedule.lean` is about the client's state. `World.lean` adds a server, as an abstract labelled
+transition system (reads that change server state included), and a commutativity specification
+of which requests commute. The book chapter is *What psync guarantees about the outside world*.
+
+| Theorem | Statement |
+|---|---|
+| `Sys.levels_correct`, `Sys.reorders_correct` | the scheduling theorems, for any state and any independence relation under which steps commute |
+| `world_commute` | two statements with disjoint client footprints, distinct calls and spec-commuting requests commute in the world: same client state, server state and responses |
+| `world_levels_correct` | if the spec is sound for the server, every execution of psync's schedule ends with the sequential program's client state, server state, and response for every call |
+| `empty_spec_sound` | the empty spec (no two requests commute) is sound for every server |
+| `kvSpec_sound`, `get_count_not_commute` | a counting server: two `get`s commute; a `get` and a `count` do not |
+| `psync_rule_unsound_for_counters` | psync's built-in rule ("two reads commute") is unsound for that server, so the guarantee is relative to the spec |
+
 ```sh
 lean verify/Schedule.lean      # Lean 4.22; prints nothing when every proof checks
 lean verify/Tutorial.lean      # the book's Lean introduction (Foundations, "Proofs") and its exercise solutions
+lean verify/World.lean         # the schedule against a server, relative to a commutativity spec
 ```
 
 The proofs use only Lean's standard axioms (`propext`, `Classical.choice`, `Quot.sound`) and

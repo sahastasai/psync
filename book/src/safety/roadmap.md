@@ -198,6 +198,14 @@ replaying the first exit in program order gives the sequential state and exit). 
 replay found a real bug: an exit was replayed before an earlier statement in a later level had
 run. Fixed, with a test.
 
+**The outside world is modelled too.** `verify/World.lean` adds a server, as a labelled transition
+system, and proves that the schedule preserves the server's state and every response, relative to
+a commutativity specification. It also proves that psync's built-in rule is such a specification,
+and that the rule is unsound for a server whose reads change state
+([What psync guarantees about the outside world](./world.md)). Next: per-function certificates
+that a Lean checker, proven sound, verifies for every build; then footprint soundness over a MIR
+fragment; then specifications for HTTP, the Kubernetes API and S3, checked against server logs.
+
 ## Priorities
 
 | Step | Closes | Effort |
@@ -209,4 +217,4 @@ run. Fixed, with a test.
 | 7. processes and cwd | over-conservative processes; cwd hazard | small |
 | 5. staged writes, 6. cancellation | wasted work, writes waiting on exits | medium to large |
 | 8. compiler driver (built: `cargo psync check`, `build`, `fix`) | the token-level foundation | next: argument-precise effects |
-| 9. Lean model (scheduling built: `verify/Schedule.lean`) | the token-level foundation | exit replay proven; next: loops (prefetch) |
+| 9. Lean model (scheduling built: `verify/Schedule.lean`) | the token-level foundation | exit replay and the server model proven; next: certified schedules |
