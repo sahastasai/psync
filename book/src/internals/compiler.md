@@ -445,9 +445,33 @@ raw pointers, and values that reach a call only through memory it reads behind a
 got earlier, are not followed. The test fails when non-point calls do not pass their arguments
 through.
 
-**Not yet.** The spawn/join/select structure of the macro's joins, and summaries of loops.
-Effects are written in terms of the body's own parameters. For a closure or async block, those
-are its captures.
+**Joins.** In a rewritten function, the statements that run concurrently are async blocks (or,
+in Phase II, closures run as jobs on threads), each with a graph of its own. The body that joins
+them lists them, read back from the same markers `cargo psync check` uses
+([Adding a check](../contributing/check.md)):
+
+```text
+keep_both::{closure#0}
+  join 1: keep_both::{closure#0}::{closure#0} (statement 0) || keep_both::{closure#0}::{closure#1} (statement 1)
+  b9   line 223  await
+keep_both::{closure#0}::{closure#0}
+  b7   line 225  await
+  b15  line 225  call keep  [write file "x.json"]
+stash_both
+  join 1: stash_both::{closure#0} (statement 0, thread) || stash_both::{closure#1} (statement 1, thread)
+```
+
+Each chain is listed with its statements, by position in the rewritten block, and its tags:
+`may exit`, `speculate`, `independent`, and `thread` for a Phase II job. A prefetched loop is
+listed as `prefetch:`, the async closure that runs ahead for later items, tagged `the body may
+end the loop` when it can. Together, the joins and each chain's guards and data edges give the
+conditional critical path of #168 its graph. A path through a function is one chain per join,
+under the guards that hold.
+
+**Not yet.** Summaries of loops (how often a body runs), and `select!`-like structure in user
+code. psync generates no selects, and the graph shows one only as the branches of its
+`poll` results. Effects are written in terms of the body's own parameters. For a closure or
+async block, those are its captures.
 
 ## What is proved, and what is assumed
 

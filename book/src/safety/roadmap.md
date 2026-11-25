@@ -266,5 +266,5 @@ tokio) is open.
 | 4. HTTP semantics | coarse service conflicts | small |
 | 7. processes and cwd | over-conservative processes; cwd hazard | small |
 | 5. staged writes, 6. cancellation | wasted work, writes waiting on exits | medium to large |
-| 8. compiler driver (built: `cargo psync check`, `build`, `fix`; per-argument effects for synchronous helpers; synchronous levels checked) | the token-level foundation | per-argument effects also through `async fn` coroutines; exit positions in the checker; control dependence and data edges per async body (`cargo psync pdg`); next: join structure in the PDG; paths computed by `join` in MIR; async closures |
+| 8. compiler driver (built: `cargo psync check`, `build`, `fix`; per-argument effects for synchronous helpers; synchronous levels checked) | the token-level foundation | per-argument effects also through `async fn` coroutines; exit positions in the checker; control dependence, data edges and the macro's joins per async body (`cargo psync pdg`); next: loop summaries in the PDG; paths computed by `join` in MIR; async closures |
 | 9. Lean model (scheduling built: `verify/Schedule.lean`) | the token-level foundation | exit replay, the server model, certified schedules and footprint soundness (with real compiler output through Charon) built |

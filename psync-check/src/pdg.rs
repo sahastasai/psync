@@ -164,12 +164,47 @@ pub struct PdgBranch {
     pub uses: Vec<usize>,
 }
 
+/// One chain of a join the macro generated: a closure or async block of its own, whose graph is
+/// listed under `path`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PdgChain {
+    pub path: String,
+    /// Its first and last statements, by position in the rewritten block.
+    pub first: u64,
+    pub last: u64,
+    pub exits: bool,
+    pub speculate: bool,
+    pub independent: bool,
+    /// A job on a thread (Phase II), not a future.
+    pub sync: bool,
+}
+
+/// Chains that run concurrently: one join of the rewritten function.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PdgJoin {
+    pub level: u64,
+    pub chains: Vec<PdgChain>,
+}
+
+/// A prefetched loop: `path` (the prefix) runs for later items while earlier ones finish.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PdgPrefetch {
+    pub path: String,
+    pub terminates: bool,
+    pub speculate: bool,
+}
+
 /// The dependence graph of one body (a function, closure or async block).
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct FnPdg {
     pub path: String,
     pub nodes: Vec<PdgNode>,
     pub branches: Vec<PdgBranch>,
+    /// The joins the macro generated in this body.
+    #[serde(default)]
+    pub joins: Vec<PdgJoin>,
+    #[serde(default)]
+    pub prefetches: Vec<PdgPrefetch>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -193,6 +228,46 @@ pub fn render(f: &FnPdg) -> String {
             .join(", ")
     };
     let mut out = format!("{}\n", f.path);
+    for j in &f.joins {
+        let chains: Vec<String> = j
+            .chains
+            .iter()
+            .map(|c| {
+                let mut tags = vec![if c.first == c.last {
+                    format!("statement {}", c.first)
+                } else {
+                    format!("statements {}-{}", c.first, c.last)
+                }];
+                for (on, tag) in [
+                    (c.exits, "may exit"),
+                    (c.speculate, "speculate"),
+                    (c.independent, "independent"),
+                    (c.sync, "thread"),
+                ] {
+                    if on {
+                        tags.push(tag.into());
+                    }
+                }
+                format!("{} ({})", c.path, tags.join(", "))
+            })
+            .collect();
+        out += &format!("  join {}: {}\n", j.level, chains.join(" || "));
+    }
+    for p in &f.prefetches {
+        let mut tags = Vec::new();
+        if p.terminates {
+            tags.push("the body may end the loop");
+        }
+        if p.speculate {
+            tags.push("speculate");
+        }
+        let tags = if tags.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", tags.join(", "))
+        };
+        out += &format!("  prefetch: {}{tags}\n", p.path);
+    }
     for n in &f.nodes {
         let what = match n.kind.as_str() {
             "call" => format!("call {}", n.callee),
@@ -326,6 +401,48 @@ mod tests {
             }]
         );
         assert!(cd[3].is_empty());
+    }
+
+    #[test]
+    fn renders_joins_and_prefetches() {
+        let f = FnPdg {
+            path: "f::{closure#0}".into(),
+            joins: vec![PdgJoin {
+                level: 1,
+                chains: vec![
+                    PdgChain {
+                        path: "f::{closure#0}::{closure#0}".into(),
+                        first: 0,
+                        last: 2,
+                        exits: true,
+                        speculate: false,
+                        independent: false,
+                        sync: false,
+                    },
+                    PdgChain {
+                        path: "f::{closure#0}::{closure#1}".into(),
+                        first: 1,
+                        last: 1,
+                        exits: false,
+                        speculate: true,
+                        independent: false,
+                        sync: false,
+                    },
+                ],
+            }],
+            prefetches: vec![PdgPrefetch {
+                path: "f::{closure#0}::{closure#2}".into(),
+                terminates: true,
+                speculate: false,
+            }],
+            ..Default::default()
+        };
+        assert_eq!(
+            render(&f),
+            "f::{closure#0}\n  join 1: f::{closure#0}::{closure#0} (statements 0-2, may exit) || \
+             f::{closure#0}::{closure#1} (statement 1, speculate)\n  prefetch: \
+             f::{closure#0}::{closure#2} (the body may end the loop)\n"
+        );
     }
 
     #[test]

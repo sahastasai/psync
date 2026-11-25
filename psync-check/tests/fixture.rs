@@ -79,6 +79,16 @@ fn finds_effects_hidden_in_callees() {
         !find(&chained, "call ready").contains("uses"),
         "{chained:#?}"
     );
+    // The macro's joins: `keep_both`'s two awaits run as one join of two async blocks, and
+    // `stash_both`'s two statements as jobs on threads.
+    assert!(
+        text.contains("join 1: keep_both::{closure#0}::{closure#0} (statement 0) || keep_both::{closure#0}::{closure#1} (statement 1)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("stash_both::{closure#0} (statement 0, thread) || stash_both::{closure#1} (statement 1, thread)"),
+        "{text}"
+    );
     // `keep` writes its first parameter after an await; each caller's write names its file.
     let keep = body("keep::{closure#0}");
     assert!(
