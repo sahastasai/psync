@@ -14,6 +14,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import textwrap
 
 root = pathlib.Path(__file__).resolve().parent.parent
 subprocess.run(
@@ -26,7 +27,7 @@ blocks = re.compile(r"```(\S*)\n(.*?)```", re.S)
 
 
 def norm(s):
-    return [line.rstrip() for line in s.strip().splitlines()]
+    return [line.rstrip() for line in textwrap.dedent(s).strip().splitlines()]
 
 
 total = drifted = 0
@@ -41,7 +42,7 @@ with tempfile.TemporaryDirectory() as tmp:
             total += 1
             where = f"{md.relative_to(root)} (offset {pos})"
             file = pathlib.Path(tmp) / f"{md.stem}-{pos}.rs"
-            file.write_text(code)
+            file.write_text(textwrap.dedent(code))
             line = next(i for i, l in enumerate(code.splitlines(), 1) if re.search(r"\bfn\b", l))
             run = subprocess.run([expand, file, str(line + 1)], capture_output=True, text=True)
             try:

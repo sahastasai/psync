@@ -158,3 +158,76 @@ psync-expand file.rs 42 | jq -r .expanded
 `psync-expand` was how the 90 audit findings were checked. It ran on each finding's function at the
 pinned commit, and the script confirmed that the concurrent region or prefetched loop fell inside the
 finding's source lines.
+
+## Exercises
+
+1. Here is a function and its report:
+
+   ```rust,ignore
+   #[psync::graph(explain)]
+   async fn digest(api: &Api, ids: &[u64]) -> u64 {
+       let mut seen = 0;
+       let first = api.fetch(ids[0]).await;
+       seen += first.len();
+       let second = api.fetch(ids[1]).await;
+       let rank = api.rank(first.score + second.score).await;
+       seen + rank
+   }
+   ```
+
+   ```text
+     region 0:
+       n0: seen = 0
+       n1: first = fetch() [await] {read `api` `ids [0]` (fetch)}
+       n2: seen += first . len () ;
+       n3: second = fetch() [await] {read `api` `ids [1]` (fetch)}
+       n4: rank = rank() [await]
+       n0 -> n2 (reads `seen`)
+       n1 -> n2 (reads `first`)
+       n1 -> n4 (reads `first`)
+       n3 -> n4 (reads `second`)
+       level 0: n0 || n1 || n3
+       level 1: n2 || n4
+     unclassified (assumed to read; `strict` treats them as writes): rank
+   ```
+
+   1. Which requests are in flight together?
+   2. `n1 -> n2` is the only edge into `n2` from an await. Why is `n1->n2` not a chain?
+   3. Why does `rank` appear under `unclassified`, but `fetch` does not?
+   4. What are `chains` and `levels` in this function's JSON report?
+2. In the false-edge example, change the second call to `db.get_totals("orders")`. What happens
+   to the edge, and why?
+3. In the same example, rename `cache.lookup` to `cache.refresh`. The level does not change. What
+   else changes in the report, and what should you do about it?
+4. Put `strict` on `profile_page`: `#[psync::graph(strict)]`. How many levels are there? Why does
+   `unclassified` still list all four calls?
+
+<details>
+<summary>Answers</summary>
+
+1. 1. `first` and `second`, in level 0. `rank` comes later, in level 1.
+   2. A chain needs an edge from a node with exactly one successor, and `n1` has two (`n2` and
+      `n4`). Neither edge fuses, so both `n2` and `n4` are in level 1.
+   3. `fetch` is a read verb, so it gets an effect: a read of `api` with the target `ids [0]`.
+      `rank` says nothing about what it does. psync assumes it reads and lists it so that you
+      can check.
+   4. `"chains": [[0], [1], [2], [3], [4]]`, one chain per node, and
+      `"levels": [[0, 1, 3], [2, 4]]`, indices into `chains`.
+2. The edge disappears, and the level becomes `n0 || n1 || n2`. The write is now to `db`
+   `"sales"` and the read to `db` `"orders"`. Two different literal targets in the same domain
+   are taken to be different things ([Side effects](../safety/effects.md)).
+3. `n2` loses its effect, which had been ``{read `cache` "sales" (lookup)}``, and `refresh` is listed
+   under `unclassified`. `refresh` is not a read verb, and it is not in psync's list of write
+   names either. If it rebuilds the cache on the server, it is a write. Run `cargo psync check`,
+   which reads its body, or say so with `effects(write(refresh))`. That does change the schedule,
+   though nothing else touches `cache`: a write may not start before an earlier statement that
+   may exit, so `refresh` now waits for both `?`s
+   (``n0 -> n2 (may exit before `refresh` runs)``), and the region is `(unchanged)`. If a
+   refresh that sequential code would have skipped is harmless, `#[psync::speculate]` on it
+   lets it overlap again.
+4. Four levels: every call becomes ``{write unknown (user)}``, two unknown writes always
+   conflict, and the region is `(unchanged)`. The `unclassified` line lists names, not what
+   psync did with them, and its text still says "assumed to read". With `strict`, they are the
+   calls that were made writes.
+
+</details>
