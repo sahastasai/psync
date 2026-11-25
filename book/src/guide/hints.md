@@ -129,3 +129,43 @@ messages. See [Side effects](../safety/effects.md).
 When a function cannot be made correct with hints, leave it as written with
 `#[psync::graph(off)]`, or just remove the attribute. Here is one example from the audit: a
 function that borrows `&mut self` in both branches. No reordering can make that run concurrently.
+
+## Exercises
+
+Check each answer with `psync-expand FILE LINE`.
+
+1. Remove `#[psync::fresh]` from `fresh_pool`. Which edges does the report show, and how many
+   levels? Why does reading through `pool` count as a write?
+2. Take the two `set_account_data` calls from the `independent` section, with no hints. Predict
+   the edges. Then predict them with only `#[psync::independent]` on the second call, with only
+   `#[psync::speculate]`, and with both.
+3. Which hint, if any, do you reach for in each case?
+   1. Two `GET`s to an API that allows one request at a time.
+   2. A loop that charges a card for each order, and can stop at a `?`.
+   3. A loop that fills a cache with `cache.insert(k, v)` after an awaited lookup.
+   4. Two queries that must see the same transaction.
+
+<details>
+<summary>Answers</summary>
+
+1. Three edges: `n0 -> n1` and `n0 -> n2` (both read `pool`), and `n1 -> n2 (writes `pool`)`.
+   That is one chain, `n0->n1->n2`, so the region is `(unchanged)`. `pool` is a `&mut`, and
+   passing a unique handle to a call may change what is behind it, so psync treats it as a write
+   ([Unique handles stay ordered](./concepts.md#unique-handles-stay-ordered)).
+2. With no hints there is one edge, for the two writes to `self.client`:
+   ``write `self.client` `KeyBackupContent { enabled : t…` (set_account_data) vs write `self.client` `BackupDisabledContent { disabl…` (set_account_data)``.
+   `independent` removes that edge, but another one takes its place:
+   ``n0 -> n1 (may exit before `set_account_data` runs)``. The first call's `?` may leave, and the
+   second call writes. `speculate` alone removes the exit edge but not the conflict, so the
+   report shows the conflict again. Each hint answers one question. Only with both is the level
+   `n0 || n1`.
+3. 1. `#[psync::seq]` on the second `GET`. Nothing in the tokens says the API is limited.
+   2. None. Leave it sequential, and certainly do not add `speculate`: a charge for an order
+      that sequential code would never reach is not harmless. psync already refuses to prefetch
+      it.
+   3. `#[psync::independent]` on the loop, if a repeated lookup for a duplicate key is fine.
+   4. Not `fresh`, which would give each query its own value. Without hints psync keeps the
+      queries through one `&mut` transaction in order. If they go through a shared handle,
+      mark the second one `#[psync::seq]`.
+
+</details>
