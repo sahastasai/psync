@@ -226,8 +226,8 @@ theorem c15_ok : check c15 = true := by decide
 /-- tests/sync.rs: `speculative_writes`, region 0 -/
 def c16 : Cert where
   nodes := [
-    { reads := [[0, 15], [0, 17], [0, 41], [0, 64], [0, 65], [0, 18], [0, 66], [0, 24], [0, 30], [0, 62], [0, 63], [0, 67], [3, 15], [3, 17], [3, 41], [3, 64], [3, 65], [3, 18], [3, 66], [3, 24], [3, 30], [3, 62], [3, 63], [3, 67], [37, 38]], writes := [[37, 68, 60, 69, 70, 71, 0, 8, 70], [37, 68, 60, 69, 70, 71, 0, 8, 70], [19, 20]] },
-    { reads := [[0, 17], [0, 41], [0, 64], [0, 65], [0, 66], [0, 24], [0, 30], [0, 62], [0, 63], [0, 67], [3, 17], [3, 41], [3, 64], [3, 65], [3, 66], [3, 24], [3, 30], [3, 62], [3, 63], [3, 67], [37, 38]], writes := [[37, 68, 60, 69, 70, 60, 37, 71, 70], [37, 68, 60, 69, 70, 60, 37, 71, 70], [19, 22]] }]
+    { reads := [[0, 15], [0, 17], [0, 41], [0, 64], [0, 65], [0, 18], [0, 66], [0, 24], [0, 30], [0, 62], [0, 63], [0, 67], [3, 15], [3, 17], [3, 41], [3, 64], [3, 65], [3, 18], [3, 66], [3, 24], [3, 30], [3, 62], [3, 63], [3, 67], [37, 68, 60, 69, 70, 71, 0, 8, 70], [37, 38]], writes := [[37, 68, 60, 69, 70, 71, 0, 8, 70], [37, 68, 60, 69, 70, 71, 0, 8, 70], [19, 20]] },
+    { reads := [[0, 17], [0, 41], [0, 64], [0, 65], [0, 66], [0, 24], [0, 30], [0, 62], [0, 63], [0, 67], [3, 17], [3, 41], [3, 64], [3, 65], [3, 66], [3, 24], [3, 30], [3, 62], [3, 63], [3, 67], [37, 68, 60, 69, 70, 60, 37, 71, 70], [37, 38]], writes := [[37, 68, 60, 69, 70, 60, 37, 71, 70], [37, 68, 60, 69, 70, 60, 37, 71, 70], [19, 22]] }]
   levels := [[[0], [1]]]
   holes := [69]
 
@@ -344,124 +344,148 @@ def c25 : Cert where
 The schedule psync generated for `boot` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
 theorem c25_ok : check c25 = true := by decide
 
-/-- examples/graph_suite/chains.rs: `run`, region 0 -/
+/-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `stash_both`, region 0 -/
 def c26 : Cert where
   nodes := [
-    { reads := [[0, 86], [3, 86, 40]], writes := [[3, 86, 40], [8]] },
-    { reads := [[0, 86], [3, 86, 42], [37, 38, 86, 42]], writes := [[0, 87], [19, 22]] },
-    { reads := [[0, 15], [0, 46], [0, 17], [0, 47], [0, 88], [0, 41], [0, 89], [0, 90], [0, 91], [0, 92], [0, 93], [0, 94], [0, 95], [0, 96], [0, 49], [0, 87], [0, 97], [0, 50], [0, 86], [0, 44], [0, 98], [0, 99], [0, 100], [0, 53], [0, 57], [0, 28], [3, 15], [3, 46], [3, 17], [3, 47], [3, 88], [3, 41], [3, 89], [3, 90], [3, 91], [3, 92], [3, 93], [3, 94], [3, 95], [3, 96], [3, 49], [3, 87], [3, 97], [3, 50], [3, 86, 42], [3, 86, 40], [3, 86, 101], [3, 44], [3, 98], [3, 99], [3, 100], [3, 53], [3, 57], [3, 28], [37, 38, 86, 42]], writes := [[3, 86, 40], [19, 23], [8]] },
-    { reads := [[0, 102], [3, 102]], writes := [[0, 103]] },
-    { reads := [[0, 15], [0, 46], [0, 17], [0, 47], [0, 104], [0, 49], [0, 50], [0, 105], [0, 103], [0, 86], [0, 53], [0, 28], [3, 15], [3, 46], [3, 17], [3, 47], [3, 104], [3, 49], [3, 50], [3, 105], [3, 103], [3, 86, 42], [3, 86, 101], [3, 53], [3, 28], [37, 38, 86, 42]], writes := [[0, 106]] },
-    { reads := [[0, 47], [0, 104], [0, 106], [0, 107], [0, 105], [0, 103], [0, 86], [0, 53], [0, 57], [3, 47], [3, 104], [3, 106], [3, 107], [3, 105], [3, 103], [3, 86, 40], [3, 53], [3, 57]], writes := [[3, 86, 40], [19, 58], [8]] }]
-  levels := [[[0], [1], [3, 4]], [[2]], [[5]]]
+    { reads := [[0, 86], [3, 86]], writes := [[0, 87]] },
+    { reads := [[0, 86], [3, 86]], writes := [[0, 88]] }]
+  levels := [[[0], [1]]]
 
 /-- $$\operatorname{check}(\mathtt{c26}) = \mathsf{true}$$
 
-The schedule psync generated for `run` (examples/graph_suite/chains.rs, region 0): 6 statements in 3 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 6 statements in program order. -/
+The schedule psync generated for `stash_both` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
 theorem c26_ok : check c26 = true := by decide
 
-/-- examples/graph_suite/late_start.rs: `put_and_upload_sst`, region 0 -/
+/-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `stash_same`, region 0 -/
 def c27 : Cert where
   nodes := [
-    { reads := [[0, 108], [0, 109], [3, 108], [3, 109]], writes := [[0, 110], [19, 20]] },
-    { reads := [[0, 108], [0, 109], [3, 108], [3, 109]], writes := [[0, 111], [37, 38, 108], [19, 22]] },
-    { reads := [[0, 108], [0, 109], [0, 110], [3, 108], [3, 109], [3, 110]], writes := [[0, 112], [37, 38, 108], [19, 23]] }]
-  levels := [[[0], [1]], [[2]]]
+    { reads := [[0, 86], [3, 86]], writes := [[0, 87]] },
+    { reads := [[0, 86], [3, 86]], writes := [[0, 88]] }]
+  levels := [[[0], [1]]]
 
 /-- $$\operatorname{check}(\mathtt{c27}) = \mathsf{true}$$
 
-The schedule psync generated for `put_and_upload_sst` (examples/graph_suite/late_start.rs, region 0): 3 statements in 2 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 3 statements in program order. -/
+The schedule psync generated for `stash_same` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
 theorem c27_ok : check c27 = true := by decide
 
-/-- examples/graph_suite/late_start.rs: `checkpoint_sync`, region 0 -/
+/-- examples/graph_suite/chains.rs: `run`, region 0 -/
 def c28 : Cert where
   nodes := [
-    { reads := [[0, 113], [3, 113], [37, 38, 113, 60, 9, 114, 0, 4, 115, 114, 116, 8, 7, 61]], writes := [[0, 117], [19, 20]] },
-    { reads := [[0, 113], [0, 117], [3, 113], [3, 117], [37, 38, 113]], writes := [[0, 118], [19, 22]] },
-    { reads := [[0, 118], [0, 113], [3, 118], [3, 113], [37, 38, 113]], writes := [[0, 119], [19, 23]] },
-    { reads := [[0, 120], [3, 120]], writes := [[0, 121], [19, 26]] }]
-  levels := [[[0, 1, 2], [3]]]
+    { reads := [[0, 89], [3, 89, 40]], writes := [[3, 89, 40], [8]] },
+    { reads := [[0, 89], [3, 89, 42], [37, 38, 89, 42]], writes := [[0, 90], [19, 22]] },
+    { reads := [[0, 15], [0, 46], [0, 17], [0, 47], [0, 91], [0, 41], [0, 92], [0, 93], [0, 94], [0, 95], [0, 96], [0, 97], [0, 98], [0, 99], [0, 49], [0, 90], [0, 100], [0, 50], [0, 89], [0, 44], [0, 101], [0, 102], [0, 103], [0, 53], [0, 57], [0, 28], [3, 15], [3, 46], [3, 17], [3, 47], [3, 91], [3, 41], [3, 92], [3, 93], [3, 94], [3, 95], [3, 96], [3, 97], [3, 98], [3, 99], [3, 49], [3, 90], [3, 100], [3, 50], [3, 89, 42], [3, 89, 40], [3, 89, 104], [3, 44], [3, 101], [3, 102], [3, 103], [3, 53], [3, 57], [3, 28], [37, 38, 89, 42]], writes := [[3, 89, 40], [19, 23], [8]] },
+    { reads := [[0, 105], [3, 105]], writes := [[0, 106]] },
+    { reads := [[0, 15], [0, 46], [0, 17], [0, 47], [0, 107], [0, 49], [0, 50], [0, 108], [0, 106], [0, 89], [0, 53], [0, 28], [3, 15], [3, 46], [3, 17], [3, 47], [3, 107], [3, 49], [3, 50], [3, 108], [3, 106], [3, 89, 42], [3, 89, 104], [3, 53], [3, 28], [37, 38, 89, 42]], writes := [[0, 109]] },
+    { reads := [[0, 47], [0, 107], [0, 109], [0, 110], [0, 108], [0, 106], [0, 89], [0, 53], [0, 57], [3, 47], [3, 107], [3, 109], [3, 110], [3, 108], [3, 106], [3, 89, 40], [3, 53], [3, 57]], writes := [[3, 89, 40], [19, 58], [8]] }]
+  levels := [[[0], [1], [3, 4]], [[2]], [[5]]]
 
 /-- $$\operatorname{check}(\mathtt{c28}) = \mathsf{true}$$
 
-The schedule psync generated for `checkpoint_sync` (examples/graph_suite/late_start.rs, region 0): 4 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 4 statements in program order. -/
+The schedule psync generated for `run` (examples/graph_suite/chains.rs, region 0): 6 statements in 3 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 6 statements in program order. -/
 theorem c28_ok : check c28 = true := by decide
 
-/-- examples/graph_suite/late_start.rs: `fetch_extensions_from_blob_store`, region 0 -/
+/-- examples/graph_suite/late_start.rs: `put_and_upload_sst`, region 0 -/
 def c29 : Cert where
   nodes := [
-    { reads := [[0, 122], [3, 122], [37, 38, 122, 60, 8, 19, 60, 8, 0, 74, 114, 71, 0, 74, 70, 61]], writes := [[0, 123], [19, 20]] },
-    { reads := [[0, 30], [3, 30]], writes := [[0, 124]] },
-    { reads := [[0, 15], [0, 46], [0, 17], [0, 47], [0, 88], [0, 41], [0, 125], [0, 90], [0, 91], [0, 94], [0, 95], [0, 96], [0, 49], [0, 122], [0, 50], [0, 98], [0, 99], [0, 100], [0, 123], [0, 126], [0, 124], [0, 53], [0, 57], [0, 28], [3, 15], [3, 46], [3, 17], [3, 47], [3, 88], [3, 41], [3, 125], [3, 90], [3, 91], [3, 94], [3, 95], [3, 96], [3, 49], [3, 122], [3, 50], [3, 98], [3, 99], [3, 100], [3, 123], [3, 126], [3, 124], [3, 53], [3, 57], [3, 28], [37, 38, 122]], writes := [[3, 124], [19, 23], [8]] },
-    { reads := [[0, 127], [3, 127], [37, 38, 127]], writes := [[0, 128], [19, 26]] }]
-  levels := [[[0], [1], [3]], [[2]]]
+    { reads := [[0, 111], [0, 112], [3, 111], [3, 112]], writes := [[0, 113], [19, 20]] },
+    { reads := [[0, 111], [0, 112], [3, 111], [3, 112]], writes := [[0, 114], [37, 38, 111], [19, 22]] },
+    { reads := [[0, 111], [0, 112], [0, 113], [3, 111], [3, 112], [3, 113]], writes := [[0, 115], [37, 38, 111], [19, 23]] }]
+  levels := [[[0], [1]], [[2]]]
 
 /-- $$\operatorname{check}(\mathtt{c29}) = \mathsf{true}$$
 
-The schedule psync generated for `fetch_extensions_from_blob_store` (examples/graph_suite/late_start.rs, region 0): 4 statements in 2 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 4 statements in program order. -/
+The schedule psync generated for `put_and_upload_sst` (examples/graph_suite/late_start.rs, region 0): 3 statements in 2 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 3 statements in program order. -/
 theorem c29_ok : check c29 = true := by decide
 
-/-- examples/graph_suite/sequential_awaits.rs: `process_show_validators`, region 0 -/
+/-- examples/graph_suite/late_start.rs: `checkpoint_sync`, region 0 -/
 def c30 : Cert where
   nodes := [
-    { reads := [[0, 129], [3, 129], [37, 38, 129]], writes := [[0, 130], [19, 20]] },
-    { reads := [[0, 129], [3, 129], [37, 38, 129]], writes := [[0, 131], [19, 22]] },
-    { reads := [[0, 129], [3, 129], [37, 38, 129]], writes := [[0, 132], [19, 23]] },
-    { reads := [[0, 129], [3, 129], [37, 38, 129]], writes := [[0, 133], [19, 26]] }]
-  levels := [[[0], [1], [2], [3]]]
+    { reads := [[0, 116], [3, 116], [37, 38, 116, 60, 9, 117, 0, 4, 118, 117, 119, 8, 7, 61]], writes := [[0, 120], [19, 20]] },
+    { reads := [[0, 116], [0, 120], [3, 116], [3, 120], [37, 38, 116]], writes := [[0, 121], [19, 22]] },
+    { reads := [[0, 121], [0, 116], [3, 121], [3, 116], [37, 38, 116]], writes := [[0, 122], [19, 23]] },
+    { reads := [[0, 123], [3, 123]], writes := [[0, 124], [19, 26]] }]
+  levels := [[[0, 1, 2], [3]]]
 
 /-- $$\operatorname{check}(\mathtt{c30}) = \mathsf{true}$$
 
-The schedule psync generated for `process_show_validators` (examples/graph_suite/sequential_awaits.rs, region 0): 4 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 4 statements in program order. -/
+The schedule psync generated for `checkpoint_sync` (examples/graph_suite/late_start.rs, region 0): 4 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 4 statements in program order. -/
 theorem c30_ok : check c30 = true := by decide
 
-/-- examples/graph_suite/sequential_awaits.rs: `disable`, region 0 -/
+/-- examples/graph_suite/late_start.rs: `fetch_extensions_from_blob_store`, region 0 -/
 def c31 : Cert where
   nodes := [
-    { reads := [[0, 42], [3, 42], [37, 38, 42, 60, 134, 135, 74, 8, 6, 53, 8, 60, 41, 74, 60, 71, 53, 4, 44, 8, 135, 7, 8, 9, 4, 136, 115, 60, 41, 137, 8, 21, 61]], writes := [[0, 138], [19, 20]] },
-    { reads := [[0, 42], [3, 42]], writes := [[37, 38, 42, 60, 134, 135, 74, 8, 6, 53, 8, 60, 41, 74, 60, 71, 53, 4, 44, 8, 135, 7, 8, 9, 4, 136, 115, 60, 41, 137, 8, 21, 61], [19, 22]] },
-    { reads := [[0, 15], [0, 46], [0, 17], [0, 47], [0, 125], [0, 49], [0, 50], [0, 42], [0, 138], [0, 66], [0, 139], [0, 53], [0, 28], [3, 15], [3, 46], [3, 17], [3, 47], [3, 125], [3, 49], [3, 50], [3, 42], [3, 138], [3, 66], [3, 139], [3, 53], [3, 28]], writes := [[0, 140], [37, 38, 42, 60, 134, 135, 74, 8, 6, 53, 8, 60, 41, 74, 60, 71, 53, 4, 44, 8, 135, 137, 8, 21, 135, 141, 61]] },
-    { reads := [[0, 47], [0, 125], [0, 140], [0, 142], [0, 53], [0, 57], [3, 47], [3, 125], [3, 140], [3, 142], [3, 53], [3, 57]], writes := [[19, 26], [8]] },
-    { reads := [[0, 42], [3, 42]], writes := [[37, 38, 42, 60, 134, 135, 134, 8, 44, 71, 115, 134, 41, 5, 4, 6, 137, 136, 3, 135, 28, 22, 61], [19, 143]] },
-    { reads := [[0, 42], [3, 42]], writes := [[37, 38, 42, 60, 134, 135, 71, 53, 44, 135, 134, 4, 60, 53, 114, 19, 135, 6, 136, 74, 60, 71, 134, 135, 5, 4, 6, 137, 136, 3, 41, 7, 114, 74, 4, 5, 115, 8, 7, 61], [19, 58]] },
-    { reads := [[0, 42], [3, 42]], writes := [[37, 38, 42, 60, 134, 135, 6, 53, 71, 74, 74, 41, 74, 114, 44, 0, 114, 0, 44, 135, 134, 4, 74, 60, 8, 53, 61], [19, 144]] },
-    { reads := [[0, 42], [3, 42]], writes := [[37, 38, 42, 60, 134, 135, 6, 53, 71, 74, 74, 41, 74, 114, 44, 0, 114, 0, 44, 135, 74, 8, 115, 9, 41, 74, 114, 44, 0, 114, 0, 44, 61], [19, 145]] },
-    { reads := [[0, 42], [3, 42]], writes := [[37, 38, 42, 60, 134, 135, 6, 53, 71, 74, 74, 41, 74, 114, 44, 0, 114, 0, 44, 135, 136, 74, 8, 53, 41, 74, 114, 44, 0, 114, 0, 44, 61], [19, 146]] },
-    { reads := [[0, 42], [3, 42]], writes := [[37, 38, 42, 60, 134, 135, 134, 8, 44, 71, 115, 134, 41, 5, 4, 6, 137, 136, 3, 135, 28, 22, 135, 137, 8, 21, 61], [19, 147]] }]
-  levels := [[[0], [4], [5], [6], [7], [8], [9]], [[1], [2, 3]]]
-  holes := [141]
+    { reads := [[0, 125], [3, 125], [37, 38, 125, 60, 8, 19, 60, 8, 0, 74, 117, 71, 0, 74, 70, 61]], writes := [[0, 126], [19, 20]] },
+    { reads := [[0, 30], [3, 30]], writes := [[0, 127]] },
+    { reads := [[0, 15], [0, 46], [0, 17], [0, 47], [0, 91], [0, 41], [0, 128], [0, 93], [0, 94], [0, 97], [0, 98], [0, 99], [0, 49], [0, 125], [0, 50], [0, 101], [0, 102], [0, 103], [0, 126], [0, 129], [0, 127], [0, 53], [0, 57], [0, 28], [3, 15], [3, 46], [3, 17], [3, 47], [3, 91], [3, 41], [3, 128], [3, 93], [3, 94], [3, 97], [3, 98], [3, 99], [3, 49], [3, 125], [3, 50], [3, 101], [3, 102], [3, 103], [3, 126], [3, 129], [3, 127], [3, 53], [3, 57], [3, 28], [37, 38, 125]], writes := [[3, 127], [19, 23], [8]] },
+    { reads := [[0, 130], [3, 130], [37, 38, 130]], writes := [[0, 131], [19, 26]] }]
+  levels := [[[0], [1], [3]], [[2]]]
 
 /-- $$\operatorname{check}(\mathtt{c31}) = \mathsf{true}$$
 
-The schedule psync generated for `disable` (examples/graph_suite/sequential_awaits.rs, region 0): 10 statements in 2 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 10 statements in program order. -/
+The schedule psync generated for `fetch_extensions_from_blob_store` (examples/graph_suite/late_start.rs, region 0): 4 statements in 2 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 4 statements in program order. -/
 theorem c31_ok : check c31 = true := by decide
 
-/-- examples/graph_suite/sequential_awaits.rs: `fetch_page`, region 0 -/
+/-- examples/graph_suite/sequential_awaits.rs: `process_show_validators`, region 0 -/
 def c32 : Cert where
   nodes := [
-    { reads := [[0, 127], [3, 127], [37, 38, 127, 60, 136, 74, 8, 53, 74, 61]], writes := [[0, 148], [19, 20]] },
-    { reads := [[0, 127], [0, 149], [0, 150], [3, 127], [3, 149], [3, 150]], writes := [[0, 151], [19, 22]] }]
-  levels := [[[0], [1]]]
+    { reads := [[0, 132], [3, 132], [37, 38, 132]], writes := [[0, 133], [19, 20]] },
+    { reads := [[0, 132], [3, 132], [37, 38, 132]], writes := [[0, 134], [19, 22]] },
+    { reads := [[0, 132], [3, 132], [37, 38, 132]], writes := [[0, 135], [19, 23]] },
+    { reads := [[0, 132], [3, 132], [37, 38, 132]], writes := [[0, 136], [19, 26]] }]
+  levels := [[[0], [1], [2], [3]]]
 
 /-- $$\operatorname{check}(\mathtt{c32}) = \mathsf{true}$$
 
-The schedule psync generated for `fetch_page` (examples/graph_suite/sequential_awaits.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
+The schedule psync generated for `process_show_validators` (examples/graph_suite/sequential_awaits.rs, region 0): 4 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 4 statements in program order. -/
 theorem c32_ok : check c32 = true := by decide
 
-/-- examples/graph_suite/sequential_awaits.rs: `check_notifications_allowed`, region 0 -/
+/-- examples/graph_suite/sequential_awaits.rs: `disable`, region 0 -/
 def c33 : Cert where
   nodes := [
-    { reads := [[0, 152], [0, 35], [0, 153], [0, 154], [3, 152], [3, 153], [3, 154], [37, 38]], writes := [[19, 20]] },
-    { reads := [[0, 152], [0, 35], [0, 153], [0, 154], [3, 152], [3, 153], [3, 154], [37, 38]], writes := [[19, 22]] },
-    { reads := [[0, 152], [0, 35], [0, 153], [0, 154], [3, 152], [3, 153], [3, 154], [37, 38]], writes := [[19, 23]] },
-    { reads := [[0, 152], [0, 35], [0, 153], [0, 154], [3, 152], [3, 153], [3, 154], [37, 38]], writes := [[19, 26]] },
-    { reads := [[0, 152], [0, 35], [0, 155], [0, 154], [3, 152], [3, 155], [3, 154], [37, 38]], writes := [[0, 156]] },
-    { reads := [[0, 152], [0, 35], [0, 155], [0, 154], [3, 152], [3, 155], [3, 154], [37, 38]], writes := [[0, 157]] }]
-  levels := [[[0], [1], [2], [3], [4], [5]]]
+    { reads := [[0, 42], [3, 42], [37, 38, 42, 60, 137, 138, 74, 8, 6, 53, 8, 60, 41, 74, 60, 71, 53, 4, 44, 8, 138, 7, 8, 9, 4, 139, 118, 60, 41, 140, 8, 21, 61]], writes := [[0, 141], [19, 20]] },
+    { reads := [[0, 42], [3, 42]], writes := [[37, 38, 42, 60, 137, 138, 74, 8, 6, 53, 8, 60, 41, 74, 60, 71, 53, 4, 44, 8, 138, 7, 8, 9, 4, 139, 118, 60, 41, 140, 8, 21, 61], [19, 22]] },
+    { reads := [[0, 15], [0, 46], [0, 17], [0, 47], [0, 128], [0, 49], [0, 50], [0, 42], [0, 141], [0, 66], [0, 142], [0, 53], [0, 28], [3, 15], [3, 46], [3, 17], [3, 47], [3, 128], [3, 49], [3, 50], [3, 42], [3, 141], [3, 66], [3, 142], [3, 53], [3, 28]], writes := [[0, 143], [37, 38, 42, 60, 137, 138, 74, 8, 6, 53, 8, 60, 41, 74, 60, 71, 53, 4, 44, 8, 138, 140, 8, 21, 138, 144, 61]] },
+    { reads := [[0, 47], [0, 128], [0, 143], [0, 145], [0, 53], [0, 57], [3, 47], [3, 128], [3, 143], [3, 145], [3, 53], [3, 57]], writes := [[19, 26], [8]] },
+    { reads := [[0, 42], [3, 42]], writes := [[37, 38, 42, 60, 137, 138, 137, 8, 44, 71, 118, 137, 41, 5, 4, 6, 140, 139, 3, 138, 28, 22, 61], [19, 146]] },
+    { reads := [[0, 42], [3, 42]], writes := [[37, 38, 42, 60, 137, 138, 71, 53, 44, 138, 137, 4, 60, 53, 117, 19, 138, 6, 139, 74, 60, 71, 137, 138, 5, 4, 6, 140, 139, 3, 41, 7, 117, 74, 4, 5, 118, 8, 7, 61], [19, 58]] },
+    { reads := [[0, 42], [3, 42]], writes := [[37, 38, 42, 60, 137, 138, 6, 53, 71, 74, 74, 41, 74, 117, 44, 0, 117, 0, 44, 138, 137, 4, 74, 60, 8, 53, 61], [19, 147]] },
+    { reads := [[0, 42], [3, 42]], writes := [[37, 38, 42, 60, 137, 138, 6, 53, 71, 74, 74, 41, 74, 117, 44, 0, 117, 0, 44, 138, 74, 8, 118, 9, 41, 74, 117, 44, 0, 117, 0, 44, 61], [19, 148]] },
+    { reads := [[0, 42], [3, 42]], writes := [[37, 38, 42, 60, 137, 138, 6, 53, 71, 74, 74, 41, 74, 117, 44, 0, 117, 0, 44, 138, 139, 74, 8, 53, 41, 74, 117, 44, 0, 117, 0, 44, 61], [19, 149]] },
+    { reads := [[0, 42], [3, 42]], writes := [[37, 38, 42, 60, 137, 138, 137, 8, 44, 71, 118, 137, 41, 5, 4, 6, 140, 139, 3, 138, 28, 22, 138, 140, 8, 21, 61], [19, 150]] }]
+  levels := [[[0], [4], [5], [6], [7], [8], [9]], [[1], [2, 3]]]
+  holes := [144]
 
 /-- $$\operatorname{check}(\mathtt{c33}) = \mathsf{true}$$
 
-The schedule psync generated for `check_notifications_allowed` (examples/graph_suite/sequential_awaits.rs, region 0): 6 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 6 statements in program order. -/
+The schedule psync generated for `disable` (examples/graph_suite/sequential_awaits.rs, region 0): 10 statements in 2 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 10 statements in program order. -/
 theorem c33_ok : check c33 = true := by decide
+
+/-- examples/graph_suite/sequential_awaits.rs: `fetch_page`, region 0 -/
+def c34 : Cert where
+  nodes := [
+    { reads := [[0, 130], [3, 130], [37, 38, 130, 60, 139, 74, 8, 53, 74, 61]], writes := [[0, 151], [19, 20]] },
+    { reads := [[0, 130], [0, 152], [0, 153], [3, 130], [3, 152], [3, 153]], writes := [[0, 154], [19, 22]] }]
+  levels := [[[0], [1]]]
+
+/-- $$\operatorname{check}(\mathtt{c34}) = \mathsf{true}$$
+
+The schedule psync generated for `fetch_page` (examples/graph_suite/sequential_awaits.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
+theorem c34_ok : check c34 = true := by decide
+
+/-- examples/graph_suite/sequential_awaits.rs: `check_notifications_allowed`, region 0 -/
+def c35 : Cert where
+  nodes := [
+    { reads := [[0, 155], [0, 35], [0, 156], [0, 157], [3, 155], [3, 156], [3, 157], [37, 38]], writes := [[19, 20]] },
+    { reads := [[0, 155], [0, 35], [0, 156], [0, 157], [3, 155], [3, 156], [3, 157], [37, 38]], writes := [[19, 22]] },
+    { reads := [[0, 155], [0, 35], [0, 156], [0, 157], [3, 155], [3, 156], [3, 157], [37, 38]], writes := [[19, 23]] },
+    { reads := [[0, 155], [0, 35], [0, 156], [0, 157], [3, 155], [3, 156], [3, 157], [37, 38]], writes := [[19, 26]] },
+    { reads := [[0, 155], [0, 35], [0, 158], [0, 157], [3, 155], [3, 158], [3, 157], [37, 38]], writes := [[0, 159]] },
+    { reads := [[0, 155], [0, 35], [0, 158], [0, 157], [3, 155], [3, 158], [3, 157], [37, 38]], writes := [[0, 160]] }]
+  levels := [[[0], [1], [2], [3], [4], [5]]]
+
+/-- $$\operatorname{check}(\mathtt{c35}) = \mathsf{true}$$
+
+The schedule psync generated for `check_notifications_allowed` (examples/graph_suite/sequential_awaits.rs, region 0): 6 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 6 statements in program order. -/
+theorem c35_ok : check c35 = true := by decide
 
 end PsyncCerts
