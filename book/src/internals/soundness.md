@@ -97,10 +97,11 @@ For each mistake, say what catches it: rustc, psync's rules, `cargo psync check`
    it with `#[psync::seq]`.
 2. Nothing: different receivers are assumed to be different resources (assumption 2). Name the
    relation with `effects(..)`, keep the read in place with `#[psync::seq]`, or use one handle.
-3. `notify_user` has no verb, so the macro assumes it reads (assumption 1).
-   `cargo psync check` reads its body. If the email goes out through a process or a socket write
-   that the summary records, it reports a `speculative-write`. `strict` removes the assumption
-   outright.
+3. Nothing, usually. `notify_user` has no verb, so the macro assumes it reads (assumption 1).
+   `cargo psync check` reads its body, but a library's summary leaves out socket traffic, so an
+   email sent through an SMTP or HTTP client is not recorded. It would catch a process (say,
+   `sendmail`) or a file write. Mark the call as a write with `effects(write(notify_user))`, or use
+   `strict`, which makes every unclassified call a write.
 4. Nothing: per-item targets of services are assumed to differ (assumption 4). Deduplicate the
    list first, or mark the loop `#[psync::seq]`.
 5. psync's rules, at run time: the path is total, so the generated code compares all items'
