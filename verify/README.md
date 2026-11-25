@@ -51,10 +51,23 @@ of which requests commute. The book chapter is *What psync guarantees about the 
 | `kvSpec_sound`, `get_count_not_commute` | a counting server: two `get`s commute; a `get` and a `count` do not |
 | `psync_rule_unsound_for_counters` | psync's built-in rule ("two reads commute") is unsound for that server, so the guarantee is relative to the spec |
 
+`Footprint.lean` proves the hypothesis `hind` of `check_sound` for a fragment of MIR: places with
+projections, assignments, aggregate moves, `if`, `while`, and calls that pass places by
+reference, with per-function summaries.
+
+| Theorem | Statement |
+|---|---|
+| `frame`, `dep` | under summaries that pass the link check (`Valid`), a statement changes nothing outside its writes, and its writes depend only on what it touches |
+| `memSys` | statements with disjoint footprints commute (via `World.upd_comm`) |
+| `hind_of_cover` | a certificate whose nodes cover the footprints: certificate independence implies disjoint footprints |
+| `mir_schedule_sound` | `check_sound` with `hind` discharged: valid summaries, covering certificate, `check` accepts, so every run of the schedule equals the sequential one |
+| `Program.valid`, `prog_valid`, `callers_sound` | the link check decided for a finite program; a recursive callee called on two fields, in one level, proved equal to the calls in order |
+
 ```sh
 lean verify/Schedule.lean      # Lean 4.22; prints nothing when every proof checks
 lean verify/Tutorial.lean      # the book's Lean introduction (Foundations, "Proofs") and its exercise solutions
 lean verify/World.lean         # the schedule against a server, relative to a commutativity spec
+cd verify && lake build PsyncVerify   # everything, including Cert.lean and Footprint.lean
 ```
 
 The proofs use only Lean's standard axioms (`propext`, `Classical.choice`, `Quot.sound`) and
