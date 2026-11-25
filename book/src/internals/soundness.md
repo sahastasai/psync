@@ -76,6 +76,38 @@ which is why [`cargo psync check`](../safety/check.md) verifies them against the
 
 The generated Rust is not modeled. rustc checks it.
 
+## Exercises
+
+For each mistake, say what catches it: rustc, psync's rules, `cargo psync check`, or nothing
+(one of your assumptions). Then say how to protect against it.
+
+1. Two concurrent chains both call `query` on a `&mut Conn` that a method returned.
+2. Two chains call `self.primary.put(k, v)` and `self.replica.get(k)`, two handles to one
+   database.
+3. `notify_user(id).await` runs before an earlier `?` would have left, and its body sends an
+   email.
+4. A prefetched loop calls `store.delete(item.key)` for a list with a duplicate key.
+5. A loop writes `fs::write(dir.join(name), ..)` for a list with a duplicate name.
+
+<details>
+<summary>Answers</summary>
+
+1. rustc: the generated code needs two `&mut` borrows at once and does not compile
+   ([`&mut` in two branches](../guide/patterns.md#mut-in-two-branches-does-not-compile)). Fix
+   it with `#[psync::seq]`.
+2. Nothing: different receivers are assumed to be different resources (assumption 2). Name the
+   relation with `effects(..)`, keep the read in place with `#[psync::seq]`, or use one handle.
+3. `notify_user` has no verb, so the macro assumes it reads (assumption 1).
+   `cargo psync check` reads its body. If the email goes out through a process or a socket write
+   that the summary records, it reports a `speculative-write`. `strict` removes the assumption
+   outright.
+4. Nothing: per-item targets of services are assumed to differ (assumption 4). Deduplicate the
+   list first, or mark the loop `#[psync::seq]`.
+5. psync's rules, at run time: the path is total, so the generated code compares all items'
+   paths and runs the loop as written when two are the same file.
+
+</details>
+
 ## How this compares with dynamic languages
 
 Tools that reorder awaits in JavaScript rely on a whole-program side-effect analysis. They state
