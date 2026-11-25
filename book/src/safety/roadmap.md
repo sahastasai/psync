@@ -206,9 +206,10 @@ and that the rule is unsound for a server whose reads change state
 
 **Schedules are certified.** psync writes a certificate per concurrent region, and a Lean checker,
 proven sound, accepts or rejects it; CI checks all of the repository's schedules
-([Certified schedules](./certificates.md)). Next: footprint soundness over a MIR fragment
-(the checker's hypothesis), certificates for prefetched loops and exits, then specifications for
-HTTP, the Kubernetes API and S3, checked against server logs.
+([Certified schedules](./certificates.md)). The checker's hypothesis, that footprints are right,
+is proved for a fragment of MIR with cross-function summaries (`verify/Footprint.lean`). Next:
+specifications for HTTP, the Kubernetes API and S3, checked against server logs, then
+certificates for prefetched loops and exits.
 
 ## Priorities
 

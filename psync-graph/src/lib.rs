@@ -598,6 +598,40 @@ mod tests {
         assert!(r.regions[0].changed);
     }
 
+    /// rustic's `diff`: `let path2 = path2.unwrap_or(path1);` sits between the two lookups and feeds
+    /// the second. `unwrap_or` was unclassified, so the statement was its own chain and delayed
+    /// the second lookup by a level; with pure arguments it is pure.
+    #[test]
+    fn cheap_statements_do_not_delay_waits() {
+        let mut f: ItemFn = syn::parse_quote! {
+            fn diff(repo: &Repo, path1: Option<&str>, path2: Option<&str>) -> Result<()> {
+                let snaps = repo.get_snapshots(&[1, 2])?;
+                let snap1 = &snaps[0];
+                let snap2 = &snaps[1];
+                let path1 = path1.unwrap_or("");
+                let path2 = path2.unwrap_or(path1);
+                info!("{path1} {path2}");
+                #[psync::par]
+                let node1 = repo.node(snap1, path1)?;
+                #[psync::par]
+                let node2 = repo.node(snap2, path2)?;
+                show(node1, node2)
+            }
+        };
+        let report = transform_fn(&mut f, &Options::default());
+        let r = &report.regions[0];
+        let level_of = |name: &str| {
+            let n = r
+                .nodes
+                .iter()
+                .position(|n| n.label.starts_with(name))
+                .unwrap();
+            let c = r.chains.iter().position(|c| c.contains(&n)).unwrap();
+            r.levels.iter().position(|l| l.contains(&c)).unwrap()
+        };
+        assert_eq!(level_of("node1"), level_of("node2"), "{:?}", r.levels);
+    }
+
     /// A loop body may end in an await without `;` (`api.put(x).await`, as in DataFusion's join
     /// fuzz tests and greptimedb's `wait_datanodes_alive`): the generated code was invalid and the
     /// macro panicked. Found by `psync-scan` over the audit corpus.

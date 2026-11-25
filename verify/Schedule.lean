@@ -36,6 +36,18 @@ independent.
 
 namespace Psync
 
+/-! ## Notation used in the theorem statements
+
+* $s : \mathrm{Loc} \to \mathrm{Val}$ is a state; an operation $o$ has a step $\mathrm{run}_o$, a read
+  footprint $R_o$ and a write footprint $W_o$.
+* $[\![ xs ]\!](s)$ runs the list of operations $xs$ in order from $s$ (`runAll`);
+  $\mathbin{+\!\!+}$ is list concatenation.
+* $a \mathrel{I} b$ (`Independent`) means $W_a \cap (R_b \cup W_b) = \emptyset$ and
+  $W_b \cap R_a = \emptyset$.
+* $a \parallel b$ is the set of interleavings of $a$ and $b$ that keep each one's order
+  (`Interleave`); $\Vert_{c \in cs}\, c$ interleaves several chains (`InterleaveAll`).
+-/
+
 variable {Loc Val : Type}
 
 abbrev State (Loc Val : Type) := Loc → Val
@@ -53,10 +65,13 @@ structure Op (Loc Val : Type) where
 def Independent (a b : Op Loc Val) : Prop :=
   (∀ l, a.W l → ¬ b.R l ∧ ¬ b.W l) ∧ (∀ l, b.W l → ¬ a.R l)
 
+/-- $$a \mathrel{I} b \implies b \mathrel{I} a$$ -/
 theorem Independent.symm {a b : Op Loc Val} (h : Independent a b) : Independent b a := by
   refine ⟨fun l hb => ⟨h.2 l hb, fun ha => (h.1 l ha).2 hb⟩, fun l ha => (h.1 l ha).1⟩
 
-/-- **1.** Independent operations commute. -/
+/-- $$a \mathrel{I} b \implies \mathrm{run}_b(\mathrm{run}_a(s)) = \mathrm{run}_a(\mathrm{run}_b(s))$$
+
+**1.** Independent operations commute. -/
 theorem commute (a b : Op Loc Val) (h : Independent a b) (s : State Loc Val) :
     b.run (a.run s) = a.run (b.run s) := by
   funext l
@@ -77,13 +92,16 @@ def runAll : List (Op Loc Val) → State Loc Val → State Loc Val
   | [], s => s
   | o :: os, s => runAll os (o.run s)
 
+/-- $$[\![ xs \mathbin{+\!\!+} ys ]\!](s) = [\![ ys ]\!]([\![ xs ]\!](s))$$ -/
 theorem runAll_append (xs ys : List (Op Loc Val)) (s : State Loc Val) :
     runAll (xs ++ ys) s = runAll ys (runAll xs s) := by
   induction xs generalizing s with
   | nil => rfl
   | cons x xs ih => exact ih _
 
-/-- An operation independent of every operation of a list commutes with the whole list. -/
+/-- $$(\forall x \in xs,\ x \mathrel{I} y) \implies [\![ xs ]\!](\mathrm{run}_y(s)) = \mathrm{run}_y\bigl([\![ xs ]\!](s)\bigr)$$
+
+An operation independent of every operation of a list commutes with the whole list. -/
 theorem commute_list (y : Op Loc Val) (xs : List (Op Loc Val))
     (h : ∀ x ∈ xs, Independent x y) (s : State Loc Val) :
     runAll xs (y.run s) = y.run (runAll xs s) := by
@@ -100,7 +118,9 @@ inductive Interleave : List (Op Loc Val) → List (Op Loc Val) → List (Op Loc 
   | left {x a b m} : Interleave a b m → Interleave (x :: a) b (x :: m)
   | right {y a b m} : Interleave a b m → Interleave a (y :: b) (y :: m)
 
-/-- **2.** Concurrent chains: any interleaving of two independent chains has the effect of running
+/-- $$(\forall x \in a,\ \forall y \in b,\ x \mathrel{I} y) \;\wedge\; m \in a \parallel b \implies [\![ m ]\!](s) = [\![ a \mathbin{+\!\!+} b ]\!](s)$$
+
+**2.** Concurrent chains: any interleaving of two independent chains has the effect of running
 the first, then the second. (For more chains, interleave one with the interleaving of the rest.) -/
 theorem interleave_correct {a b m : List (Op Loc Val)}
     (hab : ∀ x ∈ a, ∀ y ∈ b, Independent x y) (hm : Interleave a b m) (s : State Loc Val) :
@@ -120,6 +140,7 @@ inductive InterleaveAll : List (List (Op Loc Val)) → List (Op Loc Val) → Pro
   | nil : InterleaveAll [] []
   | cons {c cs m r} : InterleaveAll cs r → Interleave c r m → InterleaveAll (c :: cs) m
 
+/-- $$m \in \textstyle\Vert_{c \in cs}\, c \implies \forall y \in m,\ \exists c \in cs,\ y \in c$$ -/
 theorem interleaveAll_mem {cs : List (List (Op Loc Val))} {m : List (Op Loc Val)}
     (h : InterleaveAll cs m) : ∀ y ∈ m, ∃ c ∈ cs, y ∈ c := by
   induction h with
@@ -151,7 +172,9 @@ def PairwiseIndependent : List (List (Op Loc Val)) → Prop
   | [] => True
   | c :: cs => (∀ c' ∈ cs, ∀ x ∈ c, ∀ y ∈ c', Independent x y) ∧ PairwiseIndependent cs
 
-/-- A whole level: any interleaving of pairwise independent chains has the effect of running the
+/-- $$\mathrm{PairwiseInd}(cs) \;\wedge\; m \in \textstyle\Vert_{c \in cs}\, c \implies [\![ m ]\!](s) = [\![ c_1 \mathbin{+\!\!+} \cdots \mathbin{+\!\!+} c_k ]\!](s)$$
+
+A whole level: any interleaving of pairwise independent chains has the effect of running the
 chains one after another. -/
 theorem level_correct {cs : List (List (Op Loc Val))} {m : List (Op Loc Val)}
     (hp : PairwiseIndependent cs) (hm : InterleaveAll cs m) (s : State Loc Val) :
@@ -172,7 +195,9 @@ inductive Runs : List (List (List (Op Loc Val))) → List (List (Op Loc Val)) �
   | cons {cs m levels ms} :
       PairwiseIndependent cs → InterleaveAll cs m → Runs levels ms → Runs (cs :: levels) (m :: ms)
 
-/-- **3.** A schedule is a list of levels run one after another: whatever interleaving each level
+/-- $$\mathrm{Runs}(\mathit{levels}, ms) \implies [\![ \mathrm{flatten}(ms) ]\!](s) = [\![ \mathrm{flatten}(\mathrm{map}\ \mathrm{flatten}\ \mathit{levels}) ]\!](s)$$
+
+**3.** A schedule is a list of levels run one after another: whatever interleaving each level
 takes, the result is that of running every chain in order. -/
 theorem levels_correct {levels : List (List (List (Op Loc Val)))} {ms : List (List (Op Loc Val))}
     (h : Runs levels ms) (s : State Loc Val) :
@@ -183,7 +208,9 @@ theorem levels_correct {levels : List (List (List (Op Loc Val)))} {ms : List (Li
     rw [List.flatten_cons, runAll_append, List.map_cons, List.flatten_cons, runAll_append,
       level_correct hp hm, ih]
 
-/-- **4.** Operations that write nothing leave the state as it was. -/
+/-- $$(\forall o \in \mathit{extra},\ W_o = \emptyset) \implies [\![ \mathit{extra} ]\!](s) = s$$
+
+**4.** Operations that write nothing leave the state as it was. -/
 theorem speculation_harmless (extra : List (Op Loc Val)) (hread : ∀ o ∈ extra, ∀ l, ¬ o.W l)
     (s : State Loc Val) : runAll extra s = s := by
   induction extra generalizing s with
@@ -205,7 +232,9 @@ inductive Reorders : List (Op Loc Val) → List (Op Loc Val) → Prop
   | cons {x P A B} : (∀ y ∈ A, Independent y x) → Reorders P (A ++ B) →
       Reorders (x :: P) (A ++ x :: B)
 
-/-- **5.** Such a reordering has the effect of the program as written. Together with
+/-- $$\mathrm{Reorders}(P, L) \implies [\![ L ]\!](s) = [\![ P ]\!](s)$$
+
+**5.** Such a reordering has the effect of the program as written. Together with
 `levels_correct`, the concurrent execution of psync's schedule ends in the state the sequential
 program ends in. -/
 theorem reorders_correct {P L : List (Op Loc Val)} (h : Reorders P L) (s : State Loc Val) :
@@ -265,7 +294,9 @@ def SpecSafe : List (XOp Loc Val E) → State Loc Val → Prop
     | some _ => ∀ y ∈ xs, ∀ l, ¬ y.op.W l
     | none => SpecSafe xs (x.op.run s)
 
-/-- **6.** Running every operation, recording the outcomes and replaying the first exit in program
+/-- $$\mathrm{SpecSafe}(xs, s) \implies \bigl([\![ \mathrm{op}(xs) ]\!](s),\ \mathrm{firstExit}(\mathrm{outcomes}(xs, s))\bigr) = \mathrm{seq}_X(xs, s)$$
+
+**6.** Running every operation, recording the outcomes and replaying the first exit in program
 order gives the state and the exit of sequential execution, provided only reads run past the
 first exit. -/
 theorem replay_correct (xs : List (XOp Loc Val E)) (s : State Loc Val) (h : SpecSafe xs s) :
@@ -308,7 +339,9 @@ def XOp.recording [DecidableEq Loc] (x : XOp Loc Val E) (k : Loc) (enc : Option 
     · simp only [if_neg hk]
       exact x.op.local_dep s s' hR l (hW.resolve_right hk)
 
-/-- **7.** The slot holds the statement's outcome. Since `recording` is an ordinary `Op`, every
+/-- $$\mathrm{run}_{\mathrm{rec}_k(x)}(s)(k) = \mathrm{enc}\bigl(\mathrm{exit}_x(s)\bigr)$$
+
+**7.** The slot holds the statement's outcome. Since `recording` is an ordinary `Op`, every
 theorem above applies to programs whose statements record their exits: a schedule of independent
 chains (independence now includes the slots, which no other statement touches) leaves the same
 values in every slot as program order, so the replay reads the same outcomes. -/

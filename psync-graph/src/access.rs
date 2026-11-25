@@ -43,6 +43,7 @@ pub(crate) const PURE_METHODS: &[&str] = &[
     "as_slice",
     "len",
     "is_empty",
+    "unwrap_or",
     "unwrap_or_default",
     "as_deref",
     "iter",

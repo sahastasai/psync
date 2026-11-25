@@ -96,12 +96,55 @@ place encoding dropped `format!` targets, and Lean rejected `graph_suite`'s matr
 `disable` because of it: psync had correctly overlapped a write to `m.secret_storage.key.{id}` with
 writes to `m.megolm_backup.v1` and five others. The character encoding fixed it.
 
+## Footprints, proved for a fragment of MIR
+
+`check_sound` assumes that a certificate's places are right: if the certificate says statement 3
+writes only `s.a`, then it really does. `verify/Footprint.lean` proves that assumption for a small
+language shaped like MIR, the compiler's simplest form of a function
+([The Rust compiler](../foundations/rustc.md) introduces MIR):
+
+- **Places** are a local and a path of fields: `_5.0.1` is field 1 of field 0 of local 5.
+- **Statements** assign the result of an operation on places and constants (`_1 = _1 + 1`),
+  move a whole struct (`_2 = move _3`), and combine through sequencing, `if`, `while` and calls.
+  A call passes places by reference, as `drain(&mut s.a, &mut s.b)` does.
+- **A summary** of a function lists the places it may read and write, in terms of its own
+  parameters. A caller never looks at the callee's body. It takes the summary and replaces each
+  parameter with the argument: `_0` becomes `s.a`. This is how psync's summaries cross crates.
+- **The link check** (`Valid`) asks, for every function, whether its summary covers what its body
+  does, where the body's calls are again read from summaries. It is one local check per function,
+  so it works for recursion and for functions from other crates, and for a finite program it is
+  decided by computation (`Program.validB`).
+
+Two theorems follow, for every function and every input, provided the link check passes:
+
+- **Frame.** A statement changes nothing outside the places it may write.
+- **Dependence.** What it writes depends only on the places it may read or write. (Writes count
+  as reads, because a statement that only sometimes writes `x` leaves the old `x` otherwise.)
+
+Together they make statements with disjoint footprints commute, and `hind_of_cover` turns a
+certificate that covers the footprints into exactly the `hind` that `check_sound` needs. The
+result, `mir_schedule_sound`, has no assumption left about footprints: if the link check passes,
+the certificate covers the summaries, and `check` accepts, then every run of the schedule ends with
+the same memory as the sequential program. The file's example is a recursive `drain` called on two
+fields of one struct, in one level. Its summary is checked against its own body, and a summary that
+forgets one write is rejected.
+
+What the fragment leaves out, and so stays assumed for real Rust:
+
+- **References stored in memory** (`*p` where `p` was computed). The borrow checker is what lets
+  psync name the place behind a `&mut`, and it is not modelled.
+- **Interior mutability and `unsafe`**, which let a shared reference write.
+- **Panics and unwinding.**
+- **That real MIR is faithfully translated into the fragment**, and that psync's emitter writes
+  certificate places that cover the summaries it computed.
+
 ## What a certificate does not cover
 
-- **That the places describe the statements.** This is the hypothesis of `check_sound`. psync
-  computes the places from tokens, and from compiler facts under `cargo psync build`.
-  [`cargo psync check`](./check.md) checks them against MIR, but that is not yet proved: proving it
-  is the footprint-soundness work on the [roadmap](./roadmap.md).
+- **That the places describe the statements.** This is the hypothesis `hind` of `check_sound`.
+  For a fragment of MIR it is now proved: `verify/Footprint.lean` (below). For real Rust, psync
+  computes the places from tokens, and from compiler facts under `cargo psync build`, and
+  [`cargo psync check`](./check.md) compares them with MIR. The gap between real MIR and the
+  fragment is what stays assumed.
 - **Prefetched loops.** Certificates cover regions. A loop's prefix is checked by the macro's
   refusal rules, and certifying it is the next step.
 - **Exit replay.** `replay_correct` in `Schedule.lean` proves the rule in general. Certificates do

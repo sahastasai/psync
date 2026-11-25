@@ -171,9 +171,15 @@ fn main() {
                     let ids: Vec<String> = interner.1.iter().map(usize::to_string).collect();
                     format!("\n  holes := [{}]", ids.join(", "))
                 };
+                let (n, depth) = (nodes.len(), levels.len());
                 let _ = write!(
                     out,
-                    "\n/-- {file}: `{name}`, region {r} -/\ndef {id} : Cert where\n  nodes := [\n{}]\n  levels := [{}]{holes}\n\ntheorem {id}_ok : check {id} = true := by decide\n",
+                    "\n/-- {file}: `{name}`, region {r} -/\ndef {id} : Cert where\n  nodes := [\n{}]\n  levels := [{}]{holes}\n\n\
+                     /-- $$\\operatorname{{check}}(\\mathtt{{{id}}}) = \\mathsf{{true}}$$\n\n\
+                     The schedule psync generated for `{name}` ({file}, region {r}): {n} statements in {depth} \
+                     level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running \
+                     the {n} statements in program order. -/\n\
+                     theorem {id}_ok : check {id} = true := by decide\n",
                     nodes.join(",\n"),
                     levels.join(", ")
                 );

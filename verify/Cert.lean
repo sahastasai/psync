@@ -22,6 +22,14 @@ specification is sound (`World.lean`).
 
 namespace PsyncCert
 
+/-! ## Notation used in the theorem statements
+
+* A certificate $c$ lists the statements' footprints and the levels of chains psync chose;
+  $\mathrm{check}(c)$ is the decidable checker.
+* $\mathrm{op}_i$ interprets statement $i$ as a step of a system $T$; $[\![ xs ]\!]_T(s)$ runs
+  steps in order, and $\mathrm{op}_0, \ldots, \mathrm{op}_{n-1}$ is the program as written.
+-/
+
 open PsyncWorld
 
 /-! ## Certificates -/
@@ -108,6 +116,7 @@ def check (c : Cert) : Bool :=
 
 /-! ## Soundness -/
 
+/-- $$\mathrm{split}(x, L) = (A, B) \implies L = A \mathbin{+\!\!+} [x] \mathbin{+\!\!+} B$$ -/
 theorem split_spec {x : Nat} {L A B : List Nat} (h : split x L = some (A, B)) : L = A ++ x :: B := by
   induction L generalizing A B with
   | nil => simp [split] at h
@@ -127,6 +136,7 @@ theorem split_spec {x : Nat} {L A B : List Nat} (h : split x L = some (A, B)) : 
 
 variable {S A : Type}
 
+/-- $$\bigl(\forall i\,j,\ \mathrm{ind}(i,j) \Rightarrow \mathrm{op}_i \mathrel{I_T} \mathrm{op}_j\bigr) \implies \bigl(\mathrm{reorderable}(P, L) = \mathsf{true} \Rightarrow \mathrm{Reorders}_T(\mathrm{op}(P), \mathrm{op}(L))\bigr)$$ -/
 theorem reorderable_sound (T : Sys S A) (op : Nat → A) (ind : Nat → Nat → Bool)
     (hind : ∀ i j, ind i j = true → T.Ind (op i) (op j)) :
     ∀ (P L : List Nat), reorderable ind P L = true → T.Reorders (P.map op) (L.map op) := by
@@ -154,6 +164,7 @@ theorem reorderable_sound (T : Sys S A) (op : Nat → A) (ind : Nat → Nat → 
       · have := ih (A' ++ B) hrest
         rwa [List.map_append] at this
 
+/-- $$\bigl(\forall i\,j,\ \mathrm{ind}(i,j) \Rightarrow \mathrm{op}_i \mathrel{I_T} \mathrm{op}_j\bigr) \implies \bigl(\mathrm{pairwiseOK}(chs) = \mathsf{true} \Rightarrow \mathrm{PairwiseInd}_T(\mathrm{op}(chs))\bigr)$$ -/
 theorem pairwiseOK_sound (T : Sys S A) (op : Nat → A) (ind : Nat → Nat → Bool)
     (hind : ∀ i j, ind i j = true → T.Ind (op i) (op j)) :
     ∀ (chs : List (List Nat)), pairwiseOK ind chs = true →
@@ -178,6 +189,7 @@ inductive Execs : List (List (List A)) → List (List A) → Prop
   | nil : Execs [] []
   | cons {cs m levels ms} : InterleaveAll cs m → Execs levels ms → Execs (cs :: levels) (m :: ms)
 
+/-- $$(\forall cs \in \mathit{levels},\ \mathrm{PairwiseInd}_T(cs)) \;\wedge\; \mathrm{Execs}(\mathit{levels}, ms) \implies \mathrm{Runs}_T(\mathit{levels}, ms)$$ -/
 theorem execs_runs (T : Sys S A) {levels : List (List (List A))} {ms : List (List A)}
     (hp : ∀ cs ∈ levels, T.PairwiseInd cs) (h : Execs levels ms) : T.Runs levels ms := by
   induction h with
@@ -186,6 +198,7 @@ theorem execs_runs (T : Sys S A) {levels : List (List (List A))} {ms : List (Lis
     exact Sys.Runs.cons (hp cs (List.mem_cons_self ..)) hm
       (ih (fun cs' h' => hp cs' (List.mem_cons_of_mem _ h')))
 
+/-- $$\mathrm{flatten}\bigl(\mathrm{map}\ \mathrm{flatten}\ (\mathrm{op}(\mathit{levels}))\bigr) = \mathrm{op}\bigl(\mathrm{flatten}(\mathrm{map}\ \mathrm{flatten}\ \mathit{levels})\bigr)$$ -/
 theorem map_flatten_flatten (op : Nat → A) (levels : List (List (List Nat))) :
     ((levels.map (List.map (List.map op))).map List.flatten).flatten =
       ((levels.map List.flatten).flatten).map op := by
@@ -194,7 +207,9 @@ theorem map_flatten_flatten (op : Nat → A) (levels : List (List (List Nat))) :
   | cons l ls ih =>
     simp only [List.map_cons, List.flatten_cons, List.map_append, ih, List.map_flatten]
 
-/-- **Soundness of the checker.** Interpret each node `i` as a step `op i` of any system `T`
+/-- $$\bigl(\forall i\,j,\ c.\mathrm{ind}(i,j) \Rightarrow \mathrm{op}_i \mathrel{I_T} \mathrm{op}_j\bigr) \;\wedge\; \mathrm{check}(c) = \mathsf{true} \;\wedge\; \mathrm{Execs}(\mathrm{op}(c.\mathit{levels}), ms) \implies [\![ \mathrm{flatten}(ms) ]\!]_T(s) = [\![ \mathrm{op}_0, \ldots, \mathrm{op}_{n-1} ]\!]_T(s)$$
+
+**Soundness of the checker.** Interpret each node `i` as a step `op i` of any system `T`
 (client memory as in `Schedule.lean`, or the client and server world of `World.lean`). Suppose the
 certificate's independence implies real independence (`hind`). Then if `check` accepts the
 certificate, every run of its schedule, in any interleaving of each level, ends exactly as the
@@ -229,12 +244,14 @@ def profilePage : Cert where
     { reads := [[20], [30]], writes := [[13]] } ]
   levels := [[[0, 2], [1], [3]]]
 
+/-- $$\mathrm{check}(\mathtt{profilePage}) = \mathsf{true}$$ -/
 theorem profilePage_ok : check profilePage = true := by decide
 
 /-- And one it rejects: the same statements with `avatar` scheduled beside `user`, which it reads.
 -/
 def profilePageWrong : Cert := { profilePage with levels := [[[0], [2], [1], [3]]] }
 
+/-- $$\mathrm{check}(\mathtt{profilePageWrong}) = \mathsf{false}$$ -/
 theorem profilePageWrong_rejected : check profilePageWrong = false := by decide
 
 /-- Holes: two writes to `format!("{dir}/a")` and `format!("{dir}/b")` (places `t {dir} / a /` and
@@ -245,11 +262,13 @@ def holesOK : Cert where
   levels := [[[0], [1]]]
   holes := [7, 8]
 
+/-- $$\mathrm{check}(\mathtt{holesOK}) = \mathsf{true}$$ -/
 theorem holesOK_ok : check holesOK = true := by decide
 
 def holesClash : Cert :=
   { holesOK with nodes := [{ reads := [], writes := [[1, 7, 2, 3, 2]] }, { reads := [], writes := [[1, 8, 2, 3, 2]] }] }
 
+/-- $$\mathrm{check}(\mathtt{holesClash}) = \mathsf{false}$$ -/
 theorem holesClash_rejected : check holesClash = false := by decide
 
 end PsyncCert

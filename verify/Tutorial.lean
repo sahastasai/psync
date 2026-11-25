@@ -13,10 +13,14 @@ namespace Tutorial
 
 def double (n : Nat) : Nat := n + n
 
-/-- `rfl`: both sides compute to the same value. -/
+/-- $$\mathrm{double}(21) = 42$$
+
+`rfl`: both sides compute to the same value. -/
 theorem double_21 : double 21 = 42 := rfl
 
-/-- For *every* `n`, which no amount of computing can check: unfold, then arithmetic. -/
+/-- $$\forall n,\ \mathrm{double}(n) = 2n$$
+
+For *every* `n`, which no amount of computing can check: unfold, then arithmetic. -/
 theorem double_eq (n : Nat) : double n = 2 * n := by
   unfold double
   omega
@@ -28,14 +32,18 @@ def applyAll : List (Nat → Nat) → Nat → Nat
   | [], s => s
   | f :: fs, s => applyAll fs (f s)
 
-/-- Running `xs ++ ys` is running `xs`, then `ys`. Proof by induction on `xs`. -/
+/-- $$\mathrm{applyAll}(xs \mathbin{+\!\!+} ys)(s) = \mathrm{applyAll}(ys)\bigl(\mathrm{applyAll}(xs)(s)\bigr)$$
+
+Running `xs ++ ys` is running `xs`, then `ys`. Proof by induction on `xs`. -/
 theorem applyAll_append (xs ys : List (Nat → Nat)) (s : Nat) :
     applyAll (xs ++ ys) s = applyAll ys (applyAll xs s) := by
   induction xs generalizing s with
   | nil => rfl
   | cons x xs ih => exact ih (x s)
 
-/-- Two steps that commute can be swapped (`commute` in `Schedule.lean`, for two steps). -/
+/-- $$(\forall s,\ f(g(s)) = g(f(s))) \implies \mathrm{applyAll}[f, g](s) = \mathrm{applyAll}[g, f](s)$$
+
+Two steps that commute can be swapped (`commute` in `Schedule.lean`, for two steps). -/
 theorem swap2 (f g : Nat → Nat) (h : ∀ s, f (g s) = g (f s)) (s : Nat) :
     applyAll [f, g] s = applyAll [g, f] s := by
   show g (f s) = f (g s)
@@ -48,7 +56,9 @@ abbrev State := String → Nat
 /-- Write `v` to location `x`. -/
 def set (x : String) (v : Nat) (s : State) : State := fun y => if y = x then v else s y
 
-/-- Writes to different locations commute: the simplest case of `commute`. -/
+/-- $$x \neq y \implies s[y \mapsto b][x \mapsto a] = s[x \mapsto a][y \mapsto b]$$
+
+Writes to different locations commute: the simplest case of `commute`. -/
 theorem set_comm (x y : String) (a b : Nat) (hxy : x ≠ y) (s : State) :
     set x a (set y b s) = set y b (set x a s) := by
   funext z
@@ -68,7 +78,9 @@ structure Bump where
 
 def addOne : Bump := ⟨fun n => n + 1, fun n => Nat.le_succ n⟩
 
-/-- Implicit arguments `{..}` are filled in by Lean; `h.1` and `h.2` take apart an `∧`. -/
+/-- $$\mathrm{Small}(a) \wedge \mathrm{Small}(b) \implies a + b < 20$$
+
+Implicit arguments `{..}` are filled in by Lean; `h.1` and `h.2` take apart an `∧`. -/
 theorem both_small {a b : Nat} (h : Small a ∧ Small b) : a + b < 20 := by
   have h1 := h.1
   have h2 := h.2
@@ -81,9 +93,12 @@ inductive Even : Nat → Prop
   | zero : Even 0
   | step {n : Nat} : Even n → Even (n + 2)
 
+/-- $$\mathrm{Even}(4)$$ -/
 theorem four_even : Even 4 := Even.step (Even.step Even.zero)
 
-/-- Proofs about an inductive predicate go by induction over its rules. -/
+/-- $$\mathrm{Even}(n) \implies \exists k,\ n = 2k$$
+
+Proofs about an inductive predicate go by induction over its rules. -/
 theorem even_double {n : Nat} (h : Even n) : ∃ k, n = 2 * k := by
   induction h with
   | zero => exact ⟨0, rfl⟩
@@ -93,16 +108,22 @@ theorem even_double {n : Nat} (h : Even n) : ∃ k, n = 2 * k := by
 
 /-! ## 5. Solutions to the chapter's exercises -/
 
-/-- Exercise 1. -/
+/-- $$\mathrm{applyAll}[\,](s) = s$$
+
+Exercise 1. -/
 theorem applyAll_nil (s : Nat) : applyAll [] s = s := rfl
 
-/-- Exercise 2: the later write wins (why psync keeps two writes to one place in order). -/
+/-- $$s[x \mapsto b][x \mapsto a] = s[x \mapsto a]$$
+
+Exercise 2: the later write wins (why psync keeps two writes to one place in order). -/
 theorem set_set (x : String) (a b : Nat) (s : State) : set x a (set x b s) = set x a s := by
   funext z
   unfold set
   by_cases hx : z = x <;> simp_all
 
-/-- Exercise 3: steps that change nothing can be run any number of times
+/-- $$(\forall f \in fs,\ \forall s,\ f(s) = s) \implies \mathrm{applyAll}(fs)(s) = s$$
+
+Exercise 3: steps that change nothing can be run any number of times
 (`speculation_harmless` in `Schedule.lean`). -/
 theorem identities_harmless (fs : List (Nat → Nat)) (h : ∀ f ∈ fs, ∀ s, f s = s) (s : Nat) :
     applyAll fs s = s := by
