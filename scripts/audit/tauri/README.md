@@ -14,3 +14,11 @@ time and a digest of the files it wrote. `run.sh` serves files of the real asset
 `mirror.py`, behind toxiproxy, through `TAURI_BUNDLER_TOOLS_GITHUB_MIRROR`, checks that all three
 builds write the same files, and prints the medians. Results are in the book, chapter "The audit:
 where Phase II helps".
+
+The `spec` build is made with psync's compiler pass, so the macro schedules with facts:
+
+```sh
+git checkout -q . && python3 ../patch.py . spec
+cp ../../../../psync-check/rust-toolchain.toml .     # the driver's pinned nightly
+cargo psync build --release -p tauri-bundler --lib --tests   # copy the test binary to ../bin/bundler-spec
+```

@@ -5,5 +5,5 @@ edition = "2024"
 publish = false
 
 [dependencies]
-psync = { path = "../../../../..", default-features = false }
+psync = { path = "../../../../..", default-features = false, features = ["std"] }
 helpers = { path = "../helpers" }

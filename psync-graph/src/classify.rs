@@ -572,7 +572,7 @@ pub(crate) fn bindings_in(block: &syn::Block) -> Set {
 }
 
 /// Every name bound by a pattern anywhere inside `stmt`, except the statement's own bindings.
-fn inner_bindings(stmt: &Stmt) -> Set {
+pub(crate) fn inner_bindings(stmt: &Stmt) -> Set {
     struct V(Set);
     impl<'ast> Visit<'ast> for V {
         fn visit_pat_ident(&mut self, p: &'ast syn::PatIdent) {

@@ -12,6 +12,7 @@
 
 use crate::access::{Set, mentions};
 use crate::classify::{Class, Exits, Node, Scope, classify, line_of};
+use crate::effects::{Target, value_target};
 use crate::schedule::{emit, plan};
 use crate::{Options, Report, hoist};
 use quote::{ToTokens, format_ident};
@@ -167,6 +168,9 @@ impl Rewriter<'_> {
         let mut out = Vec::new();
         let mut region: Vec<(usize, Node)> = Vec::new();
         let last = stmts.len().saturating_sub(1);
+        // What the block's immutable bindings name, for effects whose target is a binding:
+        // `let p = dir.join("a.json"); .. fs::write(&p, ..)` writes the file `dir/a.json`.
+        let mut values: std::collections::HashMap<String, Target> = Default::default();
         for (index, stmt) in stmts.into_iter().enumerate() {
             // The block's final expression is its value, so it stays last.
             let class = if index == last && matches!(stmt, Stmt::Expr(_, None)) {
@@ -177,6 +181,22 @@ impl Rewriter<'_> {
             } else {
                 classify(&stmt, &self.scope, false)
             };
+            let class = match class {
+                Class::Node(mut n) => {
+                    let inner = crate::classify::inner_bindings(&n.stmt);
+                    for e in &mut n.effects {
+                        if let Some(name) = e.target.single_name()
+                            && !inner.contains(name)
+                            && let Some(t) = values.get(name)
+                        {
+                            e.target = t.clone();
+                        }
+                    }
+                    Class::Node(n)
+                }
+                barrier => barrier,
+            };
+            bind_values(&mut values, &stmt, &self.scope.mutable);
             match class {
                 Class::Node(n) => region.push((index, *n)),
                 Class::Barrier(why) => {
@@ -214,5 +234,36 @@ impl Rewriter<'_> {
             mentions,
             &mut self.fresh,
         )
+    }
+}
+
+/// Record what `stmt`'s bindings name. A `let` of one immutable name binds the target its value
+/// names, if that says more than "anything" and depends on no `mut` binding (so it is the same
+/// value wherever the name is used). Any binding forgets what was known of its name, and of the
+/// values computed from it (they were computed from the shadowed one).
+fn bind_values(values: &mut std::collections::HashMap<String, Target>, stmt: &Stmt, mutable: &Set) {
+    let Stmt::Local(local) = stmt else {
+        return;
+    };
+    let mut bound = Vec::new();
+    crate::classify::pat_idents(&local.pat, &mut bound);
+    for (name, _) in &bound {
+        let name = name.to_string();
+        values.remove(&name);
+        values.retain(|_, t| t.names().is_none_or(|n| !n.contains(&name)));
+    }
+    let syn::Pat::Ident(p) = &local.pat else {
+        return;
+    };
+    let Some(init) = &local.init else {
+        return;
+    };
+    if p.mutability.is_some() || p.by_ref.is_some() || p.subpat.is_some() || init.diverge.is_some()
+    {
+        return;
+    }
+    let t = value_target(&init.expr);
+    if t.informative() && t.names().is_none_or(|n| n.is_disjoint(mutable)) {
+        values.insert(p.ident.to_string(), t);
     }
 }

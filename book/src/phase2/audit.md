@@ -114,8 +114,9 @@ three downloads, each skipped if the file is already in the cache. It was built 
 - **seq**: as released;
 - **par**: `#[psync::graph]` on the function and `#[psync::par]` on the three
   `if !path.exists() { download; write }` statements, which is what a user marks first;
-- **hinted**: also `#[psync::independent]` on the three, and `#[psync::speculate]` on the second
-  and third.
+- **spec**: `par` and `#[psync::speculate]` on the second and third, built with
+  `cargo psync build`, so the macro schedules with the compiler's facts;
+- **hinted**: `spec`, and also `#[psync::independent]` on the three, built without facts.
 
 `par` alone overlaps nothing, and psync is right not to. Each statement calls `download(..)` and
 `write_and_make_executable(&path, ..)`, two helpers psync cannot see into. As far as it knows, the
@@ -134,18 +135,37 @@ that chain, because members of a chain run in order (test
 `path_joins_and_pure_ifs_do_not_delay_downloads`). `join` with one argument is pure, and
 `handle.join()`, which waits for a thread, is not.
 
+With the compiler's facts, the `independent` hint is no longer needed. The driver finds that
+`write_and_make_executable(path, ..)` writes the file passed as its parameter 0
+([per-argument effects](../internals/compiler.md#what-a-summary-is)). The macro takes that file
+from the call, `&apprun`, and from `let apprun = tools_path.join(format!("AppRun-{arch}"))` it
+knows the target is `{tools_path}/AppRun-{arch}`, which differs from
+`{tools_path}/linuxdeploy-…` ([targets](../safety/effects.md#when-two-effects-conflict)). So
+the three writes are to three files. `speculate` stays: whether filling a cache before an earlier
+download has failed is acceptable is about intent, not about effects.
+
+The compiler pass checks the schedule and reports one warning. In MIR, the two paths are values
+computed by `join` and `format!`, so the driver cannot tell them apart. The macro tells them
+apart from the tokens, under the assumption above that different names in one directory are
+different files. This is the one place in the audit where the macro knows more than the
+checker.
+
 The benchmark runs `prepare_tools` on an empty cache, against a local mirror of the GitHub
 release files (through tauri's own `TAURI_BUNDLER_TOOLS_GITHUB_MIRROR`), with files of the real
 sizes (18 KB, 12 MB, 9 MB). toxiproxy adds latency, and in two rows caps each connection's
-bandwidth. All three builds write the same files at every setting. Medians of 11 runs:
+bandwidth. All four builds write the same files at every setting. Medians of 21 runs, on the
+shared machine (load average about 40):
 
-| Latency | Bandwidth per connection | seq | par | hinted | par | hinted |
-|---|---|---|---|---|---|---|
-| 0 ms | unlimited | 57 ms | 59 ms | 38 ms | 0.97× | 1.49× |
-| 20 ms | unlimited | 119 ms | 118 ms | 56 ms | 1.01× | **2.14×** |
-| 100 ms | unlimited | 359 ms | 395 ms | 154 ms | 0.91× | **2.34×** |
-| 100 ms | 20 MB/s | 1434 ms | 1458 ms | 721 ms | 0.98× | **1.99×** |
-| 100 ms | 5 MB/s | 4534 ms | 4536 ms | 2520 ms | 1.00× | **1.80×** |
+| Latency | Bandwidth per connection | seq | par | spec | hinted | par | spec | hinted |
+|---|---|---|---|---|---|---|---|---|
+| 0 ms | unlimited | 80 ms | 60 ms | 43 ms | 43 ms | 1.34× | 1.84× | 1.85× |
+| 20 ms | unlimited | 120 ms | 120 ms | 59 ms | 55 ms | 1.00× | **2.05×** | **2.18×** |
+| 100 ms | unlimited | 359 ms | 360 ms | 135 ms | 136 ms | 1.00× | **2.66×** | **2.65×** |
+| 100 ms | 20 MB/s | 1385 ms | 1385 ms | 720 ms | 720 ms | 1.00× | **1.92×** | **1.92×** |
+| 100 ms | 5 MB/s | 4537 ms | 4558 ms | 2540 ms | 2521 ms | 1.00× | **1.79×** | **1.80×** |
+
+`spec` and `hinted` build the same schedule, and their times agree. The 0 ms row is within the
+noise of the machine: an earlier run of the same binaries measured 57 ms for `seq`.
 
 This is the best case the audit found: a command that is a few independent requests and little
 else. With a bandwidth cap, the parallel time is bounded by the largest file (12 MB at 5 MB/s is
@@ -166,8 +186,5 @@ Phase II works: the code it runs in parallel is correct, and the overlap is real
 real synchronous code much less than Phase I helps async code. It needs hints to find anything,
 and where it finds something, other sequential work in the same command dilutes the gain. The
 largest gains sit where a command is a few independent requests and little else, as in tauri's
-`prepare_tools`: 2.3× on the real code, but only with two hints that state what psync cannot see
-through the helpers. The compiler pass of Phase I (`cargo psync build`) sees through helpers in
-async code. Doing the same for blocking calls, with per-argument effects that would show that
-`write_and_make_executable(&path, ..)` writes only `path` (roadmap item #152), would remove the
-`independent` hint. `speculate` would stay, because it states something about intent.
+`prepare_tools`: 2.0× to 2.7× on the real code once latency matters. With `cargo psync build`, it
+takes one hint, `speculate`, which states intent. The effects come from the compiler.

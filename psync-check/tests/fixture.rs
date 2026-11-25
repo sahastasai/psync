@@ -78,7 +78,16 @@ fn finds_effects_hidden_in_callees() {
     // report.
     assert!(!app.findings.iter().any(|f| f.function == "sizes"));
     assert!(!app.findings.iter().any(|f| f.function == "walk_then_read"));
-    assert_eq!(app.findings.len(), 8, "{:#?}", app.findings);
+    // `stash` writes the file it is given: the same file twice conflicts, two files do not.
+    assert!(
+        app.findings
+            .iter()
+            .any(|f| f.kind == "conflict" && f.function == "stash_same"),
+        "{:#?}",
+        app.findings
+    );
+    assert!(!app.findings.iter().any(|f| f.function == "stash_both"));
+    assert_eq!(app.findings.len(), 9, "{:#?}", app.findings);
     assert!(stderr.contains("concurrent level(s)"));
 
     // A second run finds nothing to recompile. Its findings must still be the same, and
@@ -133,6 +142,7 @@ fn finds_effects_hidden_in_callees() {
         "tour",
         "release",
         "boot",
+        "stash_same",
     ] {
         assert!(
             !app.functions.contains_key(sequential),
@@ -143,6 +153,13 @@ fn finds_effects_hidden_in_callees() {
     // `create_view` only reads: its two calls now overlap.
     assert_eq!(
         app.functions.get("views"),
+        Some(&(1, 0)),
+        "{:?}",
+        app.functions
+    );
+    // Each `stash` writes the file passed to it: the two different files overlap.
+    assert_eq!(
+        app.functions.get("stash_both"),
         Some(&(1, 0)),
         "{:?}",
         app.functions
@@ -194,11 +211,11 @@ fn fix_inserts_seq_hints_until_clean() {
     };
     let fixed = run("fix");
     assert!(
-        fixed.contains("inserted 7 `#[psync::seq]` hint(s)"),
+        fixed.contains("inserted 8 `#[psync::seq]` hint(s)"),
         "{fixed}"
     );
     let source = std::fs::read_to_string(work.join("app/src/lib.rs")).expect("source");
-    assert_eq!(source.matches("#[psync::seq]").count(), 7);
+    assert_eq!(source.matches("#[psync::seq]").count(), 8);
     assert!(
         source.contains("#[psync::seq]\n    for d in dirs"),
         "{source}"

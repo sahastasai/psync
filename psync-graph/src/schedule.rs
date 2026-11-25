@@ -472,7 +472,9 @@ pub(crate) fn emit(
             if sync {
                 // A job: the chain as a closure, run once, its panic caught with the member
                 // that raised it.
-                futures.push(quote!(let mut #f = ::core::option::Option::Some(|| { #body });));
+                futures.push(quote!(let mut #f = ::core::option::Option::Some(
+                    #krate::__private::job_at::<#level_id, #order, #exits, #spec, #indep, _>(|| { #body })
+                );));
                 let nones = slot_idents
                     .iter()
                     .map(|_| quote!(::core::option::Option::None));

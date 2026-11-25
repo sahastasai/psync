@@ -221,5 +221,5 @@ certificates for prefetched loops and exits.
 | 4. HTTP semantics | coarse service conflicts | small |
 | 7. processes and cwd | over-conservative processes; cwd hazard | small |
 | 5. staged writes, 6. cancellation | wasted work, writes waiting on exits | medium to large |
-| 8. compiler driver (built: `cargo psync check`, `build`, `fix`) | the token-level foundation | next: argument-precise effects |
-| 9. Lean model (scheduling built: `verify/Schedule.lean`) | the token-level foundation | exit replay, the server model and certified schedules built; next: footprint soundness |
+| 8. compiler driver (built: `cargo psync check`, `build`, `fix`; per-argument effects for synchronous helpers; synchronous levels checked) | the token-level foundation | next: per-argument effects through `async fn` coroutines; exit positions in the checker; paths computed by `join` in MIR |
+| 9. Lean model (scheduling built: `verify/Schedule.lean`) | the token-level foundation | exit replay, the server model, certified schedules and footprint soundness (with real compiler output through Charon) built |

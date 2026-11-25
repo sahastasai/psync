@@ -42,6 +42,22 @@ impl<F: Future + Unpin> MaybeDone<F> {
     }
 }
 
+/// A synchronous chain's job, tagged for `cargo psync check` as [`maybe_done_at`] tags a future.
+/// It returns the closure unchanged.
+#[inline(always)]
+pub fn job_at<
+    const LEVEL: usize,
+    const ORDER: usize,
+    const EXITS: bool,
+    const SPEC: bool,
+    const INDEP: bool,
+    F,
+>(
+    job: F,
+) -> F {
+    job
+}
+
 /// [`maybe_done`], tagged for `cargo psync check`: the chain belongs to level `LEVEL` of the
 /// enclosing function, starts at statement `ORDER`, may exit early (`EXITS`), and carries the
 /// `speculate` (`SPEC`) and `independent` (`INDEP`) hints. The tags cost nothing at run time.

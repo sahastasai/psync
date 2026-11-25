@@ -217,14 +217,29 @@ The rows that do not speed up are the interesting ones:
   are not treated as slow by default, and why the design calls for an adaptive loop that times the
   first item before handing out the rest.
 
+## Checked by the compiler
+
+Each job of a synchronous level is wrapped in `job_at::<LEVEL, ORDER, EXITS, SPEC, INDEP, _>(|| ..)`,
+which returns the closure unchanged. It is the marker `maybe_done_at` is for a future, so
+[`cargo psync check`](../safety/check.md) checks synchronous levels as it checks async ones. Before
+this marker, synchronous rewrites were not checked at all. Two differences:
+- the cancellation note does not apply, because a synchronous call cannot be dropped halfway;
+- with per-argument effects, a helper that writes the path it is given, such as
+  `stash("a.json", ..)` next to `stash("b.json", ..)`, is checked per file.
+
+`psync-check/tests/fixtures/hidden` has both cases: `stash_both` (two files, accepted) and
+`stash_same` (one file twice, a conflict that `cargo psync fix` resolves with `#[psync::seq]`).
+
+One imprecision remains. The checker knows whether a chain may exit, not where. A chain that
+ends in `r1?` after another chain's write is reported as a speculative write, although the write
+comes later in program order. The macro, which knows the order, schedules it correctly.
+
 ## Not yet
 
 - **Loops.** `for` and `while` in synchronous code are left as written. No prefetching or fission
   yet.
 - **Compiler facts.** `cargo psync build` records what each callee does, but the macro does not
   yet use those facts to decide which statements block, so helpers need `#[psync::par]`.
-- **`cargo psync check`** does not check synchronous levels yet. They carry none of the markers it
-  reads.
 - **The *thread* effect**, described above.
 - **The proof's last step.** The theorems are about whole statements, and threads interleave
   finer. The [soundness argument](./design.md#soundness-argument) explains why data-race freedom
