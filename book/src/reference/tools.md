@@ -18,6 +18,7 @@ cargo psync check [--deny] [--notes] [--facts] [CARGO CHECK ARGS...]
 cargo psync build [--deny] [--notes] [CARGO BUILD ARGS...]
 cargo psync fix [CARGO CHECK ARGS...]
 cargo psync summaries [CRATE] [--all]
+cargo psync pdg [FUNCTION]
 ```
 
 Checks `#[psync::graph]` rewrites against the compiled bodies of callees. Built from `psync-check/`

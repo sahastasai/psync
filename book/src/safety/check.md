@@ -14,6 +14,7 @@ cargo psync check            # warnings, like clippy's
 cargo psync check --deny     # findings are errors (exit status 1), for CI
 cargo psync check --notes    # also output order and shared Cell/RefCell/Mutex state
 cargo psync summaries        # what each function was found to do
+cargo psync pdg guarded      # its calls and awaits, and the branches that decide them
 ```
 
 It does not change the rewrite. It tells you where the rewrite is wrong, so you can fix it with a

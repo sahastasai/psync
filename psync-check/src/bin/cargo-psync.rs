@@ -4,6 +4,7 @@
 //! cargo psync check [--deny] [--notes] [CARGO CHECK ARGS...]
 //! cargo psync build [--deny] [--notes] [CARGO BUILD ARGS...]
 //! cargo psync summaries [CRATE] [--all]
+//! cargo psync pdg [FUNCTION]
 //! ```
 //!
 //! `check` runs `cargo check` with `psync-driver` as `RUSTC_WRAPPER`, in its own target directory
@@ -12,7 +13,9 @@
 //! After every check, a link step resolves `dyn` and generic trait calls over the whole build and
 //! writes the facts the macro can schedule with; `build` does that, checks the schedule the macro
 //! builds from the facts, and runs `cargo build` with them.
-//! `summaries` prints the summaries the last `check` computed.
+//! `summaries` prints the summaries the last `check` computed, and `pdg` the dependence graphs of
+//! the annotated functions and `async fn`s: their effects and awaits, each with the branches that
+//! decide whether it runs.
 
 use psync_check::{CrateFindings, CrateSummaries, Severity, env};
 use std::path::{Path, PathBuf};
@@ -26,6 +29,7 @@ USAGE:
     cargo psync build [--deny] [--notes] [CARGO BUILD ARGS...]
     cargo psync fix [CARGO CHECK ARGS...]
     cargo psync summaries [CRATE] [--all]
+    cargo psync pdg [FUNCTION]
 
 check       run `cargo check` with psync's driver; warn where a rewrite runs conflicting
             effects at once, writes before an earlier exit, or prefetches loop writes
@@ -37,6 +41,9 @@ build       compute the compiler's facts about every call in #[psync::graph] fun
             schedule, then `cargo build` with it
 fix         check, then insert `#[psync::seq]` before every statement or loop with a warning
             (review the result: `#[psync::speculate]` may be the better hint for idempotent writes)
+pdg         print, for each #[psync::graph] function and `async fn` the last `check` saw, its
+            calls with effects and its awaits, each with the branches it depends on
+  FUNCTION  only functions whose path contains this text
 summaries   print each function's effects as computed by the last `check`
   CRATE     only this crate (default: every crate with findings or rewrites)
   --all     include functions without effects but with opaque calls
@@ -53,6 +60,7 @@ fn main() -> ExitCode {
         Some("build") => build(&args[1..]),
         Some("fix") => fix(&args[1..]),
         Some("summaries") => summaries(&args[1..]),
+        Some("pdg") => pdg(&args[1..]),
         Some("-h" | "--help") | None => {
             print!("{USAGE}");
             ExitCode::SUCCESS
@@ -371,6 +379,29 @@ fn summaries(args: &[String]) -> ExitCode {
                     println!("    opaque: {o}");
                 }
             }
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+fn pdg(args: &[String]) -> ExitCode {
+    let wanted = args.iter().find(|a| !a.starts_with("--"));
+    let dir = psync_dir();
+    let mut crates: Vec<psync_check::pdg::CratePdg> = psync_check::read_all(&dir.join("pdg"));
+    if crates.is_empty() {
+        eprintln!(
+            "cargo psync: no dependence graphs in {}; run `cargo psync check` first",
+            dir.display()
+        );
+        return ExitCode::from(1);
+    }
+    crates.sort_by(|a, b| a.crate_name.cmp(&b.crate_name));
+    for krate in crates {
+        for f in &krate.functions {
+            if wanted.is_some_and(|w| !f.path.contains(w.as_str())) {
+                continue;
+            }
+            print!("{}", psync_check::pdg::render(f));
         }
     }
     ExitCode::SUCCESS

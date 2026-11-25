@@ -365,6 +365,67 @@ The whole loop:
    5. cargo build, PSYNC_FACTS                  the real build, the same schedule
 ```
 
+## Dependence graphs: which branch decides a call
+
+A summary says what a function may do. It does not say when. To find a function's critical path
+under each condition (board item #168), psync also needs to know which branch decides whether
+each call runs. That is **control dependence**, the second half of the program dependence graph
+([Related work](../reference/related.md#the-program-dependence-graph-ferrante-ottenstein-and-warren-1987)).
+After every `check`, the driver writes one for each `#[psync::graph]` function and local `async
+fn`, and for the closures and async blocks in them, to `target/psync/pdg`.
+`cargo psync pdg FUNCTION` prints them. For the fixture's `guarded`:
+
+```rust,ignore
+pub async fn guarded(path: &str) -> std::io::Result<()> {
+    let n = std::fs::read_to_string(path)?.len();
+    ready().await;
+    if n > 3 {
+        std::fs::write(path, "long")?;
+    }
+    Ok(())
+}
+```
+
+```text
+guarded::{closure#0}
+  b29  line 253  call std::fs::read_to_string  [read file (parameter 0)]
+  b7   line 254  call ready  if b2 (line 253, `?`) = ok
+  b13  line 254  await  if b2 (line 253, `?`) = ok
+  b16  line 256  call std::fs::write  [write file (parameter 0)]  if b15 (line 255, if) = true
+```
+
+Each line is a point of interest: a call with effects or into the crate, or an await. It shows the
+MIR block, the source line, and the branches the point depends on. `guarded::{closure#0}` is the
+coroutine that holds the `async fn`'s body. "Parameter 0" is its first capture, `path`.
+
+**The algorithm.** Block `n` is control dependent on the edge `a -> b` when every path from `b`
+to the exit passes `n` (`n` post-dominates `b`), and not every path from `a` does. Post-dominators
+are dominators of the reversed graph, computed from a virtual exit with Cooper, Harvey and
+Kennedy's iterative algorithm. Then, for each edge out of a branch, the walk goes up the
+post-dominator tree from the edge's target to the branch's own immediate post-dominator. Every
+block on the way depends on that edge (`psync-check/src/pdg.rs`, with unit tests for a diamond,
+an early return, a loop and a loop without exit). Dependence is direct. The write above depends
+on the `if`, and the `if` on the `?`, so the write runs only when both allow it.
+
+**Undoing the state machine.** `optimized_mir` of an async body is already a state machine. It
+starts with a switch on the saved state, and each `.await` stores a state and returns `Pending`.
+Read literally, everything would depend on that first switch (`switch = 0`, as the test shows
+when the undo is removed). Before computing dependence, the driver rebuilds the source-level flow:
+- the state switch is not a branch, and the first block goes only to the unresumed state's
+  target;
+- each suspension (`SetDiscriminant(state k)` followed by `return`) continues at the block the
+  switch sends state `k` to;
+- the `Poll` switch of an `.await`'s own polling loop is not a branch, and an await takes the
+  guards of the poll before it.
+
+Edges into cleanup blocks are left out, so unwinding is not a branch. Labels come from the
+switched value. An enum's variant names it (`Some`, `Err`), a `bool` is `true` or `false`, and a
+`?` (its `ControlFlow` switch, marked by the desugaring) is `ok` or `exits`.
+
+**Not yet.** Data edges between the points (which result flows into which call), the
+spawn/join/select structure of the macro's joins, and summaries of loops. Effects are written in
+terms of the body's own parameters. For a closure or async block, those are its captures.
+
 ## What is proved, and what is assumed
 
 - **Proved** (`verify/Footprint.lean`), for a fragment of MIR with places, assignments, `if`,
