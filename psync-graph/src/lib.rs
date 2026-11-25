@@ -281,6 +281,9 @@ pub struct LoopReport {
     pub changed: bool,
     /// Why the loop was left alone.
     pub reason: String,
+    /// For a prefetched loop whose items name their own files: `checked at run time`, or why
+    /// that could not be checked and distinct items are assumed.
+    pub check: String,
     /// First and last source line of the loop (0 when spans carry no location).
     pub line: usize,
     pub end_line: usize,
@@ -356,6 +359,7 @@ pub fn transform_fn(function: &mut ItemFn, options: &Options) -> Report {
         in_async: true,
         fresh: 0,
         refusal: None,
+        loop_check: String::new(),
     };
     rewriter.visit_block_mut(&mut function.block);
     if let Some(every) = options.yield_every {
@@ -525,8 +529,13 @@ pub fn explain(report: &Report) -> String {
     }
     for l in &report.loops {
         let what = if l.changed {
+            let check = if l.check.is_empty() {
+                String::new()
+            } else {
+                format!("; per-item files {}", l.check)
+            };
             format!(
-                "prefetch [{}], {} at a time",
+                "prefetch [{}], {} at a time{check}",
                 l.prefetched.join(", "),
                 l.bound
             )
@@ -935,6 +944,98 @@ mod tests {
         );
         // `other.toml` neither conflicts with the write nor is a write: it overlaps.
         assert!(r.regions[0].levels[0].len() >= 2);
+    }
+
+    #[test]
+    fn per_item_files_are_checked_at_run_time() {
+        let check = |f: ItemFn| {
+            let r = report(Options::parse(quote!(speculate)).unwrap(), f);
+            assert!(r.loops[0].changed, "{:?}", r.loops);
+            r.loops[0].check.clone()
+        };
+        // The path is computed from the item: evaluated ahead for every item.
+        let checked = |c: String| assert_eq!(c, "checked at run time");
+        checked(check(syn::parse_quote! {
+            async fn f(dir: &Path, names: &[String]) -> Result<(), E> {
+                for name in names {
+                    let path = dir.join(name);
+                    let old = tokio::fs::read_to_string(&path).await?;
+                    std::fs::write(&path, old)?;
+                }
+                Ok(())
+            }
+        }));
+        checked(check(syn::parse_quote! {
+            async fn f(names: &[String]) -> Result<(), E> {
+                for (i, name) in names.iter().enumerate() {
+                    tokio::fs::write(format!("{name}.json"), b"x").await?;
+                }
+                Ok(())
+            }
+        }));
+        // Only reads: nothing to check.
+        assert_eq!(
+            check(syn::parse_quote! {
+                async fn f(names: &[String]) -> Result<(), E> {
+                    for name in names {
+                        let s = tokio::fs::read_to_string(format!("{name}.json")).await?;
+                    }
+                    Ok(())
+                }
+            }),
+            ""
+        );
+        // Paths that cannot be evaluated ahead keep the assumption, and say why.
+        let assumed = |c: String, why: &str| {
+            assert!(c.starts_with("assumed distinct") && c.contains(why), "{c}")
+        };
+        assumed(
+            check(syn::parse_quote! {
+                async fn f(api: &Api, names: &[String]) -> Result<(), E> {
+                    for name in names {
+                        let path = api.locate(name).await?;
+                        tokio::fs::write(&path, b"x").await?;
+                    }
+                    Ok(())
+                }
+            }),
+            "computed in the body",
+        );
+        assumed(
+            check(syn::parse_quote! {
+                async fn f(paths: &[PathBuf]) -> Result<(), E> {
+                    for i in 0..paths.len() {
+                        tokio::fs::write(&paths[i], b"x").await?;
+                    }
+                    Ok(())
+                }
+            }),
+            "may panic",
+        );
+        assumed(
+            check(syn::parse_quote! {
+                async fn f(pairs: Vec<(String, u8)>) -> Result<(), E> {
+                    for (mut name, n) in pairs {
+                        tokio::fs::write(&name, [n]).await?;
+                    }
+                    Ok(())
+                }
+            }),
+            "`mut`",
+        );
+        // `independent` is the programmer's word for it.
+        assert_eq!(
+            check(syn::parse_quote! {
+                async fn f(names: &[String]) -> Result<(), E> {
+                    #[psync::independent]
+                    for name in names {
+                        tokio::fs::write(format!("{name}.json"), b"x").await?;
+                    }
+                    Ok(())
+                }
+            }),
+            ""
+        );
     }
 
     #[test]

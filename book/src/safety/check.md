@@ -280,8 +280,9 @@ warnings. The findings summary covers only crates recompiled in this run.
 - **Targets computed at run time.** `fs::write(&path)` writes "some file". Two such writes
   conflict, even when the paths differ at run time.
 - **Loop items naming different objects.** The macro assumes that targets computed from the loop
-  item differ between iterations. The driver does not check this yet. The roadmap's runtime target
-  checks would.
+  item differ between iterations. For files whose path it can evaluate ahead, the generated code
+  checks this at run time instead ([Loop rewriting](../internals/loops.md#checking-per-item-files)).
+  Other targets are still assumed.
 - **Calls it cannot see through**: function pointers, `dyn` methods of other crates, FFI, drop glue
   (`Drop` impls), and the internals of async runtimes.
 - **Verbs of other crates' APIs are still names.** `kube::Api::list` reads because its name says

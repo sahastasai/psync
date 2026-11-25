@@ -34,6 +34,8 @@ pub(crate) struct Rewriter<'a> {
     pub fresh: usize,
     /// Why the last loop statement could not run ahead, for the loop's report.
     pub refusal: Option<String>,
+    /// How the last prefetched loop's per-item files are kept apart, for its report.
+    pub loop_check: String,
 }
 
 impl VisitMut for Rewriter<'_> {

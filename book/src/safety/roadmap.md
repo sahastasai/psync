@@ -40,6 +40,11 @@ and optionally after `canonicalize` (one extra syscall per path).
 **Result.** The loop assumption becomes a check, and computed targets stop blocking concurrency.
 **Cost.** Code size, one comparison per pair, and the rule that target expressions must be pure.
 
+**Status.** Built for loops and files ([Checking per-item files](../internals/loops.md#checking-per-item-files)).
+When every per-item path can be evaluated ahead, the items' paths are compared before the loop
+starts, and with a duplicate the loop runs as written. A canonicalizing option, other domains and
+the straight-line branch above are next.
+
 ## 2. Effect contracts checked by the type system
 
 **Problem.** Names lie. `cache.get(k)` may write a refresh, and `factory.create(..)` may only build a
@@ -215,11 +220,11 @@ certificates for prefetched loops and exits.
 
 | Step | Closes | Effort |
 |---|---|---|
-| 1. runtime target checks | the duplicate-item assumption, computed paths | small: code generation only |
+| 1. runtime target checks (built for loop files) | the duplicate-item assumption, computed paths | small: straight-line paths and other domains next |
 | 3. effect sanitizer (middleware + differential traces) | everything the static model misses, in tests | medium |
 | 2. type-checked effect contracts | lying names | medium, ongoing per ecosystem |
 | 4. HTTP semantics | coarse service conflicts | small |
 | 7. processes and cwd | over-conservative processes; cwd hazard | small |
 | 5. staged writes, 6. cancellation | wasted work, writes waiting on exits | medium to large |
-| 8. compiler driver (built: `cargo psync check`, `build`, `fix`; per-argument effects for synchronous helpers; synchronous levels checked) | the token-level foundation | per-argument effects also through `async fn` coroutines; next: exit positions in the checker; paths computed by `join` in MIR; async closures |
+| 8. compiler driver (built: `cargo psync check`, `build`, `fix`; per-argument effects for synchronous helpers; synchronous levels checked) | the token-level foundation | per-argument effects also through `async fn` coroutines; exit positions in the checker; next: paths computed by `join` in MIR; async closures |
 | 9. Lean model (scheduling built: `verify/Schedule.lean`) | the token-level foundation | exit replay, the server model, certified schedules and footprint soundness (with real compiler output through Charon) built |

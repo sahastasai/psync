@@ -84,6 +84,59 @@ Two parts of this shape exist because of real compile failures:
 Futures are lazy, so collecting them starts nothing. `join_all_bounded` starts at most `bound` at a
 time.
 
+## Checking per-item files
+
+Prefetching runs item 3's prefix before item 2's rest. That is safe when each item touches its own
+files, which a list with duplicates breaks:
+
+```rust,ignore
+for name in names {
+    let path = dir.join(name);
+    let old: u32 = fs::read_to_string(&path).await?.parse()?;
+    std::fs::write(&path, (old + 1).to_string())?;
+}
+```
+
+Run ahead over `["a", "b", "a"]`, both reads of `a` see `0`, and `a` ends at `1` instead of `2`.
+So when a file the loop touches is computed from the item, and the prefix touches one of them,
+and one is written, the macro evaluates those paths for every item before it starts any:
+
+```rust,ignore
+let __psync_iter: Vec<_> = IntoIterator::into_iter(<iter>).collect();
+let __psync_distinct: bool = {
+    let mut __psync_seen = HashMap::<PathBuf, bool>::new();   // path -> written
+    __psync_iter.iter().all(|__psync_r| {
+        let <pat> = __psync_r;                                // the item's names, by reference
+        // each path, e.g. `&(dir.join(name))`, normalized; then: no path that another item
+        // also touches, where either writes it
+    })
+};
+if __psync_distinct { <the prefetched loop> } else { <the loop as written> }
+```
+
+The paths that count are the prefix's (reads and writes) and the rest's writes. Two reads of one
+file do not need ordering. A path is compared after `Path::components`, which drops `.` and
+repeated separators, so `dir/./a` and `dir/a` are one file. Symlinks, hard links, case-folding
+file systems and a relative path against an absolute one can still make two different strings
+name one file. That is the same assumption psync makes for two different literals.
+
+A path is evaluated ahead only when that is harmless:
+- it is **total**: names, fields, references, `format!`, `join`, `with_extension`, `to_path_buf`
+  and the like, and `Path::new`/`PathBuf::from`. There is no indexing, no arithmetic, and no other
+  call, because evaluating it for an item the loop never reaches must not panic;
+- it depends only on the **loop pattern**, or on a `let` in the body bound once to a total value
+  (`let path = dir.join(name)`), which is substituted;
+- the pattern can bind **by reference**, which `mut` inside a tuple pattern prevents.
+
+When one of these fails, as for `let path = api.locate(name).await?`, distinct items are
+assumed, as before. The report says which: `psync-expand` prints `per-item files checked at run
+time`, or `per-item files assumed distinct: the path ... depends on `path`, computed in the
+body`. `#[psync::independent]` on the loop skips the check. Only files are checked. A per-item
+target in another domain, such as a service object or an environment variable, is still assumed
+to differ between items.
+
+`tests/targets.rs` runs both cases. Without the check, a file named twice ends at `1`.
+
 ## Fission
 
 `fission_with(head, label, attrs, pattern, body)`:

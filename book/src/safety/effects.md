@@ -165,8 +165,12 @@ the same in every iteration:
 - a prefetched read that conflicts with such a write elsewhere in the body is refused too.
 
 If two items can name the same object, for example a list with duplicates, the assumption is
-false. Deduplicate first (the fission pattern from `jdx/mise` does exactly this), or mark the loop
-`#[psync::seq]`.
+false. For files, psync checks it at run time. When every per-item path can be evaluated ahead
+(`dir.join(name)`, `format!("{name}.json")`), the generated code compares the paths of all items
+first and runs the loop as written if two items share a file that one of them writes
+([Loop rewriting](../internals/loops.md#checking-per-item-files)). For other targets, or a path that
+comes from awaited work, deduplicate first (the fission pattern from `jdx/mise` does exactly
+this), or mark the loop `#[psync::seq]`.
 
 ## Hints and options
 

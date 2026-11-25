@@ -370,6 +370,7 @@ impl Rewriter<'_> {
                     bound,
                     changed: true,
                     reason: String::new(),
+                    check: std::mem::take(&mut self.loop_check),
                 });
                 Some(expr)
             }
@@ -413,6 +414,7 @@ impl Rewriter<'_> {
                     bound,
                     changed: true,
                     reason: String::new(),
+                    check: std::mem::take(&mut self.loop_check),
                 });
                 Some(expr)
             }
@@ -446,6 +448,20 @@ impl Rewriter<'_> {
                 .take()
                 .unwrap_or_else(|| "no awaited statement can run ahead".into()));
         }
+        let check = target_check(
+            &f.pat,
+            &pattern,
+            &f.body,
+            &prefix,
+            &rest,
+            &scope,
+            &self.scope.effects,
+        );
+        self.loop_check = match &check {
+            Ok(Some(_)) => "checked at run time".into(),
+            Ok(None) => String::new(),
+            Err(why) => format!("assumed distinct: {why}"),
+        };
         // The prefix runs as one chain per item; its bindings flow into the rest of the body.
         let krate = self.options.krate.clone();
         let rest_mentions: Set = rest
@@ -478,8 +494,7 @@ impl Rewriter<'_> {
         let loop_id = proc_macro2::Literal::usize_unsuffixed(self.next());
         let (terminates, speculate, independent) =
             (scope.terminates, scope.speculate, scope.independent);
-        let tokens = quote! {{
-            let __psync_iter = #iter;
+        let prefetched_tokens = quote! {{
             let __psync_each = #krate::__private::over_at::<#loop_id, #terminates, #speculate, #independent, _, _, _>(&__psync_iter, async |#pat| { #chain });
             // The futures are created here, not in a generic helper, and before the await: rustc
             // can then prove the state held across the await `Send` even when items carry
@@ -495,6 +510,24 @@ impl Rewriter<'_> {
                 #(#rest_stmts)*
             }
         }};
+        let tokens = match check {
+            // Two items share a file one of them writes: the loop as written.
+            Ok(Some(distinct)) => {
+                let mut original = f.clone();
+                original.expr = syn::parse_quote!(__psync_iter);
+                original.attrs.retain(|a| !is_psync_attr(a, "independent"));
+                quote! {{
+                    let __psync_iter: #krate::__private::Vec<_> =
+                        ::core::iter::IntoIterator::into_iter(#iter).collect();
+                    let __psync_distinct: bool = #distinct;
+                    if __psync_distinct #prefetched_tokens else { #original }
+                }}
+            }
+            _ => quote! {{
+                let __psync_iter = #iter;
+                #prefetched_tokens
+            }},
+        };
         let prefetched = prefix.iter().map(|n| n.label.clone()).collect();
         Ok((
             syn::parse2(tokens).expect("psync::graph generated an invalid loop"),
@@ -897,4 +930,260 @@ impl Rewriter<'_> {
         };
         Some((guard, Stmt::Expr(rewritten, *semi)))
     }
+}
+
+/// Methods whose call on a total receiver neither panics nor touches anything: what a file
+/// path is usually built with.
+const TOTAL_METHODS: &[&str] = &[
+    "clone",
+    "to_string",
+    "to_owned",
+    "as_ref",
+    "as_str",
+    "as_path",
+    "as_os_str",
+    "to_path_buf",
+    "join",
+    "with_extension",
+    "with_file_name",
+    "path",
+];
+
+/// An expression that can be evaluated once more, ahead of the loop, for every item: it has no
+/// effect and cannot panic (no indexing, no arithmetic, no unknown call).
+fn total(e: &Expr) -> bool {
+    match e {
+        Expr::Lit(_) | Expr::Path(_) => true,
+        Expr::Field(f) => total(&f.base),
+        Expr::Reference(r) => r.mutability.is_none() && total(&r.expr),
+        Expr::Paren(p) => total(&p.expr),
+        Expr::Group(g) => total(&g.expr),
+        Expr::MethodCall(m) => {
+            TOTAL_METHODS.contains(&m.method.to_string().as_str())
+                && total(&m.receiver)
+                && m.args.iter().all(total)
+        }
+        Expr::Call(c) => {
+            let Expr::Path(p) = &*c.func else {
+                return false;
+            };
+            let s: Vec<String> = p
+                .path
+                .segments
+                .iter()
+                .map(|s| s.ident.to_string())
+                .collect();
+            matches!(
+                s.iter().map(String::as_str).collect::<Vec<_>>()[..],
+                [.., "Path" | "OsStr", "new"] | [.., "PathBuf" | "OsString" | "String", "from"]
+            ) && c.args.len() == 1
+                && c.args.iter().all(total)
+        }
+        Expr::Macro(m) if m.mac.path.is_ident("format") => {
+            use syn::parse::Parser;
+            let Ok(args) = syn::punctuated::Punctuated::<Expr, syn::Token![,]>::parse_terminated
+                .parse2(m.mac.tokens.clone())
+            else {
+                return false;
+            };
+            let mut args = args.iter();
+            matches!(
+                args.next(),
+                Some(Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Str(_),
+                    ..
+                }))
+            ) && args.all(|a| match a {
+                Expr::Assign(a) => total(&a.right),
+                a => total(a),
+            })
+        }
+        _ => false,
+    }
+}
+
+/// Replace the names bound by `lets` in `tokens` with their values, in parentheses.
+fn substitute(
+    tokens: TokenStream,
+    lets: &std::collections::HashMap<String, TokenStream>,
+) -> TokenStream {
+    use proc_macro2::{Delimiter, Group, TokenTree};
+    let trees: Vec<TokenTree> = tokens.into_iter().collect();
+    let punct =
+        |t: Option<&TokenTree>, c: char| matches!(t, Some(TokenTree::Punct(p)) if p.as_char() == c);
+    let mut out = TokenStream::new();
+    for (i, t) in trees.iter().enumerate() {
+        let (prev, next) = (
+            i.checked_sub(1).and_then(|j| trees.get(j)),
+            trees.get(i + 1),
+        );
+        match t {
+            TokenTree::Ident(id)
+                if lets.contains_key(&id.to_string())
+                    && !punct(prev, '.')
+                    && !punct(prev, ':')
+                    && !punct(next, ':')
+                    && !punct(next, '!')
+                    && (!punct(next, '=') || punct(trees.get(i + 2), '=')) =>
+            {
+                out.extend([TokenTree::Group(Group::new(
+                    Delimiter::Parenthesis,
+                    lets[&id.to_string()].clone(),
+                ))]);
+            }
+            TokenTree::Group(g) => {
+                let mut ng = Group::new(g.delimiter(), substitute(g.stream(), lets));
+                ng.set_span(g.span());
+                out.extend([TokenTree::Group(ng)]);
+            }
+            t => out.extend([t.clone()]),
+        }
+    }
+    out
+}
+
+/// Every name a pattern binds, with repetitions (`visit` sees each binding once).
+fn binding_counts(
+    body: &Block,
+    pattern: &[(Ident, bool)],
+) -> std::collections::HashMap<String, usize> {
+    struct V(std::collections::HashMap<String, usize>);
+    impl<'ast> syn::visit::Visit<'ast> for V {
+        fn visit_pat_ident(&mut self, p: &'ast syn::PatIdent) {
+            *self.0.entry(p.ident.to_string()).or_default() += 1;
+            syn::visit::visit_pat_ident(self, p);
+        }
+    }
+    let mut v = V(Default::default());
+    for (i, _) in pattern {
+        *v.0.entry(i.to_string()).or_default() += 1;
+    }
+    syn::visit::Visit::visit_block(&mut v, body);
+    v.0
+}
+
+/// The runtime check that the items of a prefetched loop name different files.
+///
+/// Prefetching runs the prefix of later items before the rest of earlier ones, which is safe when
+/// each item touches its own files. When the files depend on the item (`fs::write(dir.join(name))`),
+/// the generated code first evaluates every such path for every item and runs the loop as
+/// written when two items share one and either writes it. `Ok(None)`: nothing to check;
+/// `Err(why)`: a path cannot be evaluated ahead, so distinct items are assumed, as before.
+fn target_check(
+    pat: &syn::Pat,
+    pattern: &[(Ident, bool)],
+    body: &Block,
+    prefix: &[Node],
+    rest: &[Stmt],
+    scope: &LoopScope,
+    config: &effects::Config,
+) -> Result<Option<TokenStream>, String> {
+    if scope.independent {
+        return Ok(None);
+    }
+    let per_item =
+        |e: &&Effect| e.domain == effects::Domain::Fs && e.target.mentions_any(&scope.local);
+    let ahead: Vec<&Effect> = prefix
+        .iter()
+        .flat_map(|n| &n.effects)
+        .filter(per_item)
+        .collect();
+    let rest_effects = body_effects(rest, config);
+    let behind: Vec<&Effect> = rest_effects
+        .iter()
+        .filter(per_item)
+        .filter(|e| e.writes())
+        .collect();
+    let keyed: Vec<&Effect> = ahead.iter().chain(&behind).copied().collect();
+    if ahead.is_empty() || !keyed.iter().any(|e| e.writes()) {
+        return Ok(None);
+    }
+    // In a pattern that is not a plain name, `mut` cannot bind through the reference the check
+    // matches against.
+    if !matches!(pat, syn::Pat::Ident(_)) && pattern.iter().any(|(_, m)| *m) {
+        return Err("the loop pattern binds `mut`".into());
+    }
+    // `let p = dir.join(name);` in the body: `p` stands for its value, if it is bound only there.
+    let counts = binding_counts(body, pattern);
+    let mut lets: std::collections::HashMap<String, TokenStream> = Default::default();
+    for s in &body.stmts {
+        let Stmt::Local(l) = s else { continue };
+        let p = match &l.pat {
+            syn::Pat::Type(t) => &*t.pat,
+            p => p,
+        };
+        if let (syn::Pat::Ident(id), Some(init)) = (p, &l.init)
+            && id.by_ref.is_none()
+            && id.subpat.is_none()
+            && init.diverge.is_none()
+            && counts.get(&id.ident.to_string()) == Some(&1)
+        {
+            let value = substitute(init.expr.to_token_stream(), &lets);
+            if syn::parse2::<Expr>(value.clone()).is_ok_and(|e| total(&e)) {
+                lets.insert(id.ident.to_string(), value);
+            }
+        }
+    }
+    let names: Set = pattern.iter().map(|(i, _)| i.to_string()).collect();
+    let mut keys = Vec::new();
+    for e in keyed {
+        let Some(source) = &e.source else {
+            return Err(format!("the path of `{}` is not in the source", e.op));
+        };
+        let Ok(tokens) = source.parse::<TokenStream>() else {
+            return Err(format!("the path `{source}` does not parse"));
+        };
+        let value = substitute(tokens, &lets);
+        let Ok(expr) = syn::parse2::<Expr>(value) else {
+            return Err(format!("the path `{source}` does not parse"));
+        };
+        if !total(&expr) {
+            return Err(format!(
+                "the path `{source}` may panic or have effects when evaluated ahead"
+            ));
+        }
+        let used = mentions(expr.to_token_stream());
+        if let Some(n) = used
+            .iter()
+            .find(|n| scope.local.contains(*n) && !names.contains(*n))
+        {
+            return Err(format!(
+                "the path `{source}` depends on `{n}`, computed in the body"
+            ));
+        }
+        let writes = e.writes();
+        keys.push(quote!((&(#expr), #writes)));
+    }
+    let keys = keys.into_iter();
+    Ok(Some(quote! {{
+        let mut __psync_seen = ::std::collections::HashMap::<::std::path::PathBuf, bool>::new();
+        __psync_iter.iter().all(|__psync_r| {
+            #[allow(unused_variables, unused_mut)]
+            let #pat = __psync_r;
+            let mut __psync_mine = ::std::vec::Vec::<(::std::path::PathBuf, bool)>::new();
+            #({
+                let (__psync_p, __psync_w) = #keys;
+                let __psync_k: ::std::path::PathBuf =
+                    ::std::path::Path::new(__psync_p)
+                        .components()
+                        .filter(|c| !::core::matches!(c, ::std::path::Component::CurDir))
+                        .collect();
+                match __psync_mine.iter_mut().find(|(k, _)| *k == __psync_k) {
+                    ::core::option::Option::Some(m) => m.1 |= __psync_w,
+                    ::core::option::Option::None => __psync_mine.push((__psync_k, __psync_w)),
+                }
+            })*
+            __psync_mine.into_iter().all(|(k, w)| match __psync_seen.get_mut(&k) {
+                ::core::option::Option::Some(seen) => {
+                    let ok = !(*seen || w);
+                    *seen |= w;
+                    ok
+                }
+                ::core::option::Option::None => {
+                    __psync_seen.insert(k, w);
+                    true
+                }
+            })
+        })
+    }}))
 }
