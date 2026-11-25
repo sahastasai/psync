@@ -148,6 +148,9 @@ pub struct PdgNode {
     /// What the call does, as the summaries describe it (`write file arg 0`).
     pub effects: Vec<String>,
     pub guards: Vec<Guard>,
+    /// The calls (by block) whose results flow into this call's arguments.
+    #[serde(default)]
+    pub uses: Vec<usize>,
 }
 
 /// A branch: where it is and what it tests.
@@ -156,6 +159,9 @@ pub struct PdgBranch {
     pub block: usize,
     pub line: usize,
     pub test: String,
+    /// The calls (by block) whose results the test depends on.
+    #[serde(default)]
+    pub uses: Vec<usize>,
 }
 
 /// The dependence graph of one body (a function, closure or async block).
@@ -180,6 +186,12 @@ pub struct CratePdg {
 ///   b5  line 62  call std::fs::write  [write file arg 1]  if b3 (line 60, match on `Result`) = Ok
 /// ```
 pub fn render(f: &FnPdg) -> String {
+    let blocks = |bs: &[usize]| {
+        bs.iter()
+            .map(|b| format!("b{b}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
     let mut out = format!("{}\n", f.path);
     for n in &f.nodes {
         let what = match n.kind.as_str() {
@@ -197,6 +209,14 @@ pub fn render(f: &FnPdg) -> String {
             .map(|g| {
                 let b = f.branches.iter().find(|b| b.block == g.branch);
                 match b {
+                    Some(b) if !b.uses.is_empty() => format!(
+                        "b{} (line {}, {} on {}) = {}",
+                        g.branch,
+                        b.line,
+                        b.test,
+                        blocks(&b.uses),
+                        g.label
+                    ),
                     Some(b) => format!("b{} (line {}, {}) = {}", g.branch, b.line, b.test, g.label),
                     None => format!("b{} = {}", g.branch, g.label),
                 }
@@ -207,8 +227,13 @@ pub fn render(f: &FnPdg) -> String {
         } else {
             format!("  if {}", guards.join(" and "))
         };
+        let uses = if n.uses.is_empty() {
+            String::new()
+        } else {
+            format!("  uses {}", blocks(&n.uses))
+        };
         out += &format!(
-            "  b{:<3} line {:<4} {what}{effects}{guards}\n",
+            "  b{:<3} line {:<4} {what}{effects}{uses}{guards}\n",
             n.block, n.line
         );
     }

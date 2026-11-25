@@ -53,17 +53,31 @@ fn finds_effects_hidden_in_callees() {
     // In `guarded` (not rewritten), what follows the read runs only when its `?` did not leave,
     // and the write only when `n > 3` (a guard of the `if`, so through it also of the `?`).
     let guarded = body("guarded::{closure#0}");
+    let read = find(&guarded, "call std::fs::read_to_string");
+    let read_block = read.split_whitespace().next().unwrap().to_string();
+    let after_ok = format!("`?` on {read_block}) = ok");
     assert!(
-        find(&guarded, "call ready").contains("`?`) = ok"),
+        find(&guarded, "call ready").contains(&after_ok),
         "{guarded:#?}"
     );
+    assert!(find(&guarded, "await").contains(&after_ok), "{guarded:#?}");
+    // The `if` tests `n`, computed from what the read returned.
+    let write = find(&guarded, "call std::fs::write");
     assert!(
-        find(&guarded, "await").contains("`?`) = ok"),
+        write.contains(&format!(", if on {read_block}) = true")),
         "{guarded:#?}"
     );
+    // In `chained`, the read's result reaches the write across the await; `ready` uses nothing.
+    let chained = body("chained::{closure#0}");
+    let read = find(&chained, "call std::fs::read_to_string");
+    let read_block = read.split_whitespace().next().unwrap().to_string();
     assert!(
-        find(&guarded, "call std::fs::write").contains(", if) = true"),
-        "{guarded:#?}"
+        find(&chained, "call std::fs::write").contains(&format!("uses {read_block}")),
+        "{chained:#?}"
+    );
+    assert!(
+        !find(&chained, "call ready").contains("uses"),
+        "{chained:#?}"
     );
     // `keep` writes its first parameter after an await; each caller's write names its file.
     let keep = body("keep::{closure#0}");
