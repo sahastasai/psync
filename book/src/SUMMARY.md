@@ -72,3 +72,4 @@
 - [API reference (Rustdoc)](./reference/api.md)
 - [Environment variables and tools](./reference/tools.md)
 - [Glossary](./reference/glossary.md)
+- [Related work: dependence and diagnosis](./reference/related.md)
