@@ -205,3 +205,42 @@ Limits:
 `tests/targets.rs` runs a read of `src` and a write of `dst`. With two files they overlap. With
 one file, written as `dir/./a` and `dir/a`, the write waits. Without the gate, the read returns the
 new contents.
+
+## Exercises
+
+1. Predict the chains and levels of this function, and its time, where `io(d, v)` waits `d`
+   and returns `v`:
+
+   ```rust,ignore
+   #[graph]
+   async fn crossing() -> (u32, u32) {
+       let a1 = io(T, 1).await;
+       let a2 = io(3 * T, 2).await;
+       let b1 = io(3 * T, a1 + 10).await;
+       let b2 = io(T, a1 + a2).await;
+       (b1, b2)
+   }
+   ```
+
+   What would a dataflow schedule, where every node starts when its inputs are ready, take?
+2. Change `b2` to `io(T, a2 + 1)`. What changes, and how long does it take now?
+3. In the `key` / `resp` / `cache.insert` example, `key` has two successors. Which condition lets
+   it fuse anyway, and why would that fail if `key` were `let key = store.next_id().await;`?
+
+<details>
+<summary>Answers</summary>
+
+1. `a1` has two successors (`b1` and `b2`), so neither edge fuses. `level 0: n0 || n1`, then
+   `level 1: n2 || n3`. Level 0 takes 3T (it waits for `a2`), and level 1 takes 3T (for `b1`):
+   6T, against 8T sequentially. A dataflow schedule would start `b1` when `a1` ends, at T, and
+   finish both at 4T. The test `book_levels_wait_for_all_their_chains` in `tests/graph.rs`
+   checks the 6T.
+2. Each `a` now has one successor, so both pairs fuse: `level 0: n0->n2 || n1->n3`, two chains of
+   4T each, so 4T. That is also the dataflow time: fusion is what removes the cost of levels
+   for per-item pipelines.
+3. The second case of fusion: `key` does not await, and the other successor, `cache.insert`,
+   waits for `resp` anyway. With `next_id().await`, `key` awaits, so only the single-successor
+   case could apply, and it has two. `key` ends its chain, `resp` gets level 1, and `insert`,
+   whose predecessors are now in two chains, level 2.
+
+</details>
