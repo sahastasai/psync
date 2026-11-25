@@ -163,6 +163,7 @@ async fn with_lock(state: &Mutex<State>, api: &Api) -> u32 {
     n3: c = three() [await]
     n0 -> n1 (writes `guard.count`)
     level 0: n0->n1 || n2 || n3
+  unclassified (assumed to read; `strict` treats them as writes): two, three
   barrier: line 3: `let mut guard = state . lock () . await ;`: awaits `lock`, whose position is meaningful
 ```
 
@@ -227,13 +228,14 @@ async fn send_both(tx: &Sender<u32>, api: &Api) {
   region 0:
     n0: a = one() [await]
     n1: b = two() [await]
-    n2: send() [await]
-    n3: send() [await]
+    n2: send() [await] {write `tx` `a` (send)}
+    n3: send() [await] {write `tx` `b` (send)}
     n0 -> n2 (reads `a`)
     n1 -> n3 (reads `b`)
     n2 -> n3 (writes `tx`)
     level 0: n0->n2 || n1
     level 1: n3
+  unclassified (assumed to read; `strict` treats them as writes): one, two
 ```
 
 Both requests run together, and `a` is sent as soon as it arrives. `b` is still sent second. The
@@ -250,3 +252,48 @@ After the rewrite:
 
 What can differ is **work that the sequential code would have skipped after an exit**. That is the
 speculation you opt into with the attribute, and the next chapters come back to it.
+
+## Exercises
+
+Predict the report, then check with `psync-expand FILE LINE`
+([Environment variables and tools](../reference/tools.md)) on a file holding the function. The
+types need not exist: the macro reads tokens.
+
+1. In `profile_page`, change the second line to `let posts = api.posts(user.id).await?;`. Which
+   edges are there now? How many levels? If every call takes time T, how long does the function
+   take, against 4T sequentially?
+2. In `chains`, change `b1` to `let b1 = io(2 * T, a1 + a2).await;`. Which chains and levels
+   does psync build? How long does the function take now, and how long sequentially?
+3. Put `let t = std::time::Instant::now();` between `b` and `c` in this function:
+
+   ```rust,ignore
+   async fn with_clock(api: &Api) -> u32 {
+       let a = api.one().await;
+       let b = api.two().await;
+       let c = api.three().await;
+       let d = api.four().await;
+       a + b + c + d
+   }
+   ```
+
+   How many regions are there, and which calls run together?
+4. In `send_both`, send `b` on a second channel, `rx.send(b).await`. What happens to the edge
+   `n2 -> n3`, and to the levels?
+
+<details>
+<summary>Answers</summary>
+
+1. Two edges: `n0 -> n1` and `n0 -> n2` (both read `user`). `n0` now has two successors, so it
+   fuses with neither, and there are two levels: `n0 || n3`, then `n1 || n2`. That takes 2T,
+   against 4T sequentially.
+2. `b1` now reads both `a1` and `a2`, so it can join neither chain. `b2` reads `a2`, but `a2` now
+   has two successors, so it does not fuse either. There are two levels, `n0 || n1` and then
+   `n2 || n3`. That takes max(T, 2T) + max(2T, T) = 4T, against 6T sequentially. This is also the
+   best any schedule can do here, because `b1` cannot start before `a2` ends at 2T.
+3. Two regions, because reading the clock is a barrier. `a || b` run together before it, and
+   `c || d` after it. The clock reads the time between the two pairs, as it did sequentially.
+4. The edge disappears: the two sends are on different receivers. The level becomes
+   `n0->n2 || n1->n3`: each value is sent as soon as it arrives. The side effects in braces,
+   ``{write `rx` `b` (send)}``, name the receiver each send writes to.
+
+</details>

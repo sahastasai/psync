@@ -115,3 +115,12 @@ for psync. It must contain no `sorry`. Lean prints a warning for each one, and C
 `lean verify/Schedule.lean`. The proofs use only Lean's core library, so the file checks in
 about a second with no downloads. Update the theorem table in `verify/README.md` and in
 [Proofs](../foundations/proofs.md).
+
+## The book's examples
+
+A Rust example in the book that is directly followed by a `text` block holding a report (one
+that starts with `region`) is checked in CI. `scripts/check-book-examples.py` runs `psync-expand`
+on the example and compares its explanation with the block, line for line. When a change to the
+macro changes a report, run the script, and paste what it prints into the chapter. If the report
+belongs to a function the book does not show, show the function. A reader must be able to
+reproduce every report.
