@@ -1124,8 +1124,43 @@ impl<'tcx> Analyzer<'tcx> {
                     }
                 }
             }
-            let f = self.body_pdg(def_id, body);
-            if !f.nodes.is_empty() {
+            let mut f = self.body_pdg(def_id, body);
+            // What the macro made concurrent here, by the bodies whose graphs follow.
+            let (levels, prefixes) = markers(tcx, def_id);
+            let name = |d: DefId| {
+                if tcx.is_closure_like(d) {
+                    tcx.def_path_str(d)
+                } else {
+                    display_path(tcx, d)
+                }
+            };
+            f.joins = levels
+                .into_iter()
+                .map(|(level, chains)| psync_check::pdg::PdgJoin {
+                    level,
+                    chains: chains
+                        .iter()
+                        .map(|c| psync_check::pdg::PdgChain {
+                            path: name(c.body),
+                            first: c.order,
+                            last: c.last,
+                            exits: c.exits,
+                            speculate: c.spec,
+                            independent: c.indep,
+                            sync: c.sync,
+                        })
+                        .collect(),
+                })
+                .collect();
+            f.prefetches = prefixes
+                .iter()
+                .map(|p| psync_check::pdg::PdgPrefetch {
+                    path: name(p.body),
+                    terminates: p.terminates,
+                    speculate: p.spec,
+                })
+                .collect();
+            if !f.nodes.is_empty() || !f.joins.is_empty() || !f.prefetches.is_empty() {
                 functions.push(f);
             }
         }
@@ -1511,6 +1546,8 @@ impl<'tcx> Analyzer<'tcx> {
             },
             nodes,
             branches,
+            joins: Vec::new(),
+            prefetches: Vec::new(),
         }
     }
 
@@ -1967,7 +2004,14 @@ impl<'a, 'tcx> Checker<'a, 'tcx> {
 
     /// The tagged levels and loop prefixes in one body.
     fn markers(&self, def_id: DefId) -> (Vec<(u64, Vec<Chain>)>, Vec<Prefix>) {
-        let tcx = self.analyzer.tcx;
+        markers(self.analyzer.tcx, def_id)
+    }
+}
+
+/// What the macro made concurrent in one body, read back from its markers: each join's chains
+/// (`maybe_done_at`, `job_at`), by level, and each prefetched loop prefix (`over_at`).
+fn markers(tcx: TyCtxt<'_>, def_id: DefId) -> (Vec<(u64, Vec<Chain>)>, Vec<Prefix>) {
+    {
         let body = tcx.optimized_mir(def_id);
         let mut levels: Vec<(u64, Vec<Chain>)> = Vec::new();
         let mut prefixes = Vec::new();
@@ -2053,7 +2097,9 @@ impl<'a, 'tcx> Checker<'a, 'tcx> {
         }
         (levels, prefixes)
     }
+}
 
+impl<'a, 'tcx> Checker<'a, 'tcx> {
     fn check_level(&mut self, function: DefId, chains: &[Chain]) {
         let summaries: Vec<Rc<Summary>> = chains
             .iter()
