@@ -234,3 +234,15 @@ pub async fn keep_same() -> std::io::Result<()> {
     let b = keep("x.json", "2").await;
     a.and(b)
 }
+
+/// Safe: the exit `r1?` comes after the second write in program order, so running that write
+/// early is what sequential code does too.
+#[graph]
+pub fn stash_tail() -> std::io::Result<()> {
+    #[psync::par]
+    let r1 = stash("c.json", "c");
+    #[psync::par]
+    let r2 = stash("d.json", "d");
+    r1?;
+    r2
+}

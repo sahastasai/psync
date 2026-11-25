@@ -11,7 +11,7 @@ The driver does not re-run psync's analysis. It reads what the macro *did*, from
 code's MIR, and compares that with what the compiled callees *do*.
 
 1. **Markers.** The macro wraps each concurrent chain in
-   `psync::__private::maybe_done_at::<JOIN, ORDER, EXITS, SPEC, INDEP, _>(async { .. })` (in
+   `psync::__private::maybe_done_at::<JOIN, ORDER, LAST, EXITS, EXIT_AT, SPEC, INDEP, _>(async { .. })` (in
    synchronous code, each job in `job_at::<..>(|| ..)`), and each
    prefetched loop prefix in `over_at::<LOOP, TERMINATES, SPEC, INDEP, ..>`. `Checker::markers`
    finds these calls in a function's MIR, reads the const generic arguments, and finds the body of

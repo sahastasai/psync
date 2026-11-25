@@ -219,7 +219,7 @@ The rows that do not speed up are the interesting ones:
 
 ## Checked by the compiler
 
-Each job of a synchronous level is wrapped in `job_at::<LEVEL, ORDER, EXITS, SPEC, INDEP, _>(|| ..)`,
+Each job of a synchronous level is wrapped in `job_at::<LEVEL, ORDER, LAST, EXITS, EXIT_AT, SPEC, INDEP, _>(|| ..)`,
 which returns the closure unchanged. It is the marker `maybe_done_at` is for a future, so
 [`cargo psync check`](../safety/check.md) checks synchronous levels as it checks async ones. Before
 this marker, synchronous rewrites were not checked at all. Two differences:
@@ -230,9 +230,9 @@ this marker, synchronous rewrites were not checked at all. Two differences:
 `psync-check/tests/fixtures/hidden` has both cases: `stash_both` (two files, accepted) and
 `stash_same` (one file twice, a conflict that `cargo psync fix` resolves with `#[psync::seq]`).
 
-One imprecision remains. The checker knows whether a chain may exit, not where. A chain that
-ends in `r1?` after another chain's write is reported as a speculative write, although the write
-comes later in program order. The macro, which knows the order, schedules it correctly.
+The checker knows where each chain may first exit and where it ends, so a chain that ends in
+`r1?` after another chain's write is not a speculative write: sequential code ran that write
+before the exit too (`stash_tail` in the fixture).
 
 ## Not yet
 

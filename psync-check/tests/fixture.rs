@@ -87,6 +87,12 @@ fn finds_effects_hidden_in_callees() {
         app.findings
     );
     assert!(!app.findings.iter().any(|f| f.function == "stash_both"));
+    // An exit after the other chain's write, in program order, is no speculation.
+    assert!(
+        !app.findings.iter().any(|f| f.function == "stash_tail"),
+        "{:#?}",
+        app.findings
+    );
     // The same through an `async fn`, whose parameters live in its coroutine.
     assert!(
         app.findings
