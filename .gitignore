@@ -7,3 +7,5 @@ verify/.lake/
 # Charon output
 scripts/charon/*/target/
 *.llbc
+scripts/audit/*/work/
+scripts/audit/*/bin/

@@ -412,8 +412,20 @@ pub(crate) fn is_pure(e: &Expr) -> bool {
         Expr::Struct(s) => {
             s.fields.iter().all(|f| is_pure(&f.expr)) && s.rest.as_ref().is_none_or(|r| is_pure(r))
         }
+        // `if arch == "i686" { "i386" } else { arch }`: a choice between pure values.
+        Expr::If(i) => {
+            is_pure(&i.cond)
+                && pure_block(&i.then_branch)
+                && i.else_branch.as_ref().is_some_and(|(_, e)| match &**e {
+                    Expr::Block(b) => pure_block(&b.block),
+                    e => is_pure(e),
+                })
+        }
+        Expr::Block(b) if b.label.is_none() => pure_block(&b.block),
         Expr::MethodCall(m) => {
-            PURE_METHODS.contains(&m.method.to_string().as_str())
+            // `path.join(name)`, `parts.join(", ")`; `handle.join()` (a thread) takes no argument.
+            (PURE_METHODS.contains(&m.method.to_string().as_str())
+                || (m.method == "join" && m.args.len() == 1))
                 && is_pure(&m.receiver)
                 && m.args.iter().all(is_pure)
         }
@@ -440,6 +452,11 @@ pub(crate) fn is_pure(e: &Expr) -> bool {
         }
         _ => false,
     }
+}
+
+/// A block that is a single pure expression.
+fn pure_block(b: &syn::Block) -> bool {
+    matches!(&b.stmts[..], [Stmt::Expr(e, None)] if is_pure(e))
 }
 
 /// A place expression whose evaluation has no side effects (a variable, field or pure index).

@@ -1,6 +1,6 @@
 # The audit: where Phase II helps
 
-> **Status: in progress.** The corpus scan and rustic are done; a second project is next.
+> **Status: done** for the corpus scan and two projects, rustic and tauri-bundler.
 
 The question is not whether threads can make synchronous code faster: they can. It is how often
 psync, as built, finds a place where they do, and whether that place is worth it. This chapter
@@ -105,6 +105,54 @@ sits between the two lookups and feeds the second one. psync did not know `unwra
 statement was its own chain, and it pushed the second lookup into a later level than the first.
 `unwrap_or` with pure arguments is now pure (test `cheap_statements_do_not_delay_waits`).
 
+### tauri-bundler, built with psync
+
+`prepare_tools` in tauri-bundler, at commit `548a369`, fetches the tools that build an AppImage:
+three downloads, each skipped if the file is already in the cache. It was built three ways
+(`scripts/audit/tauri/`):
+
+- **seq**: as released;
+- **par**: `#[psync::graph]` on the function and `#[psync::par]` on the three
+  `if !path.exists() { download; write }` statements, which is what a user marks first;
+- **hinted**: also `#[psync::independent]` on the three, and `#[psync::speculate]` on the second
+  and third.
+
+`par` alone overlaps nothing, and psync is right not to. Each statement calls `download(..)` and
+`write_and_make_executable(&path, ..)`, two helpers psync cannot see into. As far as it knows, the
+first statement's write may change what the second reads. The hints say what the code means:
+each statement writes only its own cache file, and filling a cache is harmless even if an earlier
+download fails.
+
+The real code needed two more fixes in psync before even `hinted` overlapped. Between the
+downloads sit `let linuxdeploy = tools_path.join(..)` and
+`let linuxdeploy_arch = if arch == "i686" { "i386" } else { arch };`. psync did not know that
+`Path::join` and an `if` that picks between two values are pure, so it kept them in order with the
+downloads. Once they were pure, the second download had two edges into it, one from each binding.
+A node joined a chain only when it had a single predecessor, so the download was left in a later
+level. A node now joins the chain that ends in its last predecessor when all its edges come from
+that chain, because members of a chain run in order (test
+`path_joins_and_pure_ifs_do_not_delay_downloads`). `join` with one argument is pure, and
+`handle.join()`, which waits for a thread, is not.
+
+The benchmark runs `prepare_tools` on an empty cache, against a local mirror of the GitHub
+release files (through tauri's own `TAURI_BUNDLER_TOOLS_GITHUB_MIRROR`), with files of the real
+sizes (18 KB, 12 MB, 9 MB). toxiproxy adds latency, and in two rows caps each connection's
+bandwidth. All three builds write the same files at every setting. Medians of 11 runs:
+
+| Latency | Bandwidth per connection | seq | par | hinted | par | hinted |
+|---|---|---|---|---|---|---|
+| 0 ms | unlimited | 57 ms | 59 ms | 38 ms | 0.97× | 1.49× |
+| 20 ms | unlimited | 119 ms | 118 ms | 56 ms | 1.01× | **2.14×** |
+| 100 ms | unlimited | 359 ms | 395 ms | 154 ms | 0.91× | **2.34×** |
+| 100 ms | 20 MB/s | 1434 ms | 1458 ms | 721 ms | 0.98× | **1.99×** |
+| 100 ms | 5 MB/s | 4534 ms | 4536 ms | 2520 ms | 1.00× | **1.80×** |
+
+This is the best case the audit found: a command that is a few independent requests and little
+else. With a bandwidth cap, the parallel time is bounded by the largest file (12 MB at 5 MB/s is
+2.4 s), so the gain falls toward the ratio of the total to the largest. The cap here applies to
+each connection. On a link that is itself the bottleneck, parallel downloads share it, and the gain
+would be smaller.
+
 ### The shapes
 
 The audit's ten synchronous findings, rebuilt as shapes over real sockets in
@@ -118,4 +166,8 @@ Phase II works: the code it runs in parallel is correct, and the overlap is real
 real synchronous code much less than Phase I helps async code. It needs hints to find anything,
 and where it finds something, other sequential work in the same command dilutes the gain. The
 largest gains sit where a command is a few independent requests and little else, as in tauri's
-`prepare_tools` (3 downloads, 2.98× as a shape).
+`prepare_tools`: 2.3× on the real code, but only with two hints that state what psync cannot see
+through the helpers. The compiler pass of Phase I (`cargo psync build`) sees through helpers in
+async code. Doing the same for blocking calls, with per-argument effects that would show that
+`write_and_make_executable(&path, ..)` writes only `path` (roadmap item #152), would remove the
+`independent` hint. `speculate` would stay, because it states something about intent.

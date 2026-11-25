@@ -67,6 +67,10 @@ join a prefix only if it writes nothing, for example a guard like `if done { con
   struct literals built from pure parts;
 - method calls from a fixed list of read-only methods (`clone`, `to_string`, `len`, `iter`,
   `is_some`, ...);
+- `join` with one argument (`Path::join`, `[T]::join`); `handle.join()`, which waits for a
+  thread, takes none and is not pure;
+- `if` with a pure condition whose branches are each one pure expression
+  (`if arch == "i686" { "i386" } else { arch }`), and blocks that are one pure expression;
 - constructor calls: `T::new`, `T::from`, `T::default`, `with_capacity`, `Some`, `Ok`, `Err`, and
   tuple structs;
 - `format!`, `vec!`, `concat!` and `stringify!` with pure arguments.
