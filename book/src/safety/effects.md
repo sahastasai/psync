@@ -80,7 +80,26 @@ may be the same. Targets are compared only as far as tokens allow:
   same text), if one is a directory of the other (`{dir}/a` and `{dir}/a/b`), if the format specs
   differ (`{dir:?}`), or if a placeholder is computed (`{}` of `self.base()`, which may return
   something new each call).
+- A target that is just a name, `fs::write(&a, ..)`, takes the value of the block's latest
+  `let a = ..;` before it, when that binding is not `mut` and its value is a literal, a
+  `format!` or a join. `let a = dir.join("a.json")` names the file `{dir}/a.json`, the same
+  template as `format!("{dir}/a.json")`. A join counts only when the name cannot be absolute:
+  its text must start with a character other than `/` or `\`, and not with a drive letter such
+  as `C:`, because `Path::join` with an absolute path replaces the base. The binding's value must
+  not depend on a `mut` binding, and a later `let` of a name the value depends on forgets it.
 - Anything else computed may be anything.
+
+`Path::new(x)`, `PathBuf::from(x)` and the like name what `x` names, so
+`Path::new(&format!("{dir}/one")).exists()` reads the file `{dir}/one`.
+
+Like literals, templates compare paths as text. Two different names in one directory are taken to
+be different files, even though a symbolic link could make them one.
+
+`path.exists()`, `is_file()`, `metadata()` and the other methods of `std::path::Path` that read
+the file system are file reads of the receiver. They are also kept as reads of a service named by
+the receiver, in case the receiver is some other type with a method of that name. Until this
+change they were only the service read, so in synchronous code `if !p.exists() { .. }` and a
+later `fs::write(&p, ..)` could run at once (test `path_exists_reads_the_file_system`).
 
 Reads never conflict with reads. Here is what psync now builds for a read-check-recreate function:
 

@@ -670,6 +670,82 @@ mod tests {
         assert_eq!(downloads, [0, 0], "{:?}", r.levels);
     }
 
+    /// `p.exists()` reads the file system at `p`: in synchronous code it must not overlap a write
+    /// to `p` (it was a read of a service named `p`, which no file write conflicts with).
+    #[test]
+    fn path_exists_reads_the_file_system() {
+        let mut f: ItemFn = syn::parse_quote! {
+            fn f(p: &Path) -> std::io::Result<bool> {
+                #[psync::par]
+                let there = p.exists();
+                #[psync::par]
+                std::fs::write(p, "x")?;
+                Ok(there)
+            }
+        };
+        let report = transform_fn(&mut f, &Options::default());
+        let r = &report.regions[0];
+        assert!(
+            r.edges.iter().any(|(a, b, _)| (*a, *b) == (0, 1)),
+            "{:?}",
+            r.levels
+        );
+    }
+
+    /// `let a = dir.join("a.json")`: a write to `&a` is a write to the file `dir/a.json`, which a
+    /// write to `dir/b-{x}` does not touch. A name that may be absolute (`/a`, a hole first, `C:`)
+    /// or a base that may change (`mut`) leaves the target unknown.
+    #[test]
+    fn joined_paths_name_their_files() {
+        fn levels(b: syn::Stmt, base_mut: bool) -> Vec<usize> {
+            let first: syn::Stmt = if base_mut {
+                syn::parse_quote!(let mut dir = root.to_path_buf();)
+            } else {
+                syn::parse_quote!(let dir = root;)
+            };
+            let mut f: ItemFn = syn::parse_quote! {
+                fn f(root: &Path, x: &str) -> std::io::Result<()> {
+                    #first
+                    let a = dir.join("a.json");
+                    #b
+                    #[psync::par]
+                    if !a.exists() {
+                        std::fs::write(&a, fetch("a")?)?;
+                    }
+                    #[psync::par]
+                    #[psync::speculate]
+                    if !b.exists() {
+                        std::fs::write(&b, fetch("b")?)?;
+                    }
+                    Ok(())
+                }
+            };
+            let report = transform_fn(&mut f, &Options::default());
+            let r = &report.regions[0];
+            (0..r.nodes.len())
+                .filter(|&n| r.nodes[n].label.contains("psync :: par"))
+                .map(|n| {
+                    let c = r.chains.iter().position(|c| c.contains(&n)).unwrap();
+                    r.levels.iter().position(|l| l.contains(&c)).unwrap()
+                })
+                .collect()
+        }
+        let apart: syn::Stmt = syn::parse_quote!(let b = dir.join(format!("b-{x}")););
+        let together = |l: Vec<usize>| l[0] == l[1];
+        assert!(together(levels(apart.clone(), false)));
+        assert!(!together(levels(apart, true)), "a `mut` base");
+        for b in [
+            syn::parse_quote!(let b = dir.join("a.json");),
+            syn::parse_quote!(let b = dir.join(format!("{x}"));),
+            syn::parse_quote!(let b = dir.join("/b");),
+            syn::parse_quote!(let b = dir.join("C:b");),
+            syn::parse_quote!(let mut b = dir.join("b");),
+        ] {
+            let shown = quote::quote!(#b).to_string();
+            assert!(!together(levels(b, false)), "{shown}");
+        }
+    }
+
     /// `handle.join()` waits for a thread: unlike `path.join(name)`, it is not a pure value.
     #[test]
     fn thread_join_is_not_pure() {

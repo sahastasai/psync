@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Prepare tauri-bundler's `prepare_tools` (AppImage tools: three downloads) for the Phase II audit.
 
-    patch.py TAURI_DIR seq|par|hinted
+    patch.py TAURI_DIR seq|par|spec|hinted
 
 Every mode adds a benchmark test (`psync_bench::prepare_tools_bench`) that runs `prepare_tools` on
 an empty tools directory PSYNC_RUNS times, prints the median wall time and a digest of the files
@@ -10,14 +10,16 @@ it wrote. The downloads go to a local mirror through tauri's own `TAURI_BUNDLER_
 - seq: tauri as released;
 - par: `#[psync::graph]` on the function, `#[psync::par]` on the three `if !exists { download }`
   statements (what a user marks first);
-- hinted: also `#[psync::independent]` on the three (each writes only its own cache file, which
+- spec: `par` and `#[psync::speculate]` on the second and third, built with `cargo psync build`:
+  the compiler's facts say which file each helper writes (per-argument effects);
+- hinted: `spec` and `#[psync::independent]` on the three (each writes only its own cache file, which
   psync cannot see through `download` and `write_and_make_executable`) and `#[psync::speculate]`
   on the second and third (filling a tool cache is harmless even if an earlier download fails).
 """
 import pathlib, sys
 
 root, mode = pathlib.Path(sys.argv[1]), sys.argv[2]
-assert mode in ("seq", "par", "hinted")
+assert mode in ("seq", "par", "spec", "hinted")
 src = root / "crates/tauri-bundler/src/bundle/linux/appimage/linuxdeploy.rs"
 s = src.read_text()
 
@@ -35,7 +37,7 @@ if mode != "seq":
         c = c.replace("[dependencies]\n", '[dependencies]\npsync = { path = "/mnt/ssrhdd/psync/work", default-features = false, features = ["std"] }\n', 1)
         cargo.write_text(c)
     ind = "  #[psync::independent]\n" if mode == "hinted" else ""
-    spec = ind + "  #[psync::speculate]\n" if mode == "hinted" else ""
+    spec = ind + "  #[psync::speculate]\n" if mode in ("spec", "hinted") else ""
     rep("fn prepare_tools(tools_path: &Path", "#[psync::graph]\nfn prepare_tools(tools_path: &Path")
     rep("""  let apprun = tools_path.join(format!("AppRun-{arch}"));
   if !apprun.exists() {""", """  let apprun = tools_path.join(format!("AppRun-{arch}"));

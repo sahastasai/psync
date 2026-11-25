@@ -31,6 +31,8 @@ pub(crate) struct Fact {
     /// still applies too.
     pub opaque: bool,
     pub effects: Vec<Effect>,
+    /// For each effect: its target is the call's argument `j` (0 is a method's receiver).
+    pub on_arg: Vec<Option<usize>>,
 }
 
 fn table() -> &'static HashMap<String, Fact> {
@@ -57,13 +59,15 @@ pub(crate) fn parse(text: &str) -> HashMap<String, Fact> {
         ) else {
             continue;
         };
-        let effects = effects
+        let (effects, on_arg): (Vec<Effect>, Vec<Option<usize>>) = effects
             .unwrap_or("")
             .split('\x1e')
             .filter(|e| !e.is_empty())
             .filter_map(|e| {
-                let mut parts = e.splitn(3, '\x1f');
+                let mut parts = e.splitn(4, '\x1f');
                 let (domain, access, target) = (parts.next()?, parts.next()?, parts.next()?);
+                // Malformed, it is ignored: the effect stays, on its target (empty: anything).
+                let arg = parts.next().and_then(|j| j.parse::<usize>().ok());
                 let (domain, ordered_domain) = match domain {
                     "fs" => (Domain::Fs, false),
                     "net" => (Domain::Net, false),
@@ -81,24 +85,28 @@ pub(crate) fn parse(text: &str) -> HashMap<String, Fact> {
                     "o" => (Kind::Write, true),
                     _ => return None,
                 };
-                Some(Effect {
-                    domain,
-                    kind,
-                    target: if target.is_empty() {
-                        Target::Any
-                    } else {
-                        Target::Literal(target.to_string())
+                Some((
+                    Effect {
+                        domain,
+                        kind,
+                        target: if target.is_empty() {
+                            Target::Any
+                        } else {
+                            Target::Literal(target.to_string())
+                        },
+                        op: format!("{name}, per the compiler"),
+                        ordered,
                     },
-                    op: format!("{name}, per the compiler"),
-                    ordered,
-                })
+                    arg,
+                ))
             })
-            .collect();
+            .unzip();
         let fact = Fact {
             name: name.to_string(),
             panics: panics == "1",
             opaque: opaque == "1",
             effects,
+            on_arg,
         };
         // A site listed twice (two builds of one crate): keep everything either says.
         match out.get_mut(site) {
@@ -107,6 +115,7 @@ pub(crate) fn parse(text: &str) -> HashMap<String, Fact> {
                 old.panics |= fact.panics;
                 old.opaque |= fact.opaque;
                 old.effects.extend(fact.effects);
+                old.on_arg.extend(fact.on_arg);
             }
             None => {
                 out.insert(site.to_string(), fact);
@@ -147,6 +156,19 @@ fn site_key(span: proc_macro2::Span) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A fourth field: the effect's target is the call's argument `j`.
+    #[test]
+    fn parses_argument_targets() {
+        let t = parse("/a.rs:3:5\tstash\t0\t0\tfs\x1fw\x1f\x1f0\x1efs\x1fr\x1fa.json\n");
+        let f = &t["/a.rs:3:5"];
+        assert_eq!(f.on_arg, [Some(0), None]);
+        assert!(matches!(&f.effects[1].target, Target::Literal(l) if l == "a.json"));
+        // A malformed argument leaves the effect on anything: never fewer effects.
+        let f = &parse("/a.rs:1:1\tx\t0\t0\tfs\x1fw\x1f\x1fz\n")["/a.rs:1:1"];
+        assert_eq!(f.on_arg, [None]);
+        assert!(matches!(f.effects[0].target, Target::Any));
+    }
 
     #[test]
     fn parses_lines() {

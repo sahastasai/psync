@@ -57,6 +57,11 @@ pub struct Effect {
     pub access: Access,
     /// A constant target (a file path or key), when the call's argument is a string literal.
     pub target: Option<String>,
+    /// Without a constant target: the target is the value of this parameter of the summarized
+    /// function (`fs::write(path, ..)` in `fn save(path: &Path, ..)` writes parameter 0). A caller
+    /// replaces it by what it passes there (its own parameter, a constant, or anything).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arg: Option<usize>,
     /// The call chain from the summarized function to the operation, outermost first.
     pub via: Vec<String>,
 }
@@ -225,8 +230,13 @@ pub fn link(crates: &[CrateSummaries]) -> BTreeMap<String, Resolved> {
                 let Some(f) = functions.get(i) else { continue };
                 resolved.panics |= f.panics;
                 for e in &f.effects {
-                    if !resolved.effects.iter().any(|x| same_effect(x, e)) {
-                        resolved.effects.push(e.clone());
+                    // A parameter of the implementation, not of the call site: unknown here.
+                    let e = Effect {
+                        arg: None,
+                        ..e.clone()
+                    };
+                    if !resolved.effects.iter().any(|x| same_effect(x, &e)) {
+                        resolved.effects.push(e);
                     }
                 }
                 stack.extend(f.deferred.iter().map(String::as_str));
@@ -238,7 +248,7 @@ pub fn link(crates: &[CrateSummaries]) -> BTreeMap<String, Resolved> {
 }
 
 fn same_effect(a: &Effect, b: &Effect) -> bool {
-    a.domain == b.domain && a.access == b.access && a.target == b.target
+    a.domain == b.domain && a.access == b.access && a.target == b.target && a.arg == b.arg
 }
 
 /// The final effects of a call site: its own, and those of the trait methods it reaches
@@ -256,6 +266,10 @@ pub fn resolve_call(
         if let Some(r) = linked.get(t) {
             panics |= r.panics;
             for e in &r.effects {
+                let e = &Effect {
+                    arg: None,
+                    ..e.clone()
+                };
                 if !effects.iter().any(|x| same_effect(x, e)) {
                     let mut e = e.clone();
                     e.via.insert(0, fact.callee.clone());
@@ -311,8 +325,11 @@ pub fn facts_text(crates: &[CrateSummaries], linked: &BTreeMap<String, Resolved>
                         Access::Write => "w",
                         Access::Ordered => "o",
                     };
+                    // A fourth field: the target is the call's argument `j` (0 is the receiver of
+                    // a method call).
+                    let arg = e.arg.map(|j| format!("\x1f{j}")).unwrap_or_default();
                     format!(
-                        "{domain}\x1f{access}\x1f{}",
+                        "{domain}\x1f{access}\x1f{}{arg}",
                         e.target.as_deref().unwrap_or("")
                     )
                 })
@@ -423,6 +440,7 @@ mod tests {
             access,
             target: target.map(Into::into),
             via: vec![],
+            arg: None,
         }
     }
 

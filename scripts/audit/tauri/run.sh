@@ -4,7 +4,8 @@
 #
 #   nix-shell -p toxiproxy --run './run.sh'
 #
-# bin/bundler-{seq,par,hinted} are tauri-bundler's test binaries with patch.py's modes. The files
+# bin/bundler-{seq,par,spec,hinted} are tauri-bundler's test binaries with patch.py's modes (spec is
+# built with `cargo psync build`, the others with `cargo test --no-run`). The files
 # have the sizes of the real assets (AppRun 18 KB, linuxdeploy 12 MB, the AppImage plugin 9 MB).
 # Every response gets LATENCY ms one way; with BANDWIDTH (KB/s), each connection is capped at it.
 set -euo pipefail
@@ -34,7 +35,7 @@ export TAURI_BUNDLER_TOOLS_GITHUB_MIRROR=http://127.0.0.1:18101
 TEST=bundle::linux::appimage::linuxdeploy::psync_bench::prepare_tools_bench
 run() { PSYNC_RUNS=$RUNS "$B/bundler-$1" --exact "$TEST" --nocapture --test-threads 1 2>/dev/null; }
 
-printf '%-8s %-10s %8s %8s %8s %8s %8s\n' latency bandwidth seq par hinted par× hinted×
+printf '%-8s %-10s %8s %8s %8s %8s %8s %8s %8s\n' latency bandwidth seq par spec hinted par× spec× hinted×
 for c in $CASES; do
   lat=${c%%:*} bw=${c##*:}
   tp DELETE /proxies/gh/toxics/lat 2>/dev/null || true
@@ -42,12 +43,12 @@ for c in $CASES; do
   [ "$lat" = 0 ] || tp POST /proxies/gh/toxics "{\"name\":\"lat\",\"type\":\"latency\",\"stream\":\"downstream\",\"attributes\":{\"latency\":$lat}}"
   [ "$bw" = 0 ] || tp POST /proxies/gh/toxics "{\"name\":\"bw\",\"type\":\"bandwidth\",\"stream\":\"downstream\",\"attributes\":{\"rate\":$bw}}"
   declare -A ms files
-  for m in seq par hinted; do
+  for m in seq par spec hinted; do
     out=$(run $m)
     ms[$m]=$(sed -n 's/^MEDIAN_MS //p' <<<"$out")
     files[$m]=$(command grep '^FILE' <<<"$out")
   done
-  [ "${files[seq]}" = "${files[par]}" ] && [ "${files[seq]}" = "${files[hinted]}" ] || { echo "files differ"; exit 1; }
-  awk -v l="$lat" -v b="$bw" -v s="${ms[seq]}" -v p="${ms[par]}" -v h="${ms[hinted]}" \
-    'BEGIN { printf "%-8s %-10s %8s %8s %8s %8.2f %8.2f\n", l, b, s, p, h, s / p, s / h }'
+  for m in par spec hinted; do [ "${files[seq]}" = "${files[$m]}" ] || { echo "files differ: $m"; exit 1; }; done
+  awk -v l="$lat" -v b="$bw" -v s="${ms[seq]}" -v p="${ms[par]}" -v x="${ms[spec]}" -v h="${ms[hinted]}" \
+    'BEGIN { printf "%-8s %-10s %8s %8s %8s %8s %8.2f %8.2f %8.2f\n", l, b, s, p, x, h, s / p, s / x, s / h }'
 done

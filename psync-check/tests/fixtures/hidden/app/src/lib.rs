@@ -181,3 +181,32 @@ pub async fn boot() -> Result<usize, Error> {
     stamp_run().await?;
     Ok(n)
 }
+
+/// `stash` has no verb; it writes the file it is given, through another function. The compiler
+/// says which parameter it writes (per-argument effects), so each call writes its own file.
+fn stash(path: impl AsRef<std::path::Path>, data: &str) -> std::io::Result<()> {
+    write_it(path.as_ref(), data)
+}
+fn write_it(p: &std::path::Path, d: &str) -> std::io::Result<()> {
+    std::fs::write(p, d)
+}
+
+/// Safe: two different files.
+#[graph]
+pub fn stash_both() -> std::io::Result<()> {
+    #[psync::par]
+    let r1 = stash("a.json", "a");
+    #[psync::par]
+    let r2 = stash("b.json", "b");
+    r1.and(r2)
+}
+
+/// The same file twice: the second write must stay second.
+#[graph]
+pub fn stash_same() -> std::io::Result<()> {
+    #[psync::par]
+    let r1 = stash("a.json", "1");
+    #[psync::par]
+    let r2 = stash("a.json", "2");
+    r1.and(r2)
+}

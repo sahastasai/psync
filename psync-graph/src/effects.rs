@@ -631,6 +631,20 @@ const FS_READS: &[&str] = &[
     "open",
 ];
 
+/// Methods of `std::path::Path` without arguments that read the file system at the path.
+const PATH_FS_READS: &[&str] = &[
+    "exists",
+    "try_exists",
+    "is_file",
+    "is_dir",
+    "is_symlink",
+    "metadata",
+    "symlink_metadata",
+    "read_dir",
+    "read_link",
+    "canonicalize",
+];
+
 /// Network functions that write (send data); the rest of `net` only connects or reads.
 const NET_WRITES: &[&str] = &["send_to", "send", "write", "write_all"];
 
@@ -697,6 +711,20 @@ fn target_of(arg: Option<&Expr>) -> Target {
         })) => Target::Literal(s.value()),
         Some(Expr::Reference(r)) => target_of(Some(&r.expr)),
         Some(Expr::Paren(p)) => target_of(Some(&p.expr)),
+        // `Path::new(&format!(..))`, `PathBuf::from("a")`: the same text as a path.
+        Some(Expr::Call(c))
+            if c.args.len() == 1
+                && matches!(&*c.func, Expr::Path(p) if {
+                    let s: Vec<String> =
+                        p.path.segments.iter().map(|s| s.ident.to_string()).collect();
+                    matches!(
+                        s.iter().map(String::as_str).collect::<Vec<_>>()[..],
+                        [.., "Path" | "OsStr", "new"] | [.., "PathBuf" | "OsString" | "String", "from"]
+                    )
+                }) =>
+        {
+            target_of(c.args.first())
+        }
         // `&format!("key.{id}")`: keep the literal text before the first placeholder.
         Some(Expr::Macro(m)) if m.mac.path.is_ident("format") => {
             let tokens = m.mac.tokens.clone();
@@ -735,6 +763,83 @@ fn target_of(arg: Option<&Expr>) -> Target {
             Target::Expr(tokens.to_string(), mentions(tokens))
         }
         None => Target::Any,
+    }
+}
+
+/// The target named by the value of a binding's initializer: `target_of`, and also
+/// `base.join(name)` with `base` a name or field and `name` a string literal or `format!` whose
+/// text starts with a character that cannot make it absolute: the path `base/name`, as a
+/// template whose first hole is `base`. (`Path::join` with an absolute `name` replaces `base`;
+/// `/`, `\` and a drive letter `C:` are refused.)
+pub(crate) fn value_target(e: &Expr) -> Target {
+    if let Expr::MethodCall(m) = e
+        && m.method == "join"
+        && m.args.len() == 1
+        && let Some(base) = plain_place(&m.receiver)
+    {
+        let rest = match target_of(m.args.first()) {
+            Target::Literal(l) => Some(l.chars().map(Piece::Char).collect::<Vec<_>>()),
+            Target::Template(p, _) => Some(p),
+            _ => None,
+        };
+        if let Some(rest) = rest
+            && let Some(Piece::Char(c)) = rest.first()
+            && !matches!(c, '/' | '\\')
+            && rest.get(1) != Some(&Piece::Char(':'))
+        {
+            let mut pieces = vec![Piece::Hole(format!("{base}:")), Piece::Char('/')];
+            pieces.extend(rest);
+            let names = mentions(e.to_token_stream());
+            return Target::Template(pieces, names);
+        }
+        return target_of(Some(e));
+    }
+    target_of(Some(e))
+}
+
+/// A name or a field path (`dir`, `self.root`), as tokens.
+fn plain_place(e: &Expr) -> Option<String> {
+    match e {
+        Expr::Path(p) if p.qself.is_none() && p.path.segments.len() == 1 => {
+            Some(p.to_token_stream().to_string())
+        }
+        Expr::Field(f) => {
+            plain_place(&f.base)?;
+            Some(f.to_token_stream().to_string())
+        }
+        Expr::Reference(r) if r.mutability.is_none() => plain_place(&r.expr),
+        Expr::Paren(p) => plain_place(&p.expr),
+        _ => None,
+    }
+}
+
+impl Target {
+    /// The binding a computed target is, when it is just a name (`path`, `&path`).
+    pub fn single_name(&self) -> Option<&str> {
+        match self {
+            Target::Expr(tokens, names) if names.len() == 1 => {
+                let name = names.iter().next()?;
+                let t = tokens.replace(' ', "");
+                (t == *name || t == format!("&{name}")).then_some(name.as_str())
+            }
+            _ => None,
+        }
+    }
+
+    /// Says more than "anything": a literal, a known prefix or a template.
+    pub fn informative(&self) -> bool {
+        matches!(
+            self,
+            Target::Literal(_) | Target::Prefixed(..) | Target::Template(..)
+        )
+    }
+
+    /// The names its value depends on.
+    pub fn names(&self) -> Option<&Set> {
+        match self {
+            Target::Prefixed(_, n) | Target::Template(_, n) | Target::Expr(_, n) => Some(n),
+            _ => None,
+        }
     }
 }
 
@@ -806,20 +911,28 @@ impl Finder<'_> {
     /// Use the compiler's facts for the call of `ident` at `span`, if there are any. Returns
     /// true when they are complete (the compiler saw through every callee), so the name's guess
     /// is not needed.
-    fn fact(&mut self, span: proc_macro2::Span, ident: &str) -> bool {
+    /// `args` are the call's arguments as written, a method's receiver first: an effect the
+    /// compiler found on the callee's parameter `j` acts on what `args[j]` names.
+    fn fact(&mut self, span: proc_macro2::Span, ident: &str, args: &[&Expr]) -> bool {
         let Some(fact) = crate::facts::at(span, ident) else {
             return false;
         };
-        self.found.effects.extend(fact.effects.iter().cloned());
+        for (e, arg) in fact.effects.iter().zip(&fact.on_arg) {
+            let mut e = e.clone();
+            if let Some(j) = arg {
+                e.target = args.get(*j).map_or(Target::Any, |a| target_of(Some(a)));
+            }
+            self.found.effects.push(e);
+        }
         self.found.panics |= fact.panics;
         !fact.opaque
     }
 
     /// Like [`Self::fact`], but distinguishes "no fact" (`None`) from "opaque fact"
     /// (`Some(false)`).
-    fn fact_full(&mut self, span: proc_macro2::Span, ident: &str) -> Option<bool> {
+    fn fact_full(&mut self, span: proc_macro2::Span, ident: &str, args: &[&Expr]) -> Option<bool> {
         crate::facts::at(span, ident)?;
-        Some(self.fact(span, ident))
+        Some(self.fact(span, ident, args))
     }
 
     /// The last identifier of a called path (`stamp` in `helpers::stamp(..)`).
@@ -847,7 +960,7 @@ impl Finder<'_> {
             return false;
         };
         if let Some(name) = Self::callee_name(c)
-            && self.fact(c.func.span(), &name)
+            && self.fact(c.func.span(), &name, &c.args.iter().collect::<Vec<_>>())
         {
             return true;
         }
@@ -969,12 +1082,13 @@ impl Finder<'_> {
             }
         };
         for m in &calls {
-            note(self.fact_full(m.method.span(), &m.method.to_string()));
+            let args: Vec<&Expr> = std::iter::once(&*m.receiver).chain(&m.args).collect();
+            note(self.fact_full(m.method.span(), &m.method.to_string(), &args));
         }
         if let Expr::Call(c) = e
             && let Some(name) = Self::callee_name(c)
         {
-            note(self.fact_full(c.func.span(), &name));
+            note(self.fact_full(c.func.span(), &name, &c.args.iter().collect::<Vec<_>>()));
         }
         if any && complete {
             return;
@@ -994,6 +1108,16 @@ impl Finder<'_> {
         calls.reverse();
         if calls.is_empty() {
             return;
+        }
+        // `path.exists()`, `dir.join("a").is_file()`: methods of `std::path::Path` that read the
+        // file system at the receiver. Another type may have a method of that name, so the
+        // service read below is kept as well: both are reads, and an extra one only adds
+        // conflicts.
+        for m in &calls {
+            if m.args.is_empty() && PATH_FS_READS.contains(&m.method.to_string().as_str()) {
+                let target = target_of(Some(&m.receiver));
+                self.push(Domain::Fs, Kind::Read, target, m.method.to_string(), false);
+            }
         }
         let domain = Domain::Service(receiver_path(e));
         for m in &calls {
@@ -1074,7 +1198,8 @@ impl<'ast> Visit<'ast> for Finder<'_> {
         } else {
             // Synchronous method calls in async code only have effects psync knows of through
             // the compiler.
-            self.fact(m.method.span(), &m.method.to_string());
+            let args: Vec<&Expr> = std::iter::once(&*m.receiver).chain(&m.args).collect();
+            self.fact(m.method.span(), &m.method.to_string(), &args);
         }
         syn::visit::visit_expr_method_call(self, m);
     }

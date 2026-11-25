@@ -51,6 +51,17 @@ Here is the whole summary file of the fixture's `helpers` crate:
 `stamp`'s target is `null` because it writes `format!("{dir}/.synced")`, a path computed at run
 time. An unknown target conflicts with every target in its domain.
 
+An effect can also name a **parameter** instead of a target. In
+
+```rust,ignore
+fn write_it(p: &Path, d: &str) -> io::Result<()> { std::fs::write(p, d) }
+```
+
+the effect is `{ "domain": "Fs", "access": "Write", "target": null, "arg": 0 }`: it writes the
+file passed as parameter 0. Each caller replaces `arg` by what it passes there. A string constant
+becomes the target, so `write_it("a.json".as_ref(), ..)` writes `"a.json"`. The caller's own
+parameter becomes the caller's `arg`. Anything else becomes unknown.
+
 **The one property a summary must have is over-approximation.** Every effect the function can
 really have must be covered by an effect in its summary. A summary may say too much, which only
 makes psync more careful. It may never say too little, which would let psync run two conflicting
@@ -97,7 +108,8 @@ impl rustc_driver::Callbacks for Psync {
 `after_analysis` runs only once type and borrow checking have succeeded, so every type is known
 and every call is resolved as far as the compiler can resolve it. The macro has already run, so
 the driver sees the code `#[psync::graph]` generated. That code wraps each chain of a **level**
-(the chains psync runs at once) in a call such as `maybe_done_at::<LEVEL, ORDER, ..>`, whose
+(the chains psync runs at once) in a call such as `maybe_done_at::<LEVEL, ORDER, ..>` (a future),
+or `job_at::<LEVEL, ORDER, ..>` (a job of synchronous code), whose
 constant arguments record what the macro assumed. These **markers** are how the driver finds the
 levels to check ([`cargo psync check`](../safety/check.md#1-markers-in-the-generated-code)).
 
@@ -164,6 +176,23 @@ For each function, `Analyzer::local` walks the optimized MIR once:
 - a statement `_0 = {closure@..}` or `{coroutine@..}` is also an edge: an `async fn` returns a
   coroutine, and its body is where the work is;
 - a call through a function pointer is **opaque**.
+
+Per-argument effects need to know what each argument of a call holds. `sources` reads every local
+of the body once:
+- A parameter is followed only if it is never assigned again and never borrowed mutably. Then it
+  still holds what the caller passed.
+- Any other local is followed only if it is assigned exactly once, from a copy, a move or a
+  shared borrow of a followed local (through `*`), from a string constant, or from a
+  standard-library conversion that keeps the value (`as_ref`, `deref`, `to_path_buf`, `into`, ...)
+  of one.
+- Anything else, such as `p.push("x")` on a copy of `p`, is unknown.
+
+An edge records what its call passes, and absorbing a callee's summary substitutes it. The
+link step and `dyn` calls clear `arg`: the parameter is the implementation's, not the call's.
+
+What this does not yet follow: an `async fn` keeps its parameters in its coroutine's fields, and
+the edge from the function to its coroutine passes nothing. An effect on a parameter of an
+`async fn` is therefore unknown. Synchronous helpers, which Phase II calls, are followed.
 
 The edges form a call graph, and a function's summary is its own effects plus the summaries of
 everything it calls:
@@ -287,7 +316,9 @@ app/src/lib.rs:110:11  checkpoint  0  0  fs␟w␟store.db
 
 The columns are the call site (file, line and column of the callee's name), the name as written,
 whether it may panic, whether some callee was opaque, and the effects (`␟` separates domain,
-access and target; an empty target is unknown). `cargo psync build` runs the compiler with `PSYNC_FACTS` set to the
+access and target; an empty target is unknown). A fourth field `j` says the target is the call's
+argument `j`, where 0 is a method's receiver. The macro then takes the target from the argument
+as written: `write_and_make_executable(&apprun, &data)` writes whatever `apprun` names. `cargo psync build` runs the compiler with `PSYNC_FACTS` set to the
 file's path, and the macro opens and reads it. It does so twice: once under `cargo check`, so the
 driver can check the schedule built from the facts, and finally under `cargo build`, which
 produces the program. The macro computes the same `file:line:column` key from its

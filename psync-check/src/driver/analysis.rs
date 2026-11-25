@@ -42,9 +42,11 @@ impl Summary {
         )
     }
 
-    fn absorb(&mut self, other: &Summary, span: Span, via: Option<&str>) {
+    /// Add a callee's summary. `srcs` says what the call passes as each parameter; without it
+    /// (or for a parameter it cannot follow) an effect on a parameter is on anything.
+    fn absorb(&mut self, other: &Summary, span: Span, via: Option<&str>, srcs: Option<&[Src]>) {
         for l in &other.effects {
-            let mut effect = l.effect.clone();
+            let mut effect = at_call(&l.effect, srcs);
             if let Some(v) = via {
                 effect.via.insert(0, v.to_string());
             }
@@ -64,6 +66,7 @@ impl Summary {
             l.effect.domain == effect.domain
                 && l.effect.access == effect.access
                 && l.effect.target == effect.target
+                && l.effect.arg == effect.arg
         };
         if !self.effects.iter().any(same) {
             self.effects.push(Located { effect, span });
@@ -71,10 +74,166 @@ impl Summary {
     }
 }
 
+/// What a call passes as one argument, followed back through the caller's body.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Src {
+    /// The caller's own parameter, unchanged.
+    Param(usize),
+    /// A string constant.
+    Const(String),
+    Unknown,
+}
+
+/// `effect` as seen by a caller that passes `srcs`: an effect on parameter `j` becomes one on
+/// what the call passes there.
+fn at_call(effect: &Effect, srcs: Option<&[Src]>) -> Effect {
+    let mut e = effect.clone();
+    if let Some(j) = e.arg.take() {
+        match srcs.and_then(|s| s.get(j)) {
+            Some(Src::Param(k)) => e.arg = Some(*k),
+            Some(Src::Const(c)) => e.target = Some(c.clone()),
+            _ => {}
+        }
+    }
+    e
+}
+
+/// Standard-library conversions that keep the path or string they are given
+/// (`<PathBuf as Deref>::deref`, `AsRef::<Path>::as_ref`, `Path::to_path_buf`).
+const SAME_VALUE: &[&str] = &[
+    "as_ref",
+    "deref",
+    "borrow",
+    "as_path",
+    "as_os_str",
+    "as_str",
+    "to_path_buf",
+    "to_owned",
+    "to_string",
+    "clone",
+    "into",
+    "from",
+];
+
+/// What each local of `body` holds, as a [`Src`]. A parameter is followed only if it is never
+/// assigned or borrowed mutably, and another local only if it is assigned once, from a copy, move
+/// or shared borrow of a followed local (through `*`), a string constant, or a [`SAME_VALUE`]
+/// call of the standard library on one; everything else is `Unknown`.
+fn sources<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    body: &mir::Body<'tcx>,
+    constant: impl Fn(&Operand<'tcx>) -> Option<String>,
+) -> Vec<Src> {
+    #[derive(Clone)]
+    enum Def {
+        Alias(mir::Local),
+        Const(String),
+        Other,
+    }
+    let n = body.local_decls.len();
+    let mut defs: Vec<Vec<Def>> = vec![Vec::new(); n];
+    let mut tainted = vec![false; n];
+    let plain = |p: &mir::Place<'tcx>| {
+        p.projection
+            .iter()
+            .all(|e| matches!(e, mir::ProjectionElem::Deref))
+            .then_some(p.local)
+    };
+    let of_operand = |op: &Operand<'tcx>| match op {
+        Operand::Copy(p) | Operand::Move(p) => plain(p).map_or(Def::Other, Def::Alias),
+        c => constant(c).map_or(Def::Other, Def::Const),
+    };
+    let mut assign = |place: &mir::Place<'tcx>, def: Def, defs: &mut Vec<Vec<Def>>| {
+        if place.projection.is_empty() {
+            defs[place.local.as_usize()].push(def);
+        } else {
+            tainted[place.local.as_usize()] = true;
+        }
+    };
+    let mut borrowed_mut = Vec::new();
+    for data in body.basic_blocks.iter() {
+        for stmt in &data.statements {
+            match &stmt.kind {
+                StatementKind::Assign(a) => {
+                    let (place, rv) = &**a;
+                    let def = match rv {
+                        Rvalue::Use(op, _) => of_operand(op),
+                        Rvalue::CopyForDeref(p) => plain(p).map_or(Def::Other, Def::Alias),
+                        Rvalue::Ref(_, mir::BorrowKind::Shared | mir::BorrowKind::Fake(_), p) => {
+                            plain(p).map_or(Def::Other, Def::Alias)
+                        }
+                        _ => Def::Other,
+                    };
+                    match rv {
+                        Rvalue::Ref(_, mir::BorrowKind::Mut { .. }, p)
+                        | Rvalue::RawPtr(mir::RawPtrKind::Mut, p) => borrowed_mut.push(p.local),
+                        _ => {}
+                    }
+                    assign(place, def, &mut defs);
+                }
+                StatementKind::SetDiscriminant { place, .. } => borrowed_mut.push(place.local),
+                _ => {}
+            }
+        }
+        if let TerminatorKind::Call {
+            func,
+            args,
+            destination,
+            ..
+        } = &data.terminator().kind
+        {
+            let same = func.const_fn_def().is_some_and(|(callee, _)| {
+                matches!(
+                    tcx.crate_name(callee.krate).as_str(),
+                    "std" | "core" | "alloc"
+                ) && tcx
+                    .opt_item_name(callee)
+                    .is_some_and(|n| SAME_VALUE.contains(&n.as_str()))
+            });
+            let def = match args.first() {
+                Some(a) if same && args.len() == 1 => of_operand(&a.node),
+                _ => Def::Other,
+            };
+            assign(destination, def, &mut defs);
+        }
+    }
+    for l in borrowed_mut {
+        tainted[l.as_usize()] = true;
+    }
+    fn resolve(
+        l: usize,
+        arg_count: usize,
+        defs: &[Vec<Def>],
+        tainted: &[bool],
+        depth: usize,
+    ) -> Src {
+        if tainted[l] || depth > 64 {
+            return Src::Unknown;
+        }
+        if (1..=arg_count).contains(&l) {
+            return if defs[l].is_empty() {
+                Src::Param(l - 1)
+            } else {
+                Src::Unknown
+            };
+        }
+        match &defs[l][..] {
+            [Def::Alias(x)] => resolve(x.as_usize(), arg_count, defs, tainted, depth + 1),
+            [Def::Const(c)] => Src::Const(c.clone()),
+            _ => Src::Unknown,
+        }
+    }
+    (0..n)
+        .map(|l| resolve(l, body.arg_count, &defs, &tainted, 0))
+        .collect()
+}
+
 /// A call from one body to a local body: a function, or a closure or coroutine it creates.
 #[derive(Clone, Debug)]
 pub struct Edge {
     callee: DefId,
+    /// What the call passes as each of the callee's parameters.
+    srcs: Vec<Src>,
     span: Span,
     /// The callee's path, recorded in the effects' call chains (`None` for nested bodies).
     via: Option<String>,
@@ -273,7 +432,7 @@ impl<'tcx> Analyzer<'tcx> {
                     };
                     let summary = current.get_mut(m).expect("member");
                     let before = summary.size();
-                    summary.absorb(&callee, edge.span, edge.via.as_deref());
+                    summary.absorb(&callee, edge.span, edge.via.as_deref(), Some(&edge.srcs));
                     summary.opaque.sort();
                     summary.opaque.dedup();
                     changed |= summary.size() != before;
@@ -298,6 +457,7 @@ impl<'tcx> Analyzer<'tcx> {
         let typing_env = TypingEnv::post_analysis(tcx, def_id);
         let mut own = Summary::default();
         let mut calls = Vec::new();
+        let held = sources(tcx, body, |op| self.string_constant(op));
         for data in body.basic_blocks.iter() {
             for stmt in &data.statements {
                 if let StatementKind::Assign(assign) = &stmt.kind
@@ -308,6 +468,7 @@ impl<'tcx> Analyzer<'tcx> {
                 {
                     calls.push(Edge {
                         callee: nested,
+                        srcs: Vec::new(),
                         span: stmt.source_info.span,
                         via: None,
                     });
@@ -319,6 +480,19 @@ impl<'tcx> Analyzer<'tcx> {
                 match func.const_fn_def() {
                     Some((callee, gargs)) => {
                         let args: Vec<&Operand<'tcx>> = args.iter().map(|a| &a.node).collect();
+                        let srcs: Vec<Src> = args
+                            .iter()
+                            .map(|a| match a {
+                                Operand::Copy(p) | Operand::Move(p)
+                                    if p.projection
+                                        .iter()
+                                        .all(|e| matches!(e, mir::ProjectionElem::Deref)) =>
+                                {
+                                    held[p.local.as_usize()].clone()
+                                }
+                                c => self.string_constant(c).map_or(Src::Unknown, Src::Const),
+                            })
+                            .collect();
                         self.call(
                             &mut own,
                             Some(&mut calls),
@@ -326,6 +500,7 @@ impl<'tcx> Analyzer<'tcx> {
                             callee,
                             gargs,
                             &args,
+                            &srcs,
                             span,
                         );
                     }
@@ -351,6 +526,7 @@ impl<'tcx> Analyzer<'tcx> {
         callee: DefId,
         gargs: GenericArgs<'tcx>,
         args: &[&Operand<'tcx>],
+        srcs: &[Src],
         span: Span,
     ) {
         let tcx = self.tcx;
@@ -374,7 +550,7 @@ impl<'tcx> Analyzer<'tcx> {
             let path = display_path(tcx, callee);
             if let Some(r) = self.linked.get(&key) {
                 for e in &r.effects {
-                    let mut e = e.clone();
+                    let mut e = at_call(e, None);
                     e.via.insert(0, path.clone());
                     summary.add(e, span);
                 }
@@ -404,13 +580,21 @@ impl<'tcx> Analyzer<'tcx> {
             .map(|n| n.to_string())
             .unwrap_or_default();
         let target = args.first().and_then(|a| self.string_constant(a));
-        let mut add = |domain, access, target: Option<String>| {
+        // The target of an operation on the call's argument `j`: a constant, or the caller's
+        // parameter it holds.
+        let on = |j: usize| match srcs.get(j) {
+            Some(Src::Const(c)) => (Some(c.clone()), None),
+            Some(Src::Param(k)) => (None, Some(*k)),
+            _ => (None, None),
+        };
+        let mut add = |domain, access, (target, arg): (Option<String>, Option<usize>)| {
             summary.add(
                 Effect {
                     domain,
                     access,
                     target,
                     via: vec![path.clone()],
+                    arg,
                 },
                 span,
             )
@@ -435,7 +619,7 @@ impl<'tcx> Analyzer<'tcx> {
             if !library
                 && let Some((domain, access)) = io_trait_effect(&path, &name, self_ty.as_deref())
             {
-                add(domain, access, None);
+                add(domain, access, (None, None));
                 return;
             }
             if let Some((domain, access, keeps_target)) = io_effect(&path, &name)
@@ -451,11 +635,14 @@ impl<'tcx> Analyzer<'tcx> {
                     .flatten();
                 match second {
                     Some(first_access) => {
-                        let to = args.get(1).and_then(|a| self.string_constant(a));
-                        add(Domain::Fs, first_access, target);
-                        add(Domain::Fs, Access::Write, to);
+                        add(Domain::Fs, first_access, on(0));
+                        add(Domain::Fs, Access::Write, on(1));
                     }
-                    None => add(domain, access, if keeps_target { target } else { None }),
+                    None => add(
+                        domain,
+                        access,
+                        if keeps_target { on(0) } else { (None, None) },
+                    ),
                 }
             }
             return;
@@ -464,12 +651,13 @@ impl<'tcx> Analyzer<'tcx> {
             match calls {
                 Some(calls) if self.has_body(resolved) => calls.push(Edge {
                     callee: resolved,
+                    srcs: srcs.to_vec(),
                     span,
                     via: Some(path.clone()),
                 }),
                 _ => {
                     let inner = self.summarize(resolved);
-                    summary.absorb(&inner, span, Some(&path));
+                    summary.absorb(&inner, span, Some(&path), Some(srcs));
                 }
             }
             if !self.has_body(resolved) && !library {
@@ -493,7 +681,8 @@ impl<'tcx> Analyzer<'tcx> {
             // Summarized, without effects.
             None if summarized && !use_verb => {}
             Some(s) if !use_verb => {
-                for mut effect in s.effects {
+                for effect in s.effects {
+                    let mut effect = at_call(&effect, Some(srcs));
                     effect.via.insert(0, path.clone());
                     summary.add(effect, span);
                 }
@@ -545,6 +734,7 @@ impl<'tcx> Analyzer<'tcx> {
                 access,
                 target,
                 via: vec![path.to_string()],
+                arg: None,
             },
             span,
         );
@@ -638,7 +828,11 @@ impl<'tcx> Analyzer<'tcx> {
                 };
                 let args: Vec<&Operand<'tcx>> = args.iter().map(|a| &a.node).collect();
                 let mut one = Summary::default();
-                self.call(&mut one, None, typing_env, callee, gargs, &args, *fn_span);
+                // In terms of the call's own arguments: the macro reads them at the call site.
+                let srcs: Vec<Src> = (0..args.len()).map(Src::Param).collect();
+                self.call(
+                    &mut one, None, typing_env, callee, gargs, &args, &srcs, *fn_span,
+                );
                 let name = tcx
                     .opt_item_name(callee)
                     .map(|n| n.to_string())
@@ -1029,6 +1223,8 @@ struct Chain {
     exits: bool,
     spec: bool,
     indep: bool,
+    /// A job of synchronous code (`job_at`), not a future: it cannot be dropped halfway.
+    sync: bool,
     span: Span,
 }
 
@@ -1116,7 +1312,8 @@ impl<'a, 'tcx> Checker<'a, 'tcx> {
             let usize_at = |i: usize| value(i)?.try_to_target_usize(tcx);
             let bool_at = |i: usize| value(i)?.try_to_bool();
             match name.as_str() {
-                "maybe_done_at" => {
+                // A future of an async level, or a job of a synchronous one.
+                "maybe_done_at" | "job_at" => {
                     let (Some(level), Some(order), Some(exits), Some(spec), Some(indep)) =
                         (usize_at(0), usize_at(1), bool_at(2), bool_at(3), bool_at(4))
                     else {
@@ -1131,6 +1328,7 @@ impl<'a, 'tcx> Checker<'a, 'tcx> {
                         exits,
                         spec,
                         indep,
+                        sync: name.as_str() == "job_at",
                         span,
                     };
                     match levels.iter_mut().find(|(l, _)| *l == level) {
@@ -1245,7 +1443,8 @@ impl<'a, 'tcx> Checker<'a, 'tcx> {
             })
             .map(|(k, _)| k)
             .collect();
-        if writers.len() >= 2 {
+        // A synchronous function is not cancelled: its jobs run to the end.
+        if writers.len() >= 2 && !chains.iter().all(|c| c.sync) {
             let tcx = self.analyzer.tcx;
             let span = |k: usize| user_span(tcx, chains[k].body).unwrap_or(chains[k].span);
             self.report(
