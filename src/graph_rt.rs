@@ -233,3 +233,72 @@ pub fn tick(ticks: &core::sync::atomic::AtomicU32, every: u32) -> bool {
 pub use crate::future::yield_now;
 #[cfg(feature = "std")]
 pub use crate::par::par_run;
+
+/// Orders two chains of one join at run time: the later one waits for the earlier one's end when
+/// the files they touch turn out to overlap (the macro could not tell them apart from tokens).
+/// All chains of a join are polled by one task, so one waker slot suffices; the lock is never
+/// contended, and the gate is `Sync` so the function's future stays `Send`.
+pub struct Gate {
+    open: core::sync::atomic::AtomicBool,
+    lock: core::sync::atomic::AtomicBool,
+    waker: core::cell::UnsafeCell<Option<core::task::Waker>>,
+}
+
+// SAFETY: `waker` is only touched while `lock` is held.
+unsafe impl Sync for Gate {}
+
+impl Default for Gate {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Gate {
+    pub const fn new() -> Self {
+        Self {
+            open: core::sync::atomic::AtomicBool::new(false),
+            lock: core::sync::atomic::AtomicBool::new(false),
+            waker: core::cell::UnsafeCell::new(None),
+        }
+    }
+
+    fn with_waker<R>(&self, f: impl FnOnce(&mut Option<core::task::Waker>) -> R) -> R {
+        use core::sync::atomic::Ordering;
+        while self
+            .lock
+            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            core::hint::spin_loop();
+        }
+        // SAFETY: the lock is held.
+        let r = f(unsafe { &mut *self.waker.get() });
+        self.lock.store(false, Ordering::Release);
+        r
+    }
+
+    /// The earlier chain has ended.
+    pub fn open(&self) {
+        self.open.store(true, core::sync::atomic::Ordering::Release);
+        if let Some(w) = self.with_waker(Option::take) {
+            w.wake();
+        }
+    }
+
+    /// Wait until [`Gate::open`].
+    pub async fn wait(&self) {
+        core::future::poll_fn(|cx| {
+            if self.open.load(core::sync::atomic::Ordering::Acquire) {
+                return Poll::Ready(());
+            }
+            self.with_waker(|w| *w = Some(cx.waker().clone()));
+            // Opened between the check and the store: do not miss it.
+            if self.open.load(core::sync::atomic::Ordering::Acquire) {
+                Poll::Ready(())
+            } else {
+                Poll::Pending
+            }
+        })
+        .await
+    }
+}

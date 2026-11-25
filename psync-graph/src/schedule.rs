@@ -163,6 +163,7 @@ pub(crate) fn plan(nodes: &[Node]) -> Plan {
         levels: levels.clone(),
         changed: levels.iter().any(|l| l.len() > 1),
         cert: cert_nodes(nodes),
+        runtime_checks: 0,
     };
     Plan {
         chains,
@@ -392,6 +393,7 @@ pub(crate) fn emit(
     positions: &[usize],
     mentions: &[Set],
     ids: &mut usize,
+    gates: &[crate::gates::Gate],
 ) -> Vec<Stmt> {
     let mut out = Vec::new();
     // Exit replays and bindings deferred to a later level: (level, position, tokens).
@@ -432,6 +434,13 @@ pub(crate) fn emit(
         let mut takes = Vec::new();
         *ids += 1;
         let level_id = proc_macro2::Literal::usize_unsuffixed(*ids);
+        let gate_of = |c: usize| format_ident!("__psync_gate{}_{}", *ids, c);
+        for &c in level {
+            if gates.iter().any(|g| g.on == c) {
+                let g = gate_of(c);
+                futures.push(quote!(let #g = #krate::__private::Gate::new();));
+            }
+        }
         for (k, &c) in level.iter().enumerate() {
             let members: Vec<&Node> = plan.chains[c].iter().map(|&v| &nodes[v]).collect();
             let chain_positions: Vec<usize> =
@@ -498,6 +507,22 @@ pub(crate) fn emit(
                     };
                 });
             } else {
+                // Gated: wait for an earlier chain whose files turned out to overlap this one's,
+                // and let later chains waiting for this one go when it ends.
+                let waits = gates.iter().filter(|g| g.waits == c).map(|g| {
+                    let (gate, cond) = (gate_of(g.on), &g.cond);
+                    quote!(if #cond { #gate.wait().await; })
+                });
+                let opens = gates.iter().any(|g| g.on == c).then(|| {
+                    let gate = gate_of(c);
+                    quote!(#gate.open();)
+                });
+                let body = quote! {
+                    #(#waits)*
+                    let __psync_r = { #body };
+                    #opens
+                    __psync_r
+                };
                 futures.push(quote!(let mut #f = #krate::__private::maybe_done_at::<#level_id, #order, #last, #exits, #exit_at, #spec, #indep, _>(async { #body });));
                 takes.push(quote!(let (#(#slot_idents,)* #out_k) = #taken;));
             }

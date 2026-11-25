@@ -62,6 +62,7 @@ mod access;
 mod classify;
 mod effects;
 mod facts;
+mod gates;
 
 extern crate proc_macro;
 mod exits;
@@ -226,6 +227,9 @@ pub struct RegionReport {
     /// The certificate of this region's schedule: each node's places (see `verify/Cert.lean`).
     /// With `chains` and `levels`, `psync-cert` turns it into a Lean check.
     pub cert: Vec<CertNode>,
+    /// Pairs of chains that run concurrently because their computed file paths differ when
+    /// written, and that are ordered at run time if the paths turn out to overlap.
+    pub runtime_checks: usize,
 }
 
 /// One node as a certificate describes it: the places it may read and write, each a path of
@@ -525,6 +529,13 @@ pub fn explain(report: &Report) -> String {
                 })
                 .collect();
             out += &format!("    level {l}: {}\n", chains.join(" || "));
+        }
+        if region.runtime_checks > 0 {
+            out += &format!(
+                "    paths compared at run time: {} pair(s) of chains wait for each other if \
+                 their files overlap\n",
+                region.runtime_checks
+            );
         }
     }
     for l in &report.loops {
@@ -944,6 +955,63 @@ mod tests {
         );
         // `other.toml` neither conflicts with the write nor is a write: it overlaps.
         assert!(r.regions[0].levels[0].len() >= 2);
+    }
+
+    #[test]
+    fn computed_paths_are_compared_at_run_time() {
+        let checks = |f: ItemFn| {
+            let r = report(Options::parse(quote!(speculate)).unwrap(), f);
+            (r.regions[0].runtime_checks, r.regions[0].changed)
+        };
+        // Two parameters: concurrent, ordered at run time if they name one file.
+        assert_eq!(
+            checks(syn::parse_quote! {
+                async fn f(a: &Path, b: &Path) -> Result<(), E> {
+                    let s = tokio::fs::read_to_string(a).await?;
+                    tokio::fs::write(b, b"x").await?;
+                    Ok(())
+                }
+            }),
+            (1, true)
+        );
+        // A path bound in the region to a total value is substituted.
+        assert_eq!(
+            checks(syn::parse_quote! {
+                async fn f(dir: &Path, name: &str) -> Result<(), E> {
+                    let p = dir.join(name);
+                    let s = tokio::fs::read_to_string(&p).await?;
+                    tokio::fs::write(dir.join("out"), b"x").await?;
+                    Ok(())
+                }
+            })
+            .0,
+            1
+        );
+        // The same expression is the same file: it stays ordered.
+        let same = |f: ItemFn| assert_eq!(checks(f).0, 0);
+        same(syn::parse_quote! {
+            async fn f(a: &Path) -> Result<(), E> {
+                let s = tokio::fs::read_to_string(a).await?;
+                tokio::fs::write(a, b"x").await?;
+                Ok(())
+            }
+        });
+        // A path from awaited work, or from a `mut` binding, cannot be evaluated at the start.
+        same(syn::parse_quote! {
+            async fn f(api: &Api, a: &Path) -> Result<(), E> {
+                let b = api.locate().await?;
+                let s = tokio::fs::read_to_string(a).await?;
+                tokio::fs::write(&b, b"x").await?;
+                Ok(())
+            }
+        });
+        same(syn::parse_quote! {
+            async fn f(a: &Path, mut b: PathBuf) -> Result<(), E> {
+                let s = tokio::fs::read_to_string(a).await?;
+                tokio::fs::write(&b, b"x").await?;
+                Ok(())
+            }
+        });
     }
 
     #[test]

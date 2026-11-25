@@ -221,12 +221,22 @@ impl Rewriter<'_> {
             return region.into_iter().map(|(_, n)| n.stmt).collect();
         }
         let (positions, nodes): (Vec<usize>, Vec<Node>) = region.into_iter().unzip();
-        let plan = plan(&nodes);
-        self.report.regions.push(plan.report.clone());
+        // Computed paths the tokens cannot tell apart are compared at run time instead.
+        let relaxed = (!self.scope.sync)
+            .then(|| crate::gates::relax(&nodes, &self.scope.mutable, &mut self.fresh))
+            .flatten();
+        let (plan, gates, prelude) = match relaxed {
+            Some((plan, gates, prelude)) => (plan, gates, prelude),
+            None => (plan(&nodes), Vec::new(), Vec::new()),
+        };
+        let mut report = plan.report.clone();
+        report.runtime_checks = gates.len();
+        self.report.regions.push(report);
         if !plan.report.changed {
             return nodes.into_iter().map(|n| n.stmt).collect();
         }
-        emit(
+        let mut out = prelude;
+        out.extend(emit(
             self.scope.sync,
             &self.options.krate,
             &self.scope.fresh,
@@ -235,7 +245,9 @@ impl Rewriter<'_> {
             &positions,
             mentions,
             &mut self.fresh,
-        )
+            &gates,
+        ));
+        out
     }
 }
 
