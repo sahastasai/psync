@@ -389,9 +389,9 @@ pub async fn guarded(path: &str) -> std::io::Result<()> {
 ```text
 guarded::{closure#0}
   b29  line 253  call std::fs::read_to_string  [read file (parameter 0)]
-  b7   line 254  call ready  if b2 (line 253, `?`) = ok
-  b13  line 254  await  if b2 (line 253, `?`) = ok
-  b16  line 256  call std::fs::write  [write file (parameter 0)]  if b15 (line 255, if) = true
+  b7   line 254  call ready  if b2 (line 253, `?` on b29) = ok
+  b13  line 254  await  if b2 (line 253, `?` on b29) = ok
+  b16  line 256  call std::fs::write  [write file (parameter 0)]  if b15 (line 255, if on b29) = true
 ```
 
 Each line is a point of interest: a call with effects or into the crate, or an await. It shows the
@@ -422,9 +422,32 @@ Edges into cleanup blocks are left out, so unwinding is not a branch. Labels com
 switched value. An enum's variant names it (`Some`, `Err`), a `bool` is `true` or `false`, and a
 `?` (its `ControlFlow` switch, marked by the desugaring) is `ok` or `exits`.
 
-**Not yet.** Data edges between the points (which result flows into which call), the
-spawn/join/select structure of the macro's joins, and summaries of loops. Effects are written in
-terms of the body's own parameters. For a closure or async block, those are its captures.
+**Data edges.** `on b29` says the test uses what the call in block 29 returned. The `?` tests the
+read's own result, and the `if` tests `n`, its length. For a call, `uses` lists the calls whose
+results reach its arguments. In the fixture's `chained`, the string read before the await is
+written after it:
+
+```text
+chained::{closure#0}
+  b27  line 263  call std::fs::read_to_string  [read file (parameter 0)]
+  b4   line 264  call ready  if b2 (line 263, `?` on b27) = ok
+  b11  line 264  await  if b2 (line 263, `?` on b27) = ok
+  b13  line 265  call std::fs::write  [write file (parameter 1)]  uses b27  if b2 (line 263, `?` on b27) = ok
+```
+
+The flow is computed per value, flow-insensitively, as a fixpoint. A value holds the calls its
+assignment's operands hold. It follows moves, copies, borrows, casts, aggregates, and slots that a
+coroutine keeps across an await (the same roots as the [async summaries](#inside-one-crate-walking-mir)).
+A call that is a point holds itself. Any other call, such as `branch` (the `?`), `unwrap` or
+`into_future`, holds what its arguments hold. Being flow-insensitive, it may add an edge, for a
+local reused in a loop for example, but it does not miss one through these steps. Writes through
+raw pointers, and values that reach a call only through memory it reads behind a reference it
+got earlier, are not followed. The test fails when non-point calls do not pass their arguments
+through.
+
+**Not yet.** The spawn/join/select structure of the macro's joins, and summaries of loops.
+Effects are written in terms of the body's own parameters. For a closure or async block, those
+are its captures.
 
 ## What is proved, and what is assumed
 

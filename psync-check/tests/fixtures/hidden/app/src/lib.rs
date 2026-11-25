@@ -257,3 +257,11 @@ pub async fn guarded(path: &str) -> std::io::Result<()> {
     }
     Ok(())
 }
+
+/// Not rewritten: the read's result flows, across an await, into the write; `ready` uses nothing.
+pub async fn chained(path: &str, out: &str) -> std::io::Result<()> {
+    let s = std::fs::read_to_string(path)?;
+    ready().await;
+    std::fs::write(out, s)?;
+    Ok(())
+}

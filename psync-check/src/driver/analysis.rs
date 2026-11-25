@@ -1382,7 +1382,102 @@ impl<'tcx> Analyzer<'tcx> {
                 callee,
                 effects,
                 guards: guards[at.as_usize()].clone(),
+                uses: Vec::new(),
             });
+        }
+        // Data edges: which calls' results each value holds, through assignments, borrows, moves,
+        // slots kept across awaits and calls that are not points (`?`, `unwrap`, `into_future`),
+        // flow-insensitively.
+        let points: HashSet<usize> = nodes
+            .iter()
+            .filter(|n| n.kind == "call")
+            .map(|n| n.block)
+            .collect();
+        let base = |p: &mir::Place<'tcx>| held.root(p).unwrap_or(Root::Local(p.local));
+        let of_op = |op: &Operand<'tcx>| match op {
+            Operand::Copy(p) | Operand::Move(p) => Some(base(p)),
+            _ => None,
+        };
+        let rvalue_roots = |rv: &Rvalue<'tcx>| -> Vec<Root> {
+            match rv {
+                Rvalue::Use(op, ..)
+                | Rvalue::Cast(_, op, _)
+                | Rvalue::UnaryOp(_, op)
+                | Rvalue::Repeat(op, _) => of_op(op).into_iter().collect(),
+                Rvalue::Ref(_, _, p)
+                | Rvalue::CopyForDeref(p)
+                | Rvalue::Discriminant(p)
+                | Rvalue::RawPtr(_, p) => vec![base(p)],
+                Rvalue::BinaryOp(_, ops) => {
+                    [&ops.0, &ops.1].into_iter().filter_map(of_op).collect()
+                }
+                Rvalue::Aggregate(_, ops) => ops.iter().filter_map(of_op).collect(),
+                _ => Vec::new(),
+            }
+        };
+        type Holds = HashMap<Root, std::collections::BTreeSet<usize>>;
+        let mut holds: Holds = HashMap::new();
+        let add = |holds: &mut Holds, dst: Root, from: Vec<usize>| -> bool {
+            let set = holds.entry(dst).or_default();
+            let mut changed = false;
+            for f in from {
+                changed |= set.insert(f);
+            }
+            changed
+        };
+        let held_by = |holds: &Holds, roots: &[Root]| -> Vec<usize> {
+            roots
+                .iter()
+                .flat_map(|r| holds.get(r).into_iter().flatten().copied())
+                .collect()
+        };
+        for _ in 0..64 {
+            let mut changed = false;
+            for (b, data) in blocks.iter_enumerated() {
+                if data.is_cleanup {
+                    continue;
+                }
+                for st in &data.statements {
+                    if let StatementKind::Assign(a) = &st.kind {
+                        let from = held_by(&holds, &rvalue_roots(&a.1));
+                        changed |= add(&mut holds, base(&a.0), from);
+                    }
+                }
+                if let TerminatorKind::Call {
+                    args, destination, ..
+                } = &data.terminator().kind
+                {
+                    let from = if points.contains(&b.as_usize()) {
+                        vec![b.as_usize()]
+                    } else {
+                        let roots: Vec<Root> = args.iter().filter_map(|a| of_op(&a.node)).collect();
+                        held_by(&holds, &roots)
+                    };
+                    changed |= add(&mut holds, base(destination), from);
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        let uses_of = |roots: &[Root], own: Option<usize>| -> Vec<usize> {
+            let mut out: Vec<usize> = held_by(&holds, roots)
+                .into_iter()
+                .filter(|b| Some(*b) != own)
+                .collect();
+            out.sort_unstable();
+            out.dedup();
+            out
+        };
+        for n in &mut nodes {
+            if n.kind != "call" {
+                continue;
+            }
+            let bb = mir::BasicBlock::from_usize(n.block);
+            if let TerminatorKind::Call { args, .. } = &blocks[bb].terminator().kind {
+                let roots: Vec<Root> = args.iter().filter_map(|a| of_op(&a.node)).collect();
+                n.uses = uses_of(&roots, Some(n.block));
+            }
         }
         let mut branches: Vec<PdgBranch> = Vec::new();
         for n in &nodes {
@@ -1391,9 +1486,15 @@ impl<'tcx> Analyzer<'tcx> {
                     continue;
                 }
                 let bb = mir::BasicBlock::from_usize(g.branch);
+                // The calls whose results the switched value holds.
+                let roots: Vec<Root> = match &blocks[bb].terminator().kind {
+                    TerminatorKind::SwitchInt { discr, .. } => of_op(discr).into_iter().collect(),
+                    _ => Vec::new(),
+                };
                 branches.push(PdgBranch {
                     block: g.branch,
                     line: line(blocks[bb].terminator().source_info.span),
+                    uses: uses_of(&roots, None),
                     test: switch(bb)
                         .map(|(t, _)| t)
                         .unwrap_or_else(|| "branch".into()),
