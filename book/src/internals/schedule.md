@@ -66,6 +66,33 @@ Chain fusion removes the most common case of this, independent per-item pipeline
 dataflow schedule, where every node starts the moment its own inputs are ready, would need a
 different kind of join. psync does not do this yet.
 
+### Exercise: when levels cost time
+
+```rust,ignore
+#[graph]
+async fn crossing() -> (u32, u32) {
+    let a1 = io(T, 1).await;
+    let a2 = io(3 * T, 2).await;
+    let b1 = io(3 * T, a1 + 10).await;
+    let b2 = io(T, a1 + a2).await;
+    (b1, b2)
+}
+```
+
+Which chains and levels does psync build? How long does the function take, and how long would a
+schedule take in which every statement starts the moment its own inputs are ready?
+
+<details>
+<summary>Answer</summary>
+
+`a1` has two successors, `b1` and `b2`, so it fuses with neither: `level 0: n0 || n1`, then
+`level 1: n2 || n3`. Level 0 ends when `a2` does, at 3T, and level 1 takes 3T more: 6T, against
+8T sequentially (test `book_levels_wait_for_all_their_chains`). With every statement starting as
+soon as it can, `b1` would start at T and end at 4T, and `b2` would run from 3T to 4T: 4T in
+all. That is the cost of levels, which waiting for whole joins buys.
+
+</details>
+
 ## Emitting a level
 
 A level with one chain is emitted as the original statements. A level with several chains becomes
