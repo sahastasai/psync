@@ -121,3 +121,54 @@ warning, or before the loop for a loop warning, with the statement's indentation
 On a copy of the fixture it inserts 7 hints, after which `cargo psync check` reports 0 warnings.
 `#[psync::seq]` is the safe fix, not always the best one. For idempotent writes,
 `#[psync::speculate]` keeps the concurrency. With `cargo psync build`, no hint is needed at all.
+
+## Exercises
+
+The answers to 1 and 2 come from `cargo psync build` on a one-file crate.
+
+1. ```rust,ignore
+   impl Db {
+       pub async fn create_view(&self, name: &str) -> io::Result<String> {
+           std::fs::read_to_string(format!("{name}.sql"))
+       }
+       pub async fn get_totals(&self, name: &str) -> io::Result<String> {
+           std::fs::read_to_string(format!("{name}.csv"))
+       }
+   }
+
+   #[graph(explain)]
+   pub async fn report(db: &Db) -> io::Result<(String, String)> {
+       let view = db.create_view("sales").await?;
+       let totals = db.get_totals("sales").await?;
+       Ok((view, totals))
+   }
+   ```
+
+   What does a plain build schedule, and what does `cargo psync build` schedule?
+2. Now `create_view` writes `format!("{name}.sql")` instead of reading it. `get_totals` still
+   reads `{name}.csv`, a different file. What does `cargo psync build` do, and why?
+3. You run `cargo psync build`, then add a line at the top of the file and run a plain
+   `cargo build` with the same `PSYNC_FACTS`. Can the old facts be applied to the wrong calls?
+4. Your crate defines `trait Store`, and a plugin loaded at run time implements it. What do the
+   facts say about `store.checkpoint()` calls, and can they be wrong?
+
+<details>
+<summary>Answers</summary>
+
+1. A plain build keeps them in order: `create` is a write verb, so
+   ``n0 -> n1 (write `db` "sales" (create_view) vs read `db` "sales" (get_totals))``. With facts,
+   both are reads, ``{read file (create_view, per the compiler)}``, and the level is `n0 || n1`.
+2. It keeps them in order:
+   ``n0 -> n1 (write file (create_view, per the compiler) vs read file (get_totals, per the compiler))``.
+   The driver keeps a file target only when it is a string literal. A path computed inside the
+   callee is "some file", and a write to some file may be the file the other call reads.
+3. No. A fact is keyed by the file, line and column of the callee's name, and is used only if the
+   name written there still matches. The shifted calls find no fact (or one for another name)
+   and fall back to their names. That is a plain build's schedule, which may be less concurrent,
+   or miss what only the facts showed. The stamp makes cargo rebuild when the facts change, but
+   not when the source does, so run `cargo psync build` again after editing.
+4. The facts take the union of every implementation in the build. The plugin is not in the
+   build, so its effects are missing: the closed-world assumption fails. Declare what plugins may
+   do (`effects(write(checkpoint))`), or keep such calls `#[psync::seq]`.
+
+</details>

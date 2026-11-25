@@ -171,3 +171,36 @@ ETags.
 - **The generated Rust**, which rustc type- and borrow-checks.
 - **Footprint soundness.** That MIR summaries over-approximate what a function touches is checked
   by `cargo psync check` but not yet proved. That is also on the roadmap.
+
+## Exercises
+
+1. An API's `get_item(k)` returns the item and the number of times it has been read. psync runs
+   two `get_item` calls concurrently. Does the guarantee apply? What do you change?
+2. Two identical `PUT`s to one new path run concurrently. Do they commute on a generic HTTP server?
+   On S3 without versioning?
+3. A controller applies two different ConfigMaps concurrently, then logs which one has the larger
+   `resourceVersion`. Is the schedule still "the same as sequential"?
+4. The audit-log check found 0 forbidden pairs in 65,893 Kubernetes pairs. Why does the chapter
+   call that a weak result, and the S3 one a real one?
+5. Which planted violation would catch a psync bug that started an S3 `PUT` while a `LIST` of
+   its bucket prefix was in flight?
+
+<details>
+<summary>Answers</summary>
+
+1. No. The response depends on how many reads came before, so two `get_item`s do not commute.
+   This is `psync_rule_unsound_for_counters` with a different name: psync's rule calls both
+   reads, and the rule is unsound for this server. Declare the call a write
+   (`effects(write(get_item))`), or keep one in place with `#[psync::seq]`.
+2. Not on a generic HTTP server: the first answers `201 Created`, the second `200 OK`, so
+   the order is visible (`http_put_twice_not_commute`). On S3 they do: the ETag depends only on
+   the body, and `s3Spec` allows the same `PUT` twice (`s3Spec_sound`).
+3. Only up to resourceVersions. Each write takes the next value of one cluster-wide counter, so
+   in the other order each object gets the other's version (`kube_writes_not_commute`). A client
+   that compares versions across objects sees the difference. Keep the second apply in place.
+4. The Kubernetes benchmark only reads, and two reads always commute under the spec, so no
+   pair could have failed. On S3, 854,878 overlapping pairs included a `PUT`, and each needed its
+   keys to be apart. That is a check that could have failed.
+5. "A listing and a `PUT` under its prefix", one of the four in `scripts/spec-check/selftest.sh`.
+
+</details>
