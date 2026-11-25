@@ -95,9 +95,8 @@ rustup target add thumbv8m.main-none-eabihf
 ./scripts/test-rp2350.sh --flash    # also download with probe-rs
 ```
 
-> The script builds an `rp2350` example. That example is not on the `claude/initial_psync_graph`
-> branch, which removed the missing entry from `Cargo.toml`. Until it is restored, the firmware
-> build step fails, and the host tests still run.
+> The script builds an `rp2350` example, which is not in the repository at the moment. Until it
+> is restored, the firmware build step fails, and the host tests still run.
 
 ## With `#[psync::graph]`
 
@@ -171,8 +170,38 @@ urgent task runs before step 4 instead of after step 6.
 
 - **Dual-core RP2350.** `MultiExecutor` uses `std` threads. Running it on the RP2350's second core
   needs the HAL's multicore launch and a spinlock-protected queue, and has to be tested on a board.
-- **Parallel iterations.** The code `#[psync::graph]` generates joins its branches in one task.
-  After the I/O overlaps, CPU work in the branches runs on one core (see
-  [Patterns and pitfalls](./patterns.md)). Spawning branches onto workers needs `'static` futures
-  or scoped tasks. That belongs to Phase II, which runs independent work on parallel workers
-([Where psync is going](../introduction.md#where-psync-is-going)).
+- **Parallel async branches.** The code `#[psync::graph]` generates for async functions joins its
+  branches in one task. After the I/O overlaps, CPU work in the branches runs on one core (see
+  [Patterns and pitfalls](./patterns.md)). Spawning them onto workers needs `'static` futures or
+  scoped tasks, and the runtime's spawner. For synchronous functions, Phase II already runs
+  independent statements as jobs on threads ([Synchronous code](../phase2/using.md)).
+
+## Exercises
+
+The answers to 1 and 2 are tests in `tests/scheduling.rs` (`book_*`).
+
+1. Three tasks, spawned in this order: `a` at priority 2, `b` at 2, `c` at 7. Each logs its name
+   when polled, wakes itself, and returns `Pending` the first time and `Ready` the second. What
+   is the log after `run_until_stalled()`?
+2. Three tasks that log once: `a` at 1, `b` at 2, `c` at 3. Before running the executor, you call
+   `set_priority(10)` on `a`'s handle. What is the log?
+3. A task at priority 3 runs an annotated function with two concurrent branches. Another task at
+   priority 5 is ready the whole time. When do the branches run?
+4. On `MultiExecutor::with_fairness(1, 4)`, a priority-9 task is always ready, and a priority-1
+   task becomes ready. Roughly when does it run, and what does that cost?
+
+<details>
+<summary>Answers</summary>
+
+1. `c c a b a b`. `c` is the only task at 7, so it runs again as soon as it wakes itself. Then
+   `a` and `b` take turns: a task that is still pending goes to the back of the queue, behind
+   its equals.
+2. `a c b`. The priority that counts is the one when the task is taken from the queue.
+3. Not while the priority-5 task stays ready. The branches are joined inside the priority-3
+   task, so they share its priority, and the executor always takes the highest-priority ready
+   task. They run once the priority-5 task finishes or sleeps (or, on a fair `MultiExecutor`, on
+   its fairness picks). To give a branch its own priority, spawn it as a task.
+4. Within about 4 picks: every 4th pick takes the task that has been ready longest. The cost is
+   that the priority-9 task waits during that pick.
+
+</details>

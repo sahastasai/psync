@@ -118,3 +118,46 @@ fn reprioritizing_sleeping_task_wakes_it() {
     assert!(executor.poll_once());
     assert!(executor.is_empty());
 }
+
+// The answers to the exercises in the book's chapter on the executor.
+
+/// Exercise 1: a task that wakes itself goes to the back of its priority, behind nothing higher.
+#[test]
+fn book_self_waking_tasks_by_priority() {
+    let executor = Executor::default();
+    let log = Rc::new(RefCell::new(Vec::new()));
+    for (priority, id) in [(2, 'a'), (2, 'b'), (7, 'c')] {
+        let log = log.clone();
+        let mut polls = 0;
+        executor.spawn(
+            priority,
+            poll_fn(move |cx| {
+                log.borrow_mut().push(id);
+                polls += 1;
+                if polls == 2 {
+                    Poll::Ready(())
+                } else {
+                    cx.waker().wake_by_ref();
+                    Poll::Pending
+                }
+            }),
+        );
+    }
+    executor.run_until_stalled();
+    assert_eq!(*log.borrow(), ['c', 'c', 'a', 'b', 'a', 'b']);
+}
+
+/// Exercise 2: a priority changed before the executor runs is the one that counts.
+#[test]
+fn book_priority_changed_before_running() {
+    let executor = Executor::default();
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let mut handles = Vec::new();
+    for (priority, id) in [(1, 'a'), (2, 'b'), (3, 'c')] {
+        let log = log.clone();
+        handles.push(executor.spawn(priority, async move { log.borrow_mut().push(id) }));
+    }
+    handles[0].set_priority(10);
+    executor.run_until_stalled();
+    assert_eq!(*log.borrow(), ['a', 'c', 'b']);
+}

@@ -14,6 +14,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import textwrap
 
 root = pathlib.Path(__file__).resolve().parent.parent
 subprocess.run(
@@ -26,7 +27,7 @@ blocks = re.compile(r"```(\S*)\n(.*?)```", re.S)
 
 
 def norm(s):
-    return [line.rstrip() for line in s.strip().splitlines()]
+    return [line.rstrip() for line in textwrap.dedent(s).strip().splitlines()]
 
 
 total = drifted = 0
@@ -36,13 +37,21 @@ with tempfile.TemporaryDirectory() as tmp:
         for (lang, code, pos), (next_lang, report, _) in zip(found, found[1:]):
             if not lang.startswith("rust") or next_lang != "text":
                 continue
+            # `explain` output starts with a header naming the function.
+            report = re.sub(r"\A\s*psync::graph `[^`]*`:\n", "", report)
             if not report.lstrip().startswith("region") or not re.search(r"\bfn\b", code):
+                continue
+            if "{ /* ... */ }" in code:  # the body is elided; the full function is elsewhere
                 continue
             total += 1
             where = f"{md.relative_to(root)} (offset {pos})"
             file = pathlib.Path(tmp) / f"{md.stem}-{pos}.rs"
-            file.write_text(code)
-            line = next(i for i, l in enumerate(code.splitlines(), 1) if re.search(r"\bfn\b", l))
+            file.write_text(textwrap.dedent(code))
+            # The annotated function if there is one, else the first function.
+            lines = code.splitlines()
+            marked = [i for i, l in enumerate(lines) if re.match(r"\s*#\[(psync::)?graph", l)]
+            start = marked[0] if marked else 0
+            line = next(i for i, l in enumerate(lines[start:], start + 1) if re.search(r"\bfn\b", l))
             run = subprocess.run([expand, file, str(line + 1)], capture_output=True, text=True)
             try:
                 got = json.loads(run.stdout)["explain"]

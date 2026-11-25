@@ -20,12 +20,11 @@ psync = { path = "../psync", default-features = false }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 ```
 
-> **Which version.** This book describes the development branch, which is not published yet.
-> The branch `claude/initial_psync_graph` on GitHub
-> (`psync = { git = "https://github.com/sahastasai/psync", branch = "claude/initial_psync_graph" }`)
-> has an earlier `#[psync::graph]`, with the scheduling of the Guide but without side effects,
-> `#[psync::speculate]`, `strict`, `effects(..)`, the `MultiExecutor` or `cargo psync`. Everything
-> in [Safety](./safety/effects.md) needs the development branch.
+> **Which version.** This book describes `main` on GitHub
+> (`psync = { git = "https://github.com/sahastasai/psync", branch = "main" }`). The older branch
+> `claude/initial_psync_graph` has an earlier `#[psync::graph]`, with the scheduling of the Guide
+> but without side effects, `#[psync::speculate]`, `strict`, `effects(..)`, the `MultiExecutor`
+> or `cargo psync`. Everything in [Safety](./safety/effects.md) needs `main`.
 
 On a desktop or server, use `default-features = false`. The default feature, `rp235x`, adds the
 RP2350 heap and hardware support, and you only want that for firmware.
@@ -163,3 +162,35 @@ cargo test --no-default-features --test graph            # behaviour tests for t
 cargo test --no-default-features --test scheduling       # executor tests
 cargo run --example graph_suite --no-default-features    # 16 real-world shapes, timed
 ```
+
+## Exercises
+
+1. In `dashboard`, change the third request to `fetch(&user, 100)`. What does `explain` print
+   now, and about how long does the program take?
+2. You build once, then run `PSYNC_GRAPH=off cargo run` and the program still takes about
+   100 ms. What happened?
+3. In `sum`, change `b` to `let b = work(10, a + 1).await;`. Does psync still overlap anything?
+   Check with `psync-expand`.
+
+<details>
+<summary>Answers</summary>
+
+1. ```text
+     region 0:
+       n0: user = fetch()? [await] {read service "user" (fetch)}
+       n1: orders = fetch()? [await] {read service "orders" (fetch)}
+       n2: weather = fetch()? [await] {read service `user` (fetch)}
+       n0 -> n2 (reads `user`)
+       level 0: n0->n2 || n1
+   ```
+
+   The third request reads `user`, so it waits for the first. They form a chain, `n0->n2`,
+   next to `n1`. That takes about 200 ms: 100 for `user`, then 100 for the request that needs it,
+   while `orders` runs beside them. (The target is now `` `user` ``, in backticks: a binding,
+   not a string.)
+2. Cargo did not rebuild the crate, because it does not track `PSYNC_GRAPH`. It reused the
+   concurrent expansion. Touch the annotated file, or use a separate `CARGO_TARGET_DIR`.
+3. No. `b` reads `a`, so the two awaits form one chain, and the region is `(unchanged)`. The
+   function runs exactly as written.
+
+</details>

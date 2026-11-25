@@ -61,8 +61,10 @@ Three things to know about this shape:
   error, as the sequential loop would. But keys 4 to 7 (and every later key) were still looked up.
   That is the speculation the attribute allows. For reads it does not matter. For writes, see
   [Side effects](../safety/effects.md).
-- **All results are buffered.** The loop holds every item's prefix output until the rest of the
-  body runs. For very long loops, choose a `bound` and think about memory.
+- **All results are buffered.** The loop holds every item's prefix output (and creates every
+  item's future up front) until the rest of the body runs. `bound` does not reduce this. For very
+  long loops over large results, batch the input yourself
+  ([Memory](./patterns.md#memory)).
 
 `bound` defaults to 16. You set it per function: `#[psync::graph(bound = 4)]`.
 
@@ -270,3 +272,86 @@ while size < min {
 The first half (`guard`, `size += 1`) runs as a plain `while` loop and collects each iteration's
 `guard`. The connections are then made concurrently. This is sqlx's `try_min_connections`: reserve
 in order, connect concurrently.
+
+## Exercises
+
+Predict the `loop` line of the report, then check with `psync-expand FILE LINE` on a file holding
+the function.
+
+1. Add a second lookup to `sizes`, after `meta`: `let tags = store.tags(key).await?;`, and add
+   `tags.len() as u64` to `total`. What does psync prefetch, and how many at a time?
+2. Instead, add `store.touch(key).await?;` after `meta`. What is prefetched now? Why? What would
+   `#[psync::speculate]` on the loop change?
+3. Predict the report for both of these. Why do they differ?
+
+   ```rust,ignore
+   async fn save_all(items: &[Item]) {
+       for item in items {
+           let bytes = item.json();
+           tokio::fs::write("out.json", bytes).await;
+       }
+   }
+   ```
+
+   The second version writes `format!("{}.json", item.id)` instead of `"out.json"`.
+4. This function passes the previous size to each lookup. What does psync say?
+
+   ```rust,ignore
+   async fn sizes(store: &Store, keys: &[String]) -> u64 {
+       let mut total = 0;
+       let mut last = 0;
+       for key in keys {
+           let meta = store.head(key, last).await;
+           last = meta.size;
+           total += meta.size;
+       }
+       total
+   }
+   ```
+
+5. This loop returns at the first big object:
+
+   ```rust,ignore
+   async fn first_big(store: &Store, keys: &[String]) -> Option<u64> {
+       for key in keys {
+           let meta = store.head(key).await;
+           if meta.size > 100 {
+               return Some(meta.size);
+           }
+       }
+       None
+   }
+   ```
+
+   Is it rewritten? With 1000 keys, where the first one is big, how many `head` requests does
+   the sequential loop make, and how many does the rewritten one make? When would that matter?
+
+<details>
+<summary>Answers</summary>
+
+1. Both: ``prefetch [meta = head()?, tags = tags()?], 8 at a time``. The prefix is every leading
+   awaited statement that touches only the item, and `bound = 8` sets how many run at once.
+2. ``prefetch [meta = head()?], 16 at a time``. `touch` is one of the method names psync treats
+   as a write to its receiver ([Side effects](../safety/effects.md)), and `head`'s `?` can end
+   the loop. A prefetching loop would touch later keys before knowing whether an earlier key
+   failed, which sequential code never does. With `#[psync::speculate]` it says
+   ``prefetch [meta = head()?, touch()?]``: you have said that touching a key that sequential
+   code would not reach is fine. (This function has no `bound`, so it is 16.)
+3. The first stays sequential:
+   ``would write file "out.json" (fs::write) in every iteration at once``. Every iteration
+   writes the same file, and the last write must win. `#[psync::speculate]` does not change
+   this, because it is about exits, not about order. The second is rewritten:
+   ``prefetch [bytes = item . json (), fs::write()], 16 at a time; per-item files checked at run time``.
+   The names differ per item, but psync cannot prove that two items never have the same `id`.
+   It compares the paths before starting, and falls back to the sequential loop if two are the
+   same ([Checking per-item files](../internals/loops.md)).
+4. ``reads `last`, which the loop body writes``. Each lookup needs the previous iteration's
+   result, so the iterations really are a chain, and the loop stays as written.
+5. Yes: ``prefetch [meta = head()], 16 at a time``. The `return` is replayed in order, so the
+   function returns the first key's size as before. But all 1000 `head` requests run, at most
+   16 at a time, against 1 for the sequential loop. All prefixes complete before the rest of the
+   body runs for the first item. That is fine when the big object is usually late, or not there.
+   It is wasteful when it is usually early, and harmful against a rate-limited service. Then
+   keep the loop sequential with `#[psync::seq]`, or split the keys into batches.
+
+</details>
