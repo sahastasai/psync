@@ -203,10 +203,12 @@ The places are those the driver can see, so the claim is "every place the driver
   the build, FFI, drop glue and inline assembly. Raw pointers that the driver cannot trace are
   "any state" only when they reach a standard-library call on a non-`Freeze` type; writes
   through a raw pointer by hand are not seen.
-- **Aliasing between a reference and a static.** `n/x/$state` does not overlap `h/<static>`:
-  if a reference argument points to a static that another statement of the same region names
-  directly, the certificate misses that conflict. (Two references, or a reference and an unknown
-  one, are handled: `h/$ref` meets `h`.)
+- **Aliasing between references.** The state behind `x` is named by the binding `x`. Two
+  different bindings are taken to reach different state, unless one is computed from the other in
+  the region (then data flow orders them). So two parameters that the caller points at the same
+  cell, or a reference parameter that points to a static another statement names directly, are a
+  conflict the certificate misses. Only a reference the driver could not follow is "any state"
+  (`h`, which every `h/…` and `h/$ref` meets).
 - **Generic code.** A summary is computed once for a generic function. State behind a reference
   to a type parameter counts only if the type is a cell, lock or atomic for every instance.
 - **The facts are as current as the last `cargo psync check`.** CI regenerates them; locally,
