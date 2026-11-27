@@ -82,3 +82,47 @@ Everything else that does not await is an ordinary statement, an effect, and kee
 Report labels are made from the bindings and the first awaited callee (`user = user()?`). A
 non-awaited binding shows the first 23 characters of its value. A trailing `?` means the node can
 exit.
+
+## Exercises
+
+Classify each statement of this function as a barrier, an effect or another node, then check
+with `psync-expand FILE LINE` (the JSON report's nodes have `"effect"`):
+
+```rust,ignore
+async fn f(api: &Api, m: &Mutex<Vec<u32>>, id: u64, name: &str) -> u64 {
+    let a = api.one().await;
+    let k = id * 10;
+    let up = name.to_uppercase();
+    let n = {
+        let g = m.lock().await;
+        g.len()
+    };
+    println!("{a}");
+    let b = api.two(k).await;
+    let t0 = std::time::Instant::now();
+    let c = api.three().await;
+    let d = api.four().await;
+    a + b + c + d + n as u64 + up.len() as u64 + t0.elapsed().as_millis() as u64
+}
+```
+
+1. Which statements are barriers, and how many regions are there?
+2. Which nodes are effects? Why is there an edge `n2 -> n4 (effect order)`?
+3. The report also says ``barrier: line 7: `let g = m . lock () . await ;` ``. Is the lock a
+   barrier of `f`?
+
+<details>
+<summary>Answers</summary>
+
+1. `let t0 = Instant::now();` (a clock read) and the last line (the block's value). So there are
+   two regions: everything before the clock, and `c`, `d` after it, where `c || d` run together.
+2. `up = name . to_uppercase ()` and `println!`. `k = id * 10` is a pure binding. `to_uppercase`
+   is not on the list of read-only methods, so psync treats it as an ordinary statement, and two
+   ordinary statements keep their order: hence the edge to `println!`. Every awaiting `let` is a
+   node, not an effect.
+3. No. The guard is dropped inside the block, so `n = lock()` is an ordinary node of `f`, and
+   runs beside `one`, `two` and `to_uppercase`. The barrier is in the nested block's own
+   statements, where the lock comes before `g.len()`, and psync reports it while scheduling that
+   block.
+
+</details>

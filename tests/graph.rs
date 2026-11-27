@@ -1012,3 +1012,23 @@ fn awaits_inside_bindings_overlap() {
     assert_eq!(peak, 4);
     assert_eq!(polls, T as usize + 1);
 }
+
+// The answer to an exercise in the book's chapter on the schedule: a crossing edge makes a level
+// wait for all of its chains.
+#[graph]
+async fn crossing() -> (u32, u32) {
+    let a1 = io(T, 1).await;
+    let a2 = io(3 * T, 2).await;
+    let b1 = io(3 * T, a1 + 10).await;
+    let b2 = io(T, a1 + a2).await;
+    (b1, b2)
+}
+
+#[test]
+fn book_levels_wait_for_all_their_chains() {
+    let ((b1, b2), polls, peak) = run(crossing());
+    assert_eq!((b1, b2), (11, 3));
+    assert_eq!(peak, 2);
+    // a1 || a2 (3T), then b1 || b2 (3T): 6T. Starting b1 when a1 ends would give 4T.
+    assert_eq!(polls, 6 * T as usize + 1);
+}

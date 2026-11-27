@@ -137,6 +137,41 @@ to differ between items.
 
 `tests/targets.rs` runs both cases. Without the check, a file named twice ends at `1`.
 
+### Exercises
+
+Each loop is `for name in names { .. }` in an async function with `dir: &Path`,
+`dirs: &[PathBuf]` and `api: &Api`. Predict the `loop` line of the report, then check with
+`psync-expand`.
+
+1. ```rust,ignore
+   let path = dir.join(name);
+   let old = tokio::fs::read_to_string(&path).await;
+   tokio::fs::write(&path, old).await;
+   ```
+2. The same, with `let path = api.locate(name).await;`.
+3. The same, with `let path = dirs[0].join(name);`.
+4. ```rust,ignore
+   let old = tokio::fs::read_to_string(dir.join(name)).await;
+   tokio::fs::write(dir.join("total"), old).await;
+   ```
+
+<details>
+<summary>Answers</summary>
+
+1. ``prefetch [..], 16 at a time; per-item files checked at run time``. The path is total and
+   depends only on the item, so the generated code compares every item's path first, and runs
+   the loop as written if two are the same file.
+2. ``per-item files assumed distinct: the path `& path` depends on `path`, computed in the body``.
+   An awaited value cannot be computed ahead for every item, so psync falls back to assuming
+   that different items name different files.
+3. The same message. `dirs[0]` is indexing, which may panic, so the `let` is not total, and `path`
+   is not substituted. Evaluating it for an item the loop never reaches must not panic.
+4. Not prefetched: ``write file `dir . join ("total")` (fs::write) vs read file `dir . join (name)` (fs::read_to_string), which every iteration performs``.
+   Every iteration writes the same file, which may be one that another iteration's prefix reads
+   (`name` could be `"total"`).
+
+</details>
+
 ## Fission
 
 `fission_with(head, label, attrs, pattern, body)`:
