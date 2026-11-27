@@ -192,189 +192,191 @@ def c12 : Cert where
 The schedule psync generated for `await_inside_a_binding` (tests/graph.rs, region 0): 8 statements in 3 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 8 statements in program order. -/
 theorem c12_ok : check c12 = true := by decide
 
-/-- tests/sync.rs: `three_downloads`, region 0 -/
+/-- tests/graph.rs: `crossing`, region 0 -/
 def c13 : Cert where
+  nodes := [
+    { reads := [[0, 1], [0, 2], [3, 1], [3, 2]], writes := [[0, 11]] },
+    { reads := [[0, 1], [0, 2], [3, 1], [3, 2]], writes := [[0, 12]] },
+    { reads := [[0, 1], [0, 11], [0, 2], [3, 1], [3, 11], [3, 2]], writes := [[0, 13]] },
+    { reads := [[0, 1], [0, 11], [0, 12], [0, 2], [3, 1], [3, 11], [3, 12], [3, 2]], writes := [[0, 14]] }]
+  levels := [[[0], [1]], [[2], [3]]]
+
+/-- $$\operatorname{check}(\mathtt{c13}) = \mathsf{true}$$
+
+The schedule psync generated for `crossing` (tests/graph.rs, region 0): 4 statements in 2 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 4 statements in program order. -/
+theorem c13_ok : check c13 = true := by decide
+
+/-- tests/sync.rs: `three_downloads`, region 0 -/
+def c14 : Cert where
   nodes := [
     { reads := [[0, 24], [0, 69], [3, 24], [3, 69]], writes := [[0, 4]] },
     { reads := [[0, 24], [0, 69], [3, 24], [3, 69]], writes := [[0, 5]] },
     { reads := [[0, 4], [0, 24], [0, 69], [3, 4], [3, 24], [3, 69]], writes := [[0, 6]] }]
   levels := [[[0, 2], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c13}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c14}) = \mathsf{true}$$
 
 The schedule psync generated for `three_downloads` (tests/sync.rs, region 0): 3 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 3 statements in program order. -/
-theorem c13_ok : check c13 = true := by decide
+theorem c14_ok : check c14 = true := by decide
 
 /-- tests/sync.rs: `first_error_wins`, region 0 -/
-def c14 : Cert where
+def c15 : Cert where
   nodes := [
     { reads := [[0, 15], [0, 24], [0, 69], [3, 15], [3, 24], [3, 69]], writes := [[0, 4], [19, 20]] },
     { reads := [[0, 15], [0, 24], [0, 69], [3, 15], [3, 24], [3, 69]], writes := [[0, 5], [19, 22]] }]
   levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c14}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c15}) = \mathsf{true}$$
 
 The schedule psync generated for `first_error_wins` (tests/sync.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c14_ok : check c14 = true := by decide
+theorem c15_ok : check c15 = true := by decide
 
 /-- tests/sync.rs: `panic_after_error`, region 0 -/
-def c15 : Cert where
+def c16 : Cert where
   nodes := [
     { reads := [[0, 15], [0, 17], [0, 18], [0, 24], [0, 69], [3, 15], [3, 17], [3, 18], [3, 24], [3, 69]], writes := [[0, 4], [19, 20]] },
     { reads := [[0, 24], [0, 69], [0, 70], [3, 24], [3, 69], [3, 70]], writes := [[0, 5]] }]
   levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c15}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c16}) = \mathsf{true}$$
 
 The schedule psync generated for `panic_after_error` (tests/sync.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c15_ok : check c15 = true := by decide
+theorem c16_ok : check c16 = true := by decide
 
 /-- tests/sync.rs: `returns_future`, region 0 -/
-def c16 : Cert where
+def c17 : Cert where
   nodes := [
     { reads := [[0, 19], [3, 19]], writes := [[0, 4]] },
     { reads := [[0, 19], [3, 19]], writes := [[0, 5]] }]
   levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c16}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c17}) = \mathsf{true}$$
 
 The schedule psync generated for `returns_future` (tests/sync.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c16_ok : check c16 = true := by decide
+theorem c17_ok : check c17 = true := by decide
 
 /-- tests/sync.rs: `speculative_writes`, region 0 -/
-def c17 : Cert where
+def c18 : Cert where
   nodes := [
     { reads := [[0, 15], [0, 17], [0, 41], [0, 71], [0, 72], [0, 18], [0, 73], [0, 24], [0, 30], [0, 69], [0, 70], [0, 74], [3, 15], [3, 17], [3, 41], [3, 71], [3, 72], [3, 18], [3, 73], [3, 24], [3, 30], [3, 69], [3, 70], [3, 74], [37, 75, 60, 76, 77, 78, 0, 8, 77], [37, 38]], writes := [[37, 75, 60, 76, 77, 78, 0, 8, 77], [37, 75, 60, 76, 77, 78, 0, 8, 77], [19, 20]] },
     { reads := [[0, 17], [0, 41], [0, 71], [0, 72], [0, 73], [0, 24], [0, 30], [0, 69], [0, 70], [0, 74], [3, 17], [3, 41], [3, 71], [3, 72], [3, 73], [3, 24], [3, 30], [3, 69], [3, 70], [3, 74], [37, 75, 60, 76, 77, 60, 37, 78, 77], [37, 38]], writes := [[37, 75, 60, 76, 77, 60, 37, 78, 77], [37, 75, 60, 76, 77, 60, 37, 78, 77], [19, 22]] }]
   levels := [[[0], [1]]]
   holes := [76]
 
-/-- $$\operatorname{check}(\mathtt{c17}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c18}) = \mathsf{true}$$
 
 The schedule psync generated for `speculative_writes` (tests/sync.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c17_ok : check c17 = true := by decide
+theorem c18_ok : check c18 = true := by decide
 
 /-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `start`, region 0 -/
-def c18 : Cert where
+def c19 : Cert where
   nodes := [
     { reads := [[0, 79], [3, 79]], writes := [[19, 20]] },
     { reads := [[0, 80], [3, 80], [37, 38]], writes := [[0, 81], [19, 22]] }]
   levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c18}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c19}) = \mathsf{true}$$
 
 The schedule psync generated for `start` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c18_ok : check c18 = true := by decide
+theorem c19_ok : check c19 = true := by decide
 
 /-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `login`, region 0 -/
-def c19 : Cert where
+def c20 : Cert where
   nodes := [
     { reads := [[0, 81], [3, 81], [37, 38, 81]], writes := [[19, 20]] },
     { reads := [[0, 81], [3, 81], [37, 38, 81]], writes := [[0, 60]] }]
   levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c19}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c20}) = \mathsf{true}$$
 
 The schedule psync generated for `login` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c19_ok : check c19 = true := by decide
+theorem c20_ok : check c20 = true := by decide
 
 /-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `sizes`, region 0 -/
-def c20 : Cert where
+def c21 : Cert where
   nodes := [
     { reads := [[0, 82], [3, 82], [37, 38]], writes := [[0, 4], [19, 20]] },
     { reads := [[0, 82], [3, 82], [37, 38]], writes := [[0, 5], [19, 22]] }]
   levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c20}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c21}) = \mathsf{true}$$
 
 The schedule psync generated for `sizes` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c20_ok : check c20 = true := by decide
+theorem c21_ok : check c21 = true := by decide
 
 /-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `shared`, region 0 -/
-def c21 : Cert where
+def c22 : Cert where
   nodes := [
     { reads := [[0, 83], [0, 24], [3, 83], [3, 24]], writes := [[0, 4]] },
     { reads := [[0, 83], [0, 24], [3, 83], [3, 24]], writes := [[0, 5]] }]
   levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c21}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c22}) = \mathsf{true}$$
 
 The schedule psync generated for `shared` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c21_ok : check c21 = true := by decide
+theorem c22_ok : check c22 = true := by decide
 
 /-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `snapshot`, region 0 -/
-def c22 : Cert where
+def c23 : Cert where
   nodes := [
     { reads := [[0, 59], [3, 59]], writes := [[19, 20]] },
     { reads := [[0, 84], [3, 84], [37, 38]], writes := [[0, 0], [19, 22]] }]
   levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c22}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c23}) = \mathsf{true}$$
 
 The schedule psync generated for `snapshot` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c22_ok : check c22 = true := by decide
+theorem c23_ok : check c23 = true := by decide
 
 /-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `walk_then_read`, region 0 -/
-def c23 : Cert where
+def c24 : Cert where
   nodes := [
     { reads := [[0, 85], [3, 85]], writes := [[19, 20]] },
     { reads := [[0, 86], [3, 86], [37, 38]], writes := [[0, 4], [19, 22]] }]
   levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c23}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c24}) = \mathsf{true}$$
 
 The schedule psync generated for `walk_then_read` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c23_ok : check c23 = true := by decide
+theorem c24_ok : check c24 = true := by decide
 
 /-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `tour`, region 0 -/
-def c24 : Cert where
+def c25 : Cert where
   nodes := [
     { reads := [[0, 87], [3, 87]], writes := [[19, 20]] },
     { reads := [[0, 88], [3, 88], [37, 38]], writes := [[0, 0], [19, 22]] }]
   levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c24}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c25}) = \mathsf{true}$$
 
 The schedule psync generated for `tour` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c24_ok : check c24 = true := by decide
+theorem c25_ok : check c25 = true := by decide
 
 /-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `release`, region 0 -/
-def c25 : Cert where
+def c26 : Cert where
   nodes := [
     { reads := [[0, 89], [3, 89]], writes := [[19, 20]] },
     { reads := [[0, 90], [3, 90], [37, 38]], writes := [[0, 0], [19, 22]] }]
   levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c25}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c26}) = \mathsf{true}$$
 
 The schedule psync generated for `release` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c25_ok : check c25 = true := by decide
+theorem c26_ok : check c26 = true := by decide
 
 /-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `boot`, region 0 -/
-def c26 : Cert where
+def c27 : Cert where
   nodes := [
     { reads := [[0, 91], [3, 91]], writes := [[0, 0]] },
     { reads := [[0, 92], [3, 92]], writes := [[19, 22]] }]
   levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c26}) = \mathsf{true}$$
-
-The schedule psync generated for `boot` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c26_ok : check c26 = true := by decide
-
-/-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `stash_both`, region 0 -/
-def c27 : Cert where
-  nodes := [
-    { reads := [[0, 93], [3, 93]], writes := [[0, 94]] },
-    { reads := [[0, 93], [3, 93]], writes := [[0, 95]] }]
-  levels := [[[0], [1]]]
-
 /-- $$\operatorname{check}(\mathtt{c27}) = \mathsf{true}$$
 
-The schedule psync generated for `stash_both` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
+The schedule psync generated for `boot` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
 theorem c27_ok : check c27 = true := by decide
 
-/-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `stash_same`, region 0 -/
+/-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `stash_both`, region 0 -/
 def c28 : Cert where
   nodes := [
     { reads := [[0, 93], [3, 93]], writes := [[0, 94]] },
@@ -383,22 +385,22 @@ def c28 : Cert where
 
 /-- $$\operatorname{check}(\mathtt{c28}) = \mathsf{true}$$
 
-The schedule psync generated for `stash_same` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
+The schedule psync generated for `stash_both` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
 theorem c28_ok : check c28 = true := by decide
 
-/-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `keep_both`, region 0 -/
+/-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `stash_same`, region 0 -/
 def c29 : Cert where
   nodes := [
-    { reads := [[0, 96], [3, 96]], writes := [[0, 4]] },
-    { reads := [[0, 96], [3, 96]], writes := [[0, 5]] }]
+    { reads := [[0, 93], [3, 93]], writes := [[0, 94]] },
+    { reads := [[0, 93], [3, 93]], writes := [[0, 95]] }]
   levels := [[[0], [1]]]
 
 /-- $$\operatorname{check}(\mathtt{c29}) = \mathsf{true}$$
 
-The schedule psync generated for `keep_both` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
+The schedule psync generated for `stash_same` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
 theorem c29_ok : check c29 = true := by decide
 
-/-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `keep_same`, region 0 -/
+/-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `keep_both`, region 0 -/
 def c30 : Cert where
   nodes := [
     { reads := [[0, 96], [3, 96]], writes := [[0, 4]] },
@@ -407,24 +409,36 @@ def c30 : Cert where
 
 /-- $$\operatorname{check}(\mathtt{c30}) = \mathsf{true}$$
 
-The schedule psync generated for `keep_same` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
+The schedule psync generated for `keep_both` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
 theorem c30_ok : check c30 = true := by decide
 
-/-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `stash_tail`, region 0 -/
+/-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `keep_same`, region 0 -/
 def c31 : Cert where
+  nodes := [
+    { reads := [[0, 96], [3, 96]], writes := [[0, 4]] },
+    { reads := [[0, 96], [3, 96]], writes := [[0, 5]] }]
+  levels := [[[0], [1]]]
+
+/-- $$\operatorname{check}(\mathtt{c31}) = \mathsf{true}$$
+
+The schedule psync generated for `keep_same` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
+theorem c31_ok : check c31 = true := by decide
+
+/-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `stash_tail`, region 0 -/
+def c32 : Cert where
   nodes := [
     { reads := [[0, 93], [3, 93]], writes := [[0, 94]] },
     { reads := [[0, 93], [3, 93]], writes := [[0, 95]] },
     { reads := [[0, 94], [3, 94]], writes := [[19, 23], [8]] }]
   levels := [[[0, 2], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c31}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c32}) = \mathsf{true}$$
 
 The schedule psync generated for `stash_tail` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 3 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 3 statements in program order. -/
-theorem c31_ok : check c31 = true := by decide
+theorem c32_ok : check c32 = true := by decide
 
 /-- examples/graph_suite/chains.rs: `run`, region 0 -/
-def c32 : Cert where
+def c33 : Cert where
   nodes := [
     { reads := [[0, 97], [3, 97, 40]], writes := [[3, 97, 40], [8]] },
     { reads := [[0, 97], [3, 97, 42], [37, 38, 97, 42]], writes := [[0, 98], [19, 22]] },
@@ -434,26 +448,26 @@ def c32 : Cert where
     { reads := [[0, 47], [0, 115], [0, 117], [0, 118], [0, 116], [0, 114], [0, 97], [0, 53], [0, 57], [3, 47], [3, 115], [3, 117], [3, 118], [3, 116], [3, 114], [3, 97, 40], [3, 53], [3, 57]], writes := [[3, 97, 40], [19, 58], [8]] }]
   levels := [[[0], [1], [3, 4]], [[2]], [[5]]]
 
-/-- $$\operatorname{check}(\mathtt{c32}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c33}) = \mathsf{true}$$
 
 The schedule psync generated for `run` (examples/graph_suite/chains.rs, region 0): 6 statements in 3 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 6 statements in program order. -/
-theorem c32_ok : check c32 = true := by decide
+theorem c33_ok : check c33 = true := by decide
 
 /-- examples/graph_suite/late_start.rs: `put_and_upload_sst`, region 0 -/
-def c33 : Cert where
+def c34 : Cert where
   nodes := [
     { reads := [[0, 119], [0, 120], [3, 119], [3, 120]], writes := [[0, 121], [19, 20]] },
     { reads := [[0, 119], [0, 120], [3, 119], [3, 120]], writes := [[0, 122], [37, 38, 119], [19, 22]] },
     { reads := [[0, 119], [0, 120], [0, 121], [3, 119], [3, 120], [3, 121]], writes := [[0, 123], [37, 38, 119], [19, 23]] }]
   levels := [[[0], [1]], [[2]]]
 
-/-- $$\operatorname{check}(\mathtt{c33}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c34}) = \mathsf{true}$$
 
 The schedule psync generated for `put_and_upload_sst` (examples/graph_suite/late_start.rs, region 0): 3 statements in 2 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 3 statements in program order. -/
-theorem c33_ok : check c33 = true := by decide
+theorem c34_ok : check c34 = true := by decide
 
 /-- examples/graph_suite/late_start.rs: `checkpoint_sync`, region 0 -/
-def c34 : Cert where
+def c35 : Cert where
   nodes := [
     { reads := [[0, 124], [3, 124], [37, 38, 124, 60, 9, 125, 0, 4, 126, 125, 127, 8, 7, 61]], writes := [[0, 128], [19, 20]] },
     { reads := [[0, 124], [0, 128], [3, 124], [3, 128], [37, 38, 124]], writes := [[0, 129], [19, 22]] },
@@ -461,13 +475,13 @@ def c34 : Cert where
     { reads := [[0, 131], [3, 131]], writes := [[0, 132], [19, 26]] }]
   levels := [[[0, 1, 2], [3]]]
 
-/-- $$\operatorname{check}(\mathtt{c34}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c35}) = \mathsf{true}$$
 
 The schedule psync generated for `checkpoint_sync` (examples/graph_suite/late_start.rs, region 0): 4 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 4 statements in program order. -/
-theorem c34_ok : check c34 = true := by decide
+theorem c35_ok : check c35 = true := by decide
 
 /-- examples/graph_suite/late_start.rs: `fetch_extensions_from_blob_store`, region 0 -/
-def c35 : Cert where
+def c36 : Cert where
   nodes := [
     { reads := [[0, 133], [3, 133], [37, 38, 133, 60, 8, 19, 60, 8, 0, 81, 125, 78, 0, 81, 77, 61]], writes := [[0, 134], [19, 20]] },
     { reads := [[0, 30], [3, 30]], writes := [[0, 135]] },
@@ -475,13 +489,13 @@ def c35 : Cert where
     { reads := [[0, 138], [3, 138], [37, 38, 138]], writes := [[0, 139], [19, 26]] }]
   levels := [[[0], [1], [3]], [[2]]]
 
-/-- $$\operatorname{check}(\mathtt{c35}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c36}) = \mathsf{true}$$
 
 The schedule psync generated for `fetch_extensions_from_blob_store` (examples/graph_suite/late_start.rs, region 0): 4 statements in 2 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 4 statements in program order. -/
-theorem c35_ok : check c35 = true := by decide
+theorem c36_ok : check c36 = true := by decide
 
 /-- examples/graph_suite/sequential_awaits.rs: `process_show_validators`, region 0 -/
-def c36 : Cert where
+def c37 : Cert where
   nodes := [
     { reads := [[0, 140], [3, 140], [37, 38, 140]], writes := [[0, 141], [19, 20]] },
     { reads := [[0, 140], [3, 140], [37, 38, 140]], writes := [[0, 142], [19, 22]] },
@@ -489,13 +503,13 @@ def c36 : Cert where
     { reads := [[0, 140], [3, 140], [37, 38, 140]], writes := [[0, 144], [19, 26]] }]
   levels := [[[0], [1], [2], [3]]]
 
-/-- $$\operatorname{check}(\mathtt{c36}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c37}) = \mathsf{true}$$
 
 The schedule psync generated for `process_show_validators` (examples/graph_suite/sequential_awaits.rs, region 0): 4 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 4 statements in program order. -/
-theorem c36_ok : check c36 = true := by decide
+theorem c37_ok : check c37 = true := by decide
 
 /-- examples/graph_suite/sequential_awaits.rs: `disable`, region 0 -/
-def c37 : Cert where
+def c38 : Cert where
   nodes := [
     { reads := [[0, 42], [3, 42], [37, 38, 42, 60, 145, 146, 81, 8, 6, 53, 8, 60, 41, 81, 60, 78, 53, 4, 44, 8, 146, 7, 8, 9, 4, 147, 126, 60, 41, 148, 8, 21, 61]], writes := [[0, 149], [19, 20]] },
     { reads := [[0, 42], [3, 42]], writes := [[37, 38, 42, 60, 145, 146, 81, 8, 6, 53, 8, 60, 41, 81, 60, 78, 53, 4, 44, 8, 146, 7, 8, 9, 4, 147, 126, 60, 41, 148, 8, 21, 61], [19, 22]] },
@@ -510,25 +524,25 @@ def c37 : Cert where
   levels := [[[0], [4], [5], [6], [7], [8], [9]], [[1], [2, 3]]]
   holes := [152]
 
-/-- $$\operatorname{check}(\mathtt{c37}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c38}) = \mathsf{true}$$
 
 The schedule psync generated for `disable` (examples/graph_suite/sequential_awaits.rs, region 0): 10 statements in 2 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 10 statements in program order. -/
-theorem c37_ok : check c37 = true := by decide
+theorem c38_ok : check c38 = true := by decide
 
 /-- examples/graph_suite/sequential_awaits.rs: `fetch_page`, region 0 -/
-def c38 : Cert where
+def c39 : Cert where
   nodes := [
     { reads := [[0, 138], [3, 138], [37, 38, 138, 60, 147, 81, 8, 53, 81, 61]], writes := [[0, 159], [19, 20]] },
     { reads := [[0, 138], [0, 160], [0, 161], [3, 138], [3, 160], [3, 161]], writes := [[0, 162], [19, 22]] }]
   levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c38}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c39}) = \mathsf{true}$$
 
 The schedule psync generated for `fetch_page` (examples/graph_suite/sequential_awaits.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c38_ok : check c38 = true := by decide
+theorem c39_ok : check c39 = true := by decide
 
 /-- examples/graph_suite/sequential_awaits.rs: `check_notifications_allowed`, region 0 -/
-def c39 : Cert where
+def c40 : Cert where
   nodes := [
     { reads := [[0, 163], [0, 35], [0, 164], [0, 165], [3, 163], [3, 164], [3, 165], [37, 38]], writes := [[19, 20]] },
     { reads := [[0, 163], [0, 35], [0, 164], [0, 165], [3, 163], [3, 164], [3, 165], [37, 38]], writes := [[19, 22]] },
@@ -538,9 +552,9 @@ def c39 : Cert where
     { reads := [[0, 163], [0, 35], [0, 166], [0, 165], [3, 163], [3, 166], [3, 165], [37, 38]], writes := [[0, 168]] }]
   levels := [[[0], [1], [2], [3], [4], [5]]]
 
-/-- $$\operatorname{check}(\mathtt{c39}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c40}) = \mathsf{true}$$
 
 The schedule psync generated for `check_notifications_allowed` (examples/graph_suite/sequential_awaits.rs, region 0): 6 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 6 statements in program order. -/
-theorem c39_ok : check c39 = true := by decide
+theorem c40_ok : check c40 = true := by decide
 
 end PsyncCerts
