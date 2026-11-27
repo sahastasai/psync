@@ -62,6 +62,8 @@ pub(crate) struct Node {
     pub label: String,
     /// Source line (0 when spans carry no location).
     pub line: usize,
+    /// Last source line of the statement (0 when spans carry no location).
+    pub end_line: usize,
 }
 
 /// The outcome of classifying one statement.
@@ -820,5 +822,6 @@ pub(crate) fn classify(stmt: &Stmt, scope: &Scope, relaxed: bool) -> Class {
         effect,
         exits: x.exits,
         line: line_of(stmt.span()),
+        end_line: end_line_of(stmt.span()),
     }))
 }

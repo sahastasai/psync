@@ -226,6 +226,10 @@ fn main() {
     let mut files = Vec::new();
     let mut facts_text = String::new();
     let mut expect_unsafe: Vec<String> = Vec::new();
+    // `--index FILE`: each certificate's function and its statements' source lines, so that other
+    // tools can find the statements in compiled code (`scripts/charon/llbc2lean.py --cert`).
+    let mut index_path: Option<String> = None;
+    let mut index: Vec<serde_json::Value> = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -234,11 +238,12 @@ fn main() {
                 facts_text += &std::fs::read_to_string(&f).expect("read facts");
             }
             "--expect-unsafe" => expect_unsafe.push(args.next().expect("--expect-unsafe PREFIX")),
+            "--index" => index_path = Some(args.next().expect("--index FILE")),
             _ => files.push(a),
         }
     }
     if files.is_empty() {
-        eprintln!("usage: psync-cert [--facts FACTS]... [--expect-unsafe PREFIX]... FILE... > Certs.lean");
+        eprintln!("usage: psync-cert [--facts FACTS]... [--expect-unsafe PREFIX]... [--index FILE] FILE... > Certs.lean");
         std::process::exit(2);
     }
     let facts = (!facts_text.is_empty()).then(|| FactTable::parse(&facts_text));
@@ -343,6 +348,13 @@ fn main() {
                     let ids: Vec<String> = interner.1.iter().map(usize::to_string).collect();
                     format!("\n  holes := [{}]", ids.join(", "))
                 };
+                index.push(serde_json::json!({
+                    "id": id,
+                    "file": file,
+                    "function": name,
+                    "region": r,
+                    "lines": region.nodes.iter().map(|n| [n.line, n.end_line]).collect::<Vec<_>>(),
+                }));
                 let strict = check(&interner.1, &ids, &levels_ids);
                 let hidden_ids: Vec<Ids> = ids.iter().map(|n| hide(n, &observed_ids)).collect();
                 let visible = check(&interner.1, &hidden_ids, &levels_ids);
@@ -433,6 +445,10 @@ fn main() {
     }
     out.push_str("\nend PsyncCerts\n");
     print!("{out}");
+    if let Some(path) = index_path {
+        let json = serde_json::to_string_pretty(&index).expect("index as JSON");
+        std::fs::write(&path, json + "\n").expect("write the index");
+    }
     eprintln!(
         "psync-cert: {count} certificate(s) from {} file(s): {proved} safe, {hidden} safe but for observed state, {rejected} rejected as expected{}",
         files.len(),

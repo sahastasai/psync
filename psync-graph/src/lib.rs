@@ -267,6 +267,8 @@ pub struct NodeReport {
     pub effect: bool,
     pub exits: bool,
     pub line: usize,
+    /// Its last source line.
+    pub end_line: usize,
     /// Its effects on files, the network, services, processes and the environment.
     pub effects: Vec<String>,
     /// Its writes may run ahead of earlier exits (`#[psync::speculate]`).
@@ -282,6 +284,7 @@ impl From<&classify::Node> for NodeReport {
             effect: n.effect,
             exits: n.exits,
             line: n.line,
+            end_line: n.end_line,
             effects: n.effects.iter().map(effects::Effect::describe).collect(),
             speculate: n.speculate,
         }

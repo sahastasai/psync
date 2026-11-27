@@ -345,11 +345,12 @@ Every node mixes three kinds of places:
 | c14–c16, c18 | `tests/sync.rs`: `three_downloads`, `first_error_wins`, `panic_after_error`, `speculative_writes` | No: `thread::sleep` and `Mutex::lock` have no body, generics, `?` and `expect` (unwinding) | `slow`'s `Mutex` log behind `log`, `n/log/$state` (observed) |
 | c17 | `returns_future` | No: async blocks | nothing |
 | c19–c27, c29, c31 | fixture: `start`, `login`, `sizes`, `shared`, `snapshot`, `walk_then_read`, `tour`, `release`, `boot`, `stash_same`, `keep_same` | No: `async fn`, plus `dyn` (c23), mutual recursion through `Box::pin` (c24, c25), and other crates' functions (c21) | the planted files and the panic, and `shared`'s `RefCell`: refuted, except `sizes` and `walk_then_read` |
-| c28, c30, c32 | fixture: `stash_both`, `keep_both`, `stash_tail` | Not yet for c28 and c32: synchronous, and the blockers are small (`fs::write` has no body, `impl AsRef<Path>` is a by-value generic parameter, `r1?` is an exit). c30: `async fn` | each call's own file, `w/fs/t/a.json/` and so on: they never meet |
+| c28, c30, c32 | fixture: `stash_both`, `keep_both`, `stash_tail` | c28 and c32: yes, through Charon with models of `fs::write`, `as_ref` and `?` (`verify/CharonFixture.lean`). c30: no, `async fn` | each call's own file, `w/fs/t/a.json/` and so on: they never meet |
 | c33–c38 | fixture: `counted`, `journaled`, `nested`, `appended`, `hit_and_miss`, `probed` | Not yet: atomics, `Mutex` and `thread_local!` have no body | `h/app/HITS`, `h/app/JOURNAL`, `h/app/DEPTH`, `n/log/$state`, `h/app/MISSES`, `h/app/PROBES` (observed): c33–c36 refuted |
 | c39–c46 | `graph_suite`: `Discovery::run`, `put_and_upload_sst`, `checkpoint_sync`, `fetch_extensions_from_blob_store`, `process_show_validators`, `disable`, `fetch_page`, `check_notifications_allowed` | No: `async fn`. c39 and c42 nodes are also the macro's own `join_all_bounded` code | the suite's timer, `h/graph_suite/runtime/TIMERS` and `SEQ` (observed). The world places are more than the stubs touch |
 
-None of the 47 fits the current fragment, so none is tied to compiled code yet. What changed is
+Three of the 47 are now tied to compiled code: c28 and c32 are proved against it, and c29 is
+refuted (see [the route](#the-route)). The others do not fit the fragment yet. What changed is
 the other half of `hind`: before, 34 of the 41 certificates omitted real writes, so `hind` was
 false for them in the strict sense, and nothing said so. Now every certificate lists the state
 the driver found, and Lean decides each one with it (see [What this changed](#what-this-changed)):
@@ -359,15 +360,19 @@ from compiled code, that the places are complete.
 
 ### The route
 
-1. **The three synchronous fixture functions** (c28, c29, c32). Compile the fixture as written,
-   with `#[psync::graph]` replaced by a macro that only removes psync's statement attributes, so
-   that Charon sees the program in order. Split the function's LLBC into nodes by source line:
-   `psync-cert` needs to write each node's first and last line. Model a constant path as a reference to a file place
-   (`fs::write(p, d)` writes `*p`) and `AsRef::as_ref` as the identity on the reference. Model
-   `r1?` as recording its outcome in its own slot (`recording_slot`). Lean then decides
-   `hindB` for `PsyncCerts.c28` and `c32` (expected: true, so `cert_schedule_sound` applies), and
-   refutes it for `c29` (both calls write `a.json`). Since the facts, `check` already refutes
-   c29 by itself: its certificate names `a.json` in both nodes.
+1. **The three synchronous fixture functions** (c28, c29, c32): done.
+   `scripts/charon/fixture2lean.py` reads Charon's LLBC of the fixture compiled as written
+   (`#[psync::graph]` replaced by a macro that only removes psync's statement attributes), finds
+   each node's statements by the source lines `psync-cert --index` records, and writes
+   `verify/CharonFixture.lean`. It models what has no body: a string constant is a place of its
+   own, `fs::write(p, d)` writes the file `*p.0`, `AsRef::as_ref` is the identity on the
+   reference, `Result::and` and the `?` machinery move values, drops do nothing. Lean then decides
+   `hindB` for `PsyncCerts.c28` and `c32` as `psync-cert` wrote them, and `c28_sound` and
+   `c32_sound` are `cert_schedule_sound` for the compiled code: psync's schedules for
+   `stash_both` and `stash_tail` equal their statements in order. For c29, the certificate from
+   the tokens alone (before the facts) is refuted by `hindB` (`c29_tokens_refuted`): both
+   compiled calls write `a.json`. With the facts, c29's certificate names that file in both
+   nodes, so `hindB` holds, and `check` refutes the schedule instead (`c29_rejected`).
 2. **Interior mutability as places.** Done on the certificate side
    ([Hidden state](#hidden-state-statics-thread-locals-and-cells)): statics, thread-locals and
    cells behind references are places, c22 (`shared`) and c33–c36 are refuted, and the tests that
@@ -386,8 +391,10 @@ models of functions without a body (`fs::write`, `Mutex::lock`), and the gaps of
 ## What a certificate does not cover
 
 - **That the places describe the statements.** This is the hypothesis `hind` of `check_sound`.
-  For a fragment of MIR it is proved: `verify/Footprint.lean` (above). For the 47 generated
-  certificates it is not yet proved for any of them (see the table above). Their places come from
+  For a fragment of MIR it is proved: `verify/Footprint.lean` (above). Of the 47 generated
+  certificates, it is decided against compiled code for c28 and c32 (and c29's tokens-only
+  certificate is refuted), under the models of body-less calls listed above. For the others it
+  is not proved (see the table above). Their places come from
   the tokens and from the driver's facts about the compiled callees, including hidden state, so
   what they still omit is what the driver cannot see
   ([What the facts do not see](#what-the-facts-do-not-see)). The gap between real MIR and the
