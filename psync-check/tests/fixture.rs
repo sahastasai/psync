@@ -124,6 +124,35 @@ fn finds_effects_hidden_in_callees() {
             .iter()
             .any(|f| f.kind == "interior-mutability" && f.severity == Severity::Note)
     );
+    // Hidden state touched by two chains of one level is a warning: the `RefCell` behind `log` in
+    // `shared`, a static atomic, a static `Mutex`, a `thread_local!`, and a `Mutex` behind a
+    // reference. Two different statics, and a static marked `#[psync::observed]`, are not.
+    for function in ["shared", "counted", "journaled", "nested", "appended"] {
+        assert!(
+            app.findings.iter().any(|f| f.kind == "shared-state"
+                && f.function == function
+                && f.severity == Severity::Warning),
+            "{function}: {:#?}",
+            app.findings
+        );
+    }
+    assert!(
+        app.findings.iter().any(|f| f.function == "counted" && f.message.contains("state `app::HITS`")),
+        "{:#?}",
+        app.findings
+    );
+    assert!(
+        app.findings.iter().any(|f| f.function == "nested" && f.message.contains("state `app::DEPTH`")),
+        "{:#?}",
+        app.findings
+    );
+    for function in ["hit_and_miss", "probed"] {
+        assert!(
+            !app.findings.iter().any(|f| f.function == function && f.severity == Severity::Warning),
+            "{function}: {:#?}",
+            app.findings
+        );
+    }
     // A `dyn Store` whose implementation writes the file the next call reads: resolved by the
     // link step over every implementation in the build, then checked in a second pass.
     assert!(at("conflict", "lib.rs:111"), "{:#?}", app.findings);
@@ -242,6 +271,11 @@ fn finds_effects_hidden_in_callees() {
         "boot",
         "stash_same",
         "keep_same",
+        "shared",
+        "counted",
+        "journaled",
+        "nested",
+        "appended",
     ] {
         assert!(
             !app.functions.contains_key(sequential),
@@ -269,6 +303,15 @@ fn finds_effects_hidden_in_callees() {
         "{:?}",
         app.functions
     );
+    // Different statics, and observed state, keep the two calls side by side.
+    for parallel in ["hit_and_miss", "probed"] {
+        assert_eq!(
+            app.functions.get(parallel),
+            Some(&(1, 0)),
+            "{parallel}: {:?}",
+            app.functions
+        );
+    }
     assert!(stderr.contains("with compiler facts"));
 }
 
@@ -316,11 +359,11 @@ fn fix_inserts_seq_hints_until_clean() {
     };
     let fixed = run("fix");
     assert!(
-        fixed.contains("inserted 9 `#[psync::seq]` hint(s)"),
+        fixed.contains("inserted 14 `#[psync::seq]` hint(s)"),
         "{fixed}"
     );
     let source = std::fs::read_to_string(work.join("app/src/lib.rs")).expect("source");
-    assert_eq!(source.matches("#[psync::seq]").count(), 9);
+    assert_eq!(source.matches("#[psync::seq]").count(), 14);
     assert!(
         source.contains("#[psync::seq]\n    for d in dirs"),
         "{source}"

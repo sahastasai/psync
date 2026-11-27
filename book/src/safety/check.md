@@ -59,8 +59,8 @@ note: the conflicting effect
    = note: in the code `#[psync::graph]` generated for `start`
 ```
 
-The fixture has eleven annotated functions, each hiding something different. The same run finds
-seven more findings. The first three:
+The fixture has 22 annotated functions, most of them hiding something different. Among the
+other findings of the same run, the first three:
 
 - `session.get_token()` writes a file although its name reads. psync starts it before `check()?`
   has succeeded (`speculative-write`):
@@ -88,8 +88,9 @@ seven more findings. The first three:
   51 |         helpers::stamp(&d).await?;
   ```
 
-- With `--notes`, two concurrent chains that both use one `&RefCell<Vec<u32>>`: their updates now
-  interleave (`interior-mutability`).
+- `shared`: two concurrent chains both call `bump(log, ..)`, which pushes onto the
+  `&RefCell<Vec<u32>>` it is given. Their updates now interleave (`shared-state`, a warning; with
+  `--notes` also the older `interior-mutability` note for the captured `RefCell`).
 
 The other four come from cases explained elsewhere in the book:
 
@@ -100,8 +101,15 @@ The other four come from cases explained elsewhere in the book:
 | `release` | `conflict`: `fs::copy` writes its second path, `site.html` | [Adding an effect rule](../contributing/effect-rule.md) |
 | `boot` | `speculative-write`: a write starts before a call that may panic (`unwrap`) | [Adding a check](../contributing/check.md) |
 
-That is eight in all, counting the `--notes` one. Functions with nothing to report get no finding:
-`sizes` and `walk_then_read` read files nobody writes. The test
+Four more plant hidden state, each touched by two statements that psync runs on two threads:
+`counted` (a static atomic), `journaled` (a static `Mutex`), `nested` (a `thread_local!`) and
+`appended` (a `Mutex` behind a reference). Each gets a `shared-state` warning that names the state
+(``write state `app::HITS` ``, ``write state behind parameter 0``).
+
+Functions with nothing to report get no finding: `sizes` and `walk_then_read` read files nobody
+writes, `hit_and_miss` touches two different statics, and `probed` bumps a counter marked
+`#[psync::observed]` (state measured on purpose, see
+[Observed state](./certificates.md#observed-state)). The test
 (`psync-check/tests/fixture.rs`) checks each finding and the total.
 
 ## Walkthrough: check, fix, build
@@ -236,6 +244,7 @@ program order:
 | `conflict` | two chains of one level have conflicting effects: same domain, one writes, targets may be the same, and neither is `independent` |
 | `speculative-write` | a chain writes, another chain of the same level may exit at a statement before the writer's last one (a `?`, `return`, `break` or `continue`, or, from any of its statements, a callee that panics explicitly: `unwrap`, `expect`, `panic!`, `assert!`, `unreachable!`, `todo!`), and the writer is not `speculate` |
 | `loop-speculative-write` | a prefetched prefix writes, the body can end the loop, and the loop is not `speculate` |
+| `shared-state` | two chains of one level touch the same hidden state, one writing: a `static` or `thread_local!` of the workspace, reached through any callee, or a cell, lock or atomic behind references that hold the same variable of the annotated function (or a reference the driver cannot follow, which may be any state). `#[psync::observed]` statics and `observe(x)` bindings are skipped, and `independent` does not cover hidden state ([Hidden state](./certificates.md#hidden-state-statics-thread-locals-and-cells)) |
 | `interior-mutability` (note) | two chains capture the same variable whose type, behind references, `Rc`, `Arc` or `Box`, is a `Cell`, `RefCell`, `OnceCell`, `Mutex`, `RwLock` or atomic |
 | `output-order` (note) | two chains both print |
 

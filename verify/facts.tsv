@@ -1,0 +1,351 @@
+examples/graph_suite/chains.rs:104:28	new	0	0	
+examples/graph_suite/chains.rs:106:37	list_remote_timelines	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/chains.rs:109:42	download_index_part	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/chains.rs:110:41	max	0	0	
+examples/graph_suite/chains.rs:112:36	download_tenant_manifest	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/chains.rs:113:22	push	0	0	
+examples/graph_suite/chains.rs:159:39	new	0	0	
+examples/graph_suite/chains.rs:160:42	new	0	0	
+examples/graph_suite/chains.rs:162:42	list_delete_tasks	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/chains.rs:163:29	is_empty	0	0	
+examples/graph_suite/chains.rs:164:40	push	0	0	
+examples/graph_suite/chains.rs:167:38	leaf_search	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/chains.rs:167:58	deref	0	0	
+examples/graph_suite/chains.rs:169:37	push	0	0	
+examples/graph_suite/chains.rs:171:40	push	0	0	
+examples/graph_suite/chains.rs:54:26	clear	0	0	
+examples/graph_suite/chains.rs:55:43	list_api_groups	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/chains.rs:57:25	clone	0	0	
+examples/graph_suite/chains.rs:58:31	is_queryable	0	0	
+examples/graph_suite/chains.rs:58:44	deref	0	0	
+examples/graph_suite/chains.rs:59:49	query_apis	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/chains.rs:59:60	deref	0	0	
+examples/graph_suite/chains.rs:60:34	insert	0	0	
+examples/graph_suite/chains.rs:63:23	from	0	0	
+examples/graph_suite/chains.rs:64:27	is_queryable	0	0	
+examples/graph_suite/chains.rs:64:40	deref	0	0	
+examples/graph_suite/chains.rs:65:45	list_core_api_versions	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/chains.rs:66:30	insert	0	0	
+examples/graph_suite/chains.rs:68:29	len	0	0	
+examples/graph_suite/late_start.rs:116:31	list_objects	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/late_start.rs:117:29	new	0	0	
+examples/graph_suite/late_start.rs:119:39	get_manifest	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/late_start.rs:119:52	deref	0	0	
+examples/graph_suite/late_start.rs:120:23	push	0	0	
+examples/graph_suite/late_start.rs:122:33	get_known_extension_versions	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/late_start.rs:123:22	into_iter	0	0	
+examples/graph_suite/late_start.rs:123:34	filter	0	0	
+examples/graph_suite/late_start.rs:123:46	deref	0	0	
+examples/graph_suite/late_start.rs:123:61	contains	0	0	
+examples/graph_suite/late_start.rs:123:74	collect	0	0	
+examples/graph_suite/late_start.rs:35:27	build_index	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/late_start.rs:36:34	upload_parquet	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/late_start.rs:37:33	upload_puffin	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/late_start.rs:77:28	get_debug_beacon_states_ssz	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/late_start.rs:78:28	get_beacon_blocks_ssz	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/late_start.rs:79:28	get_blobs	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/late_start.rs:80:36	genesis_state	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/loops.rs:126:26	webfinger_resolve_actor	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/loops.rs:126:50	deref	0	0	
+examples/graph_suite/loops.rs:128:31	push	0	0	
+examples/graph_suite/loops.rs:164:29	new	0	0	
+examples/graph_suite/loops.rs:167:26	insert	0	0	
+examples/graph_suite/loops.rs:167:40	clone	0	0	
+examples/graph_suite/loops.rs:168:24	put_blob	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/loops.rs:168:33	deref	0	0	
+examples/graph_suite/loops.rs:171:16	put_action_result	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/loops.rs:171:44	len	0	0	
+examples/graph_suite/loops.rs:227:20	size	0	0	state:r0
+examples/graph_suite/loops.rs:228:37	try_acquire	0	0	state:r0state:w0
+examples/graph_suite/loops.rs:229:27	deref	0	0	
+examples/graph_suite/loops.rs:229:37	borrow	0	0	state:r0
+examples/graph_suite/loops.rs:229:46	len	0	0	
+examples/graph_suite/loops.rs:231:36	try_increment_size	0	0	state:r0state:w0
+examples/graph_suite/loops.rs:231:63	ok	0	0	
+examples/graph_suite/loops.rs:232:27	deref	0	0	
+examples/graph_suite/loops.rs:232:37	borrow	0	0	state:r0
+examples/graph_suite/loops.rs:232:46	len	0	0	
+examples/graph_suite/loops.rs:234:18	release	0	0	state:w0
+examples/graph_suite/loops.rs:234:31	connect	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/loops.rs:236:12	deref	0	0	
+examples/graph_suite/loops.rs:236:22	borrow	0	0	state:r0
+examples/graph_suite/loops.rs:236:31	len	0	0	
+examples/graph_suite/loops.rs:280:57	remove	0	0	
+examples/graph_suite/loops.rs:284:49	into_iter	0	0	
+examples/graph_suite/loops.rs:284:61	collect	0	0	
+examples/graph_suite/loops.rs:285:21	write_data	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/loops.rs:285:32	deref	0	0	
+examples/graph_suite/loops.rs:285:44	deref	0	0	
+examples/graph_suite/loops.rs:286:29	len	0	0	
+examples/graph_suite/loops.rs:52:32	head	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/loops.rs:52:37	deref	0	0	
+examples/graph_suite/loops.rs:58:18	len	0	0	
+examples/graph_suite/loops.rs:75:27	with_capacity	0	0	
+examples/graph_suite/loops.rs:75:54	len	0	0	
+examples/graph_suite/loops.rs:77:33	get	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/loops.rs:77:37	deref	0	0	
+examples/graph_suite/loops.rs:81:26	read_avro_schema	0	0	
+examples/graph_suite/loops.rs:81:43	deref	0	0	
+examples/graph_suite/loops.rs:82:21	push	0	0	
+examples/graph_suite/loops.rs:84:20	len	0	0	
+examples/graph_suite/sequential_awaits.rs:110:30	count	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/sequential_awaits.rs:111:23	page	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/sequential_awaits.rs:112:25	div_ceil	0	0	
+examples/graph_suite/sequential_awaits.rs:156:33	pool	0	0	
+examples/graph_suite/sequential_awaits.rs:157:9	read_block	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/sequential_awaits.rs:158:9	read_block	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/sequential_awaits.rs:159:9	read_block	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/sequential_awaits.rs:160:9	read_block	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/sequential_awaits.rs:161:25	read_mode	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/sequential_awaits.rs:161:66	ok	0	0	
+examples/graph_suite/sequential_awaits.rs:161:71	flatten	0	0	
+examples/graph_suite/sequential_awaits.rs:161:81	unwrap_or	0	0	
+examples/graph_suite/sequential_awaits.rs:162:30	read_mode	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/sequential_awaits.rs:162:71	ok	0	0	
+examples/graph_suite/sequential_awaits.rs:162:76	flatten	0	0	
+examples/graph_suite/sequential_awaits.rs:162:86	unwrap_or	0	0	
+examples/graph_suite/sequential_awaits.rs:163:12	ne	0	0	
+examples/graph_suite/sequential_awaits.rs:163:35	ne	0	0	
+examples/graph_suite/sequential_awaits.rs:40:37	get_epoch_info	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/sequential_awaits.rs:41:40	get_vote_accounts	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/sequential_awaits.rs:42:43	get_block_production	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/sequential_awaits.rs:43:40	get_cluster_nodes	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/sequential_awaits.rs:46:27	len	0	0	
+examples/graph_suite/sequential_awaits.rs:73:34	get_account_data	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/sequential_awaits.rs:74:16	set_account_data	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/sequential_awaits.rs:76:20	set_account_data	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/sequential_awaits.rs:76:37	deref	0	0	
+examples/graph_suite/sequential_awaits.rs:78:16	set_account_data	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/sequential_awaits.rs:79:16	set_account_data	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/sequential_awaits.rs:80:16	set_account_data	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/sequential_awaits.rs:81:16	set_account_data	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/sequential_awaits.rs:82:16	set_account_data	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+examples/graph_suite/sequential_awaits.rs:83:16	set_account_data	1	0	observed:graph_suite::runtime::sleep_ms::SEQwobserved:graph_suite::runtime::TIMERSw
+psync-check/tests/fixtures/hidden/app/src/lib.rs:110:11	checkpoint	0	0	fswstore.db
+psync-check/tests/fixtures/hidden/app/src/lib.rs:111:13	inspect_db	0	0	fsrstore.db
+psync-check/tests/fixtures/hidden/app/src/lib.rs:141:5	walk	0	0	fswwalk.log
+psync-check/tests/fixtures/hidden/app/src/lib.rs:142:13	read_notes	0	0	fsrnotes.txt
+psync-check/tests/fixtures/hidden/app/src/lib.rs:149:5	visit	0	0	fswwalk.log
+psync-check/tests/fixtures/hidden/app/src/lib.rs:150:13	read_log	0	0	fsrwalk.log
+psync-check/tests/fixtures/hidden/app/src/lib.rs:164:5	promote	0	0	fsrdraft.htmlfswsite.html
+psync-check/tests/fixtures/hidden/app/src/lib.rs:165:13	read_site	0	0	fsrsite.html
+psync-check/tests/fixtures/hidden/app/src/lib.rs:180:13	parse_config	1	0	fsrapp.toml
+psync-check/tests/fixtures/hidden/app/src/lib.rs:181:5	stamp_run	0	0	fswrun.stamp
+psync-check/tests/fixtures/hidden/app/src/lib.rs:198:14	stash	0	0	fsw0
+psync-check/tests/fixtures/hidden/app/src/lib.rs:200:14	stash	0	0	fsw0
+psync-check/tests/fixtures/hidden/app/src/lib.rs:201:8	and	0	0	
+psync-check/tests/fixtures/hidden/app/src/lib.rs:208:14	stash	0	0	fsw0
+psync-check/tests/fixtures/hidden/app/src/lib.rs:210:14	stash	0	0	fsw0
+psync-check/tests/fixtures/hidden/app/src/lib.rs:211:8	and	0	0	
+psync-check/tests/fixtures/hidden/app/src/lib.rs:225:13	keep	0	0	fsw0
+psync-check/tests/fixtures/hidden/app/src/lib.rs:226:13	keep	0	0	fsw0
+psync-check/tests/fixtures/hidden/app/src/lib.rs:227:7	and	0	0	
+psync-check/tests/fixtures/hidden/app/src/lib.rs:233:13	keep	0	0	fsw0
+psync-check/tests/fixtures/hidden/app/src/lib.rs:234:13	keep	0	0	fsw0
+psync-check/tests/fixtures/hidden/app/src/lib.rs:235:7	and	0	0	
+psync-check/tests/fixtures/hidden/app/src/lib.rs:23:5	warm	0	0	fswcache.json
+psync-check/tests/fixtures/hidden/app/src/lib.rs:243:14	stash	0	0	fsw0
+psync-check/tests/fixtures/hidden/app/src/lib.rs:245:14	stash	0	0	fsw0
+psync-check/tests/fixtures/hidden/app/src/lib.rs:24:13	load	0	0	fsrcache.json
+psync-check/tests/fixtures/hidden/app/src/lib.rs:322:13	hit	0	0	state:app::HITSw
+psync-check/tests/fixtures/hidden/app/src/lib.rs:324:13	hit	0	0	state:app::HITSw
+psync-check/tests/fixtures/hidden/app/src/lib.rs:332:13	note	0	0	state:app::JOURNALw
+psync-check/tests/fixtures/hidden/app/src/lib.rs:334:13	note	0	0	state:app::JOURNALw
+psync-check/tests/fixtures/hidden/app/src/lib.rs:342:13	enter	0	0	state:app::DEPTHw
+psync-check/tests/fixtures/hidden/app/src/lib.rs:344:13	enter	0	0	state:app::DEPTHw
+psync-check/tests/fixtures/hidden/app/src/lib.rs:352:13	tally	0	0	state:w0
+psync-check/tests/fixtures/hidden/app/src/lib.rs:354:13	tally	0	0	state:w0
+psync-check/tests/fixtures/hidden/app/src/lib.rs:362:13	hit	0	0	state:app::HITSw
+psync-check/tests/fixtures/hidden/app/src/lib.rs:364:13	miss	0	0	state:app::MISSESw
+psync-check/tests/fixtures/hidden/app/src/lib.rs:372:13	probe	0	0	observed:app::PROBESw
+psync-check/tests/fixtures/hidden/app/src/lib.rs:374:13	probe	0	0	observed:app::PROBESw
+psync-check/tests/fixtures/hidden/app/src/lib.rs:375:7	max	0	0	
+psync-check/tests/fixtures/hidden/app/src/lib.rs:42:7	check	0	0	
+psync-check/tests/fixtures/hidden/app/src/lib.rs:43:15	get_token	0	0	fswtoken
+psync-check/tests/fixtures/hidden/app/src/lib.rs:51:24	deref	0	0	
+psync-check/tests/fixtures/hidden/app/src/lib.rs:51:9	stamp	0	0	fsw
+psync-check/tests/fixtures/hidden/app/src/lib.rs:59:13	inspect	0	0	fsr0
+psync-check/tests/fixtures/hidden/app/src/lib.rs:60:13	inspect	0	0	fsr0
+psync-check/tests/fixtures/hidden/app/src/lib.rs:71:13	bump	0	0	state:w0
+psync-check/tests/fixtures/hidden/app/src/lib.rs:72:13	bump	0	0	state:w0
+psync-check/tests/fixtures/hidden/app/src/lib.rs:87:15	create_view	0	0	fsr1
+psync-check/tests/fixtures/hidden/app/src/lib.rs:88:15	create_view	0	0	fsr1
+tests/graph.rs:1000:17	combine	0	0	
+tests/graph.rs:1000:28	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:1003:19	push	0	0	
+tests/graph.rs:1004:13	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:1006:9	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:1008:11	push	0	0	
+tests/graph.rs:1028:14	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:1029:14	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:1030:14	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:1031:14	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:112:14	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:113:14	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:114:14	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:115:14	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:133:13	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:134:13	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:135:5	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:168:13	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:169:13	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:170:5	logged	1	0	state:w0observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:171:13	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:195:13	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:196:13	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:209:13	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:210:17	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:211:13	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:212:7	push	0	0	
+tests/graph.rs:225:19	new	0	0	
+tests/graph.rs:227:23	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:236:13	push	0	0	
+tests/graph.rs:257:20	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:271:13	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:273:13	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:294:22	hit	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:295:22	hit	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:310:13	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:314:13	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:326:19	new	0	0	
+tests/graph.rs:328:27	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:334:13	push	0	0	
+tests/graph.rs:363:21	clear	0	0	
+tests/graph.rs:366:26	is_queryable	0	0	
+tests/graph.rs:367:32	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:376:29	push	0	0	
+tests/graph.rs:401:20	new	0	0	
+tests/graph.rs:402:10	push	0	0	
+tests/graph.rs:402:15	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:402:26	index	0	0	
+tests/graph.rs:402:30	len	0	0	
+tests/graph.rs:403:10	push	0	0	
+tests/graph.rs:403:15	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:403:26	index	0	0	
+tests/graph.rs:403:30	len	0	0	
+tests/graph.rs:415:19	new	0	0	
+tests/graph.rs:416:9	push	0	0	
+tests/graph.rs:417:13	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:418:9	push	0	0	
+tests/graph.rs:419:13	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:420:9	push	0	0	
+tests/graph.rs:440:18	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:441:21	lock	1	0	state:w0observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:442:11	push	0	0	
+tests/graph.rs:442:5	deref_mut	0	0	
+tests/graph.rs:443:5	drop	0	0	
+tests/graph.rs:444:17	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:471:29	pool	0	0	
+tests/graph.rs:472:13	read_row	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:473:13	read_row	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:486:21	new	0	0	
+tests/graph.rs:489:19	contains_key	0	0	
+tests/graph.rs:490:21	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:491:19	insert	0	0	
+tests/graph.rs:494:11	into_iter	0	0	
+tests/graph.rs:494:23	collect	0	0	
+tests/graph.rs:508:25	new	0	0	
+tests/graph.rs:509:24	new	0	0	
+tests/graph.rs:511:22	insert	0	0	
+tests/graph.rs:512:27	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:513:22	push	0	0	
+tests/graph.rs:536:35	remove	0	0	
+tests/graph.rs:542:20	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:569:20	new	0	0	
+tests/graph.rs:574:14	push	0	0	
+tests/graph.rs:574:19	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:590:29	lock_buffer	1	0	state:w0observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:590:41	deref	0	0	
+tests/graph.rs:591:13	take	0	0	
+tests/graph.rs:591:33	deref_mut	0	0	
+tests/graph.rs:593:18	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:593:24	deref	0	0	
+tests/graph.rs:593:30	iter	0	0	
+tests/graph.rs:593:37	sum	0	0	
+tests/graph.rs:614:20	new	0	0	
+tests/graph.rs:615:23	new	0	0	
+tests/graph.rs:617:21	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:619:21	push	0	0	
+tests/graph.rs:622:23	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:632:18	push	0	0	
+tests/graph.rs:634:21	push	0	0	
+tests/graph.rs:655:22	new	0	0	
+tests/graph.rs:661:25	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:662:20	push	0	0	
+tests/graph.rs:684:21	clear	0	0	
+tests/graph.rs:685:20	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:687:25	push	0	0	
+tests/graph.rs:691:24	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:700:25	push	0	0	
+tests/graph.rs:727:19	now	0	0	observed:graph::TICKSr
+tests/graph.rs:728:13	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:729:18	now	0	0	observed:graph::TICKSr
+tests/graph.rs:730:13	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:764:27	into_iter	0	0	
+tests/graph.rs:765:22	finish	0	0	
+tests/graph.rs:765:37	map_err	0	0	
+tests/graph.rs:766:22	is_empty	0	0	
+tests/graph.rs:824:11	delete	1	0	state:w0observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:825:19	create	1	0	state:w0observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:840:19	get	1	0	state:w0observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:841:19	get	1	0	state:w0observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:842:19	create	1	0	state:w0observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:861:24	upload	1	0	state:w0observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:871:24	upload	1	0	state:w0observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:892:19	bump	1	0	state:w0observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:893:19	bump	1	0	state:w0observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:899:19	get	1	0	state:w0observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:89:13	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:900:19	op	1	0	state:w0observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:90:13	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:915:24	get	1	0	state:w0observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:91:13	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:92:13	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:935:13	borrow_mut	0	0	state:w0
+tests/graph.rs:935:26	push	0	0	
+tests/graph.rs:935:9	deref_mut	0	0	
+tests/graph.rs:93:13	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:94:13	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:95:5	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:978:17	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:979:9	record	1	0	state:w0observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/graph.rs:998:21	new	0	0	
+tests/graph.rs:999:13	io	1	0	observed:graph::ACTIVErobserved:graph::ACTIVEwobserved:graph::PEAKrobserved:graph::PEAKwobserved:graph::TICKSrobserved:graph::TICKSw
+tests/sync.rs:140:53	exists	0	0	
+tests/sync.rs:140:9	new	0	0	
+tests/sync.rs:141:25	slow	1	0	state:w0
+tests/sync.rs:142:51	to_string	0	0	
+tests/sync.rs:142:64	map_err	0	0	
+tests/sync.rs:142:9	write	0	0	fsw0
+tests/sync.rs:145:53	exists	0	0	
+tests/sync.rs:145:9	new	0	0	
+tests/sync.rs:146:25	slow	1	0	state:w0
+tests/sync.rs:147:51	to_string	0	0	
+tests/sync.rs:147:64	map_err	0	0	
+tests/sync.rs:147:9	write	0	0	fsw0
+tests/sync.rs:160:53	exists	0	0	
+tests/sync.rs:160:9	new	0	0	
+tests/sync.rs:161:25	slow	1	0	state:w0
+tests/sync.rs:162:51	to_string	0	0	
+tests/sync.rs:162:64	map_err	0	0	
+tests/sync.rs:162:9	write	0	0	fsw0
+tests/sync.rs:166:53	exists	0	0	
+tests/sync.rs:166:9	new	0	0	
+tests/sync.rs:167:25	slow	1	0	state:w0
+tests/sync.rs:168:51	to_string	0	0	
+tests/sync.rs:168:64	map_err	0	0	
+tests/sync.rs:168:9	write	0	0	fsw0
+tests/sync.rs:18:13	slow	1	0	state:w0
+tests/sync.rs:20:13	slow	1	0	state:w0
+tests/sync.rs:22:13	slow	1	0	state:w0
+tests/sync.rs:44:18	slow	1	0	state:w0
+tests/sync.rs:46:18	slow	1	0	state:w0
+tests/sync.rs:61:18	slow	1	0	state:w0
+tests/sync.rs:63:18	slow	1	0	state:w0
+tests/sync.rs:63:50	expect	1	0	
+tests/sync.rs:89:13	slow	1	0	state:w0
+tests/sync.rs:90:19	lock	0	0	state:w0
+tests/sync.rs:90:26	unwrap	1	0	
+tests/sync.rs:91:5	deref_mut	0	0	
+tests/sync.rs:93:13	slow	1	0	state:w0
+tests/sync.rs:94:5	drop	0	0	

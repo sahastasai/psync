@@ -24,6 +24,10 @@ prefix of the other:
 | an effect conflict | `w/<domain>/t/<target>`: `w/fs/t/` then the characters of `cache.json/`; `w/svc/api/t/…` for a service. An unknown target stops at the domain, and a process or unknown callee at `w` |
 | ``may exit before `op` runs`` | `x/i`: written by statement `i` if it may exit, read by later writes |
 | `effect order` | `e`: written by every ordinary effect statement |
+| hidden state, from the compiler's facts | `h/<crate>/<path>` for a `static` or `thread_local!` (`h/graph/PEAK`); `n/x/$state` for a cell, lock or atomic behind the reference `x`, plus a read of `h/$ref`; `h` alone for state behind a reference the driver could not follow (it overlaps every `h/…`) |
+
+The last row comes from the compiler, not from the tokens: see
+[Hidden state](#hidden-state-statics-thread-locals-and-cells) below.
 
 Targets are spelled out character by character. That makes a `format!("m.key.{id}")` prefix
 overlap exactly the strings that start with `m.key.`, as psync's own rule says. A placeholder in a
@@ -81,15 +85,133 @@ is false
 ## Running it
 
 ```sh
-cargo run -p psync-graph --features cli --bin psync-cert -- src/lib.rs > verify/Certs.lean
+cargo psync check                                       # writes target/psync/facts.tsv
+cargo run -p psync-graph --features cli --bin psync-cert -- \
+    --facts target/psync/facts.tsv src/lib.rs > verify/Certs.lean
 cd verify && lake build GeneratedCerts
 ```
 
-`scripts/certify.sh` does this for the repository's own schedules: 41 certificates from the graph tests,
-the Phase II tests, the driver fixture and `graph_suite`, checked in a few seconds. The checker is
-the same for synchronous code: a level is a set of chains, whether they run as futures or on
-threads. CI regenerates the certificates,
-fails if they changed without being committed, and checks them with Lean.
+Without `--facts`, the places come from the tokens alone, and a certificate omits whatever the
+callees do out of sight. With it, every place the compiler found is added (next section).
+
+`scripts/certify.sh` does this for the repository's own schedules: 47 certificates from the graph
+tests, the Phase II tests, the driver fixture and `graph_suite`, checked in a few seconds. Their
+facts are committed as `verify/facts.tsv`; `scripts/cert-facts.sh` regenerates them with
+`cargo psync check` (it needs psync-check's pinned nightly). The checker is the same for
+synchronous code: a level is a set of chains, whether they run as futures or on threads. CI
+regenerates the facts and the certificates, fails if either changed without being committed, and
+checks the certificates with Lean.
+
+## Hidden state: statics, thread-locals and cells
+
+A proc macro cannot see callee bodies, so the places above miss what a callee does to memory
+that no argument names. `io` in `tests/graph.rs` bumps thread-local counters, `slow` in
+`tests/sync.rs` pushes onto a `Mutex` behind a `&`, and `graph_suite`'s stubs push onto a global
+timer queue. `psync-driver` reads the compiled bodies (MIR), so it is where this information comes
+from. For every function of the workspace it records, next to file and service effects:
+
+- **a `static` or `thread_local!`** it names, directly or through any callee: written, unless
+  the method only reads (`Cell::get`, `load`, `RefCell::borrow`, `RwLock::read`, a `thread_local!`
+  `get`). A `static` whose type has no interior mutability cannot change and is left out; a
+  `static mut` is always written. A lazy value (`LazyLock`, `LazyCell`) counts as read when
+  what it holds cannot change behind `&`, and as written otherwise;
+- **a cell, lock or atomic behind a reference** (`Cell`, `RefCell`, `Mutex`, `RwLock`, atomics,
+  `OnceCell`/`OnceLock`, `Condvar`, anything whose type is not `Freeze`) that a standard-library
+  call changes through `&`. The driver follows the reference back to where it came from: a
+  parameter (then the caller substitutes what it passes, as for file paths), a static, or a value
+  the function owns (no other statement can reach it, so nothing is recorded). A pointer read from
+  inside an object is named by that object: what the `&'static Timers` inside `TIMERS` points to
+  is `TIMERS`. When the origin is unknown, the effect is on *any* state.
+
+The facts file gives each call site of a `#[psync::graph]` function these effects, and
+`psync-cert` turns them into places: `h/<static path>`, `n/x/$state` when the state is behind
+the argument `x` (it overlaps every use of `x`), and `h` for any state. It rounds toward conflict:
+a call it cannot follow writes `h`, and an argument that is not a plain binding writes `h` too.
+
+The schedule is still the one the macro builds from the tokens, as `cargo build` compiles it.
+`psync-cert` expands each function twice, without the facts (the schedule) and with them (the
+extra places), and the certificate's nodes are the union. If the schedule is unsafe with those
+places, `psync-cert` fails, and `cargo psync check` reports the pair as `shared-state` (a warning,
+an error with `--deny`). `cargo psync build` and `fix` then order the two statements.
+
+### Observed state
+
+Some hidden state is written on purpose to *measure* the schedule. The graph tests count how
+many requests are in flight (`PEAK` is 1 in program order and up to 4 concurrently, and the tests
+assert both), the Phase II tests log when each call ran, and `graph_suite`'s stubs sleep on a
+shared timer. A concurrent schedule changes that state: that is what the tests check. Such state is
+marked, and stays in the certificate:
+
+```rust,ignore
+thread_local! {
+    #[psync::observed]                       // a static or thread-local
+    static PEAK: Cell<usize> = const { Cell::new(0) };
+}
+
+#[psync::graph(observe(log))]                // the state behind a binding of the function
+fn three_downloads(log: &Mutex<Vec<&'static str>>) -> (u32, u32, u32) { .. }
+```
+
+For such a certificate `psync-cert` writes two theorems:
+
+```lean
+def c14_observed : List Place := [[0, 33, 36]]            -- n/log/$state
+theorem c14_ok : check (c14.hiding c14_observed) = true := by decide
+theorem c14_strict : check c14 = false := by decide
+```
+
+`Cert.hiding` removes the observed places from the nodes. By `check_sound`, the first theorem
+says that every run of the schedule ends as the program run in order does *on everything but
+the observed state*. The second says, also by `decide`, that counting it the schedule is not
+equivalent. That is the honest claim for a test that measures concurrency. Observed state orders
+nothing in the macro and is never reported by `cargo psync check`.
+
+### What this changed
+
+All 41 earlier certificates, plus 6 new ones in the driver fixture (below), were regenerated with
+the facts. No schedule changed. With the facts:
+
+| | Certificates | Why |
+|---|---|---|
+| safe as they are | 7: c17, c21, c24, c28, c30, c32, c37 | nothing hidden meets |
+| safe but for observed state | 27: c0–c16, c18, c38–c46 | the graph tests' counters (`ACTIVE`, `PEAK`, `TICKS`), the Phase II tests' `log`, the server log of `Store` in `reads_then_one_write`, `graph_suite`'s timer (`TIMERS`, `SEQ`), the fixture's `PROBES` |
+| unsafe, and proved so (`check cN = false`) | 13: c19, c20, c22, c23, c25–c27, c29, c31, c33–c36 | the fixture's planted effects: the files that `start`, `login`, `snapshot`, `tour`, `release`, `stash_same` and `keep_same` write, `boot`'s panic, and the hidden state of `shared`, `counted`, `journaled`, `nested` and `appended` |
+
+So every certificate now lists the places that the driver found its statements touch, and Lean
+decides each one: 34 hold outright or but for state marked observed, and the 13 planted ones are
+refuted. (#25 expected c18 to hold as it was; it does not, because its calls of `slow` push onto
+the observed `log`.) The fixture is the one file whose unsafe schedules are expected:
+`psync-cert --expect-unsafe psync-check/tests/fixtures/` writes `theorem cN_rejected : check cN
+= false` there, and fails on an unsafe schedule anywhere else.
+
+The new fixture functions are the regression tests: a static atomic (`counted`), a static
+`Mutex` (`journaled`), a `thread_local!` (`nested`), a `Mutex` behind a reference (`appended`),
+each touched by two statements that psync runs on two threads. Each is refused three ways:
+`cargo psync check` reports `shared-state`, `cargo psync build` orders the two statements, and
+Lean refutes the certificate. Two different statics (`hit_and_miss`, c37) stay concurrent and are
+proved; two calls that bump an observed counter (`probed`, c38) are proved but for it.
+
+### What the facts do not see
+
+The places are those the driver can see, so the claim is "every place the driver found", not
+"every place". Still assumed:
+
+- **Published crates' own state.** Statics of crates from crates.io or git (a runtime's context,
+  a logger, a cache) are left out, as their sockets are: the driver assumes they do not change
+  what the function computes. psync's own runtime is left out the same way.
+- **What the driver cannot follow.** Function pointers, `dyn` methods with no implementation in
+  the build, FFI, drop glue and inline assembly. Raw pointers that the driver cannot trace are
+  "any state" only when they reach a standard-library call on a non-`Freeze` type; writes
+  through a raw pointer by hand are not seen.
+- **Aliasing between a reference and a static.** `n/x/$state` does not overlap `h/<static>`:
+  if a reference argument points to a static that another statement of the same region names
+  directly, the certificate misses that conflict. (Two references, or a reference and an unknown
+  one, are handled: `h/$ref` meets `h`.)
+- **Generic code.** A summary is computed once for a generic function. State behind a reference
+  to a type parameter counts only if the type is a cell, lock or atomic for every instance.
+- **The facts are as current as the last `cargo psync check`.** CI regenerates them; locally,
+  `scripts/cert-facts.sh` does. A stale fact (the callee's name no longer matches its site) is
+  ignored rather than misapplied, which loses places, so CI's diff check is what keeps them.
 
 Building the certificates found one false alarm, and no unsafe schedule. The first version of the
 place encoding dropped `format!` targets, and Lean rejected `graph_suite`'s matrix-rust-sdk
@@ -184,7 +306,7 @@ What the fragment leaves out, and so stays assumed for real Rust:
 
 ## The generated certificates against compiled code
 
-`CharonDrain.lean` is one crate written for the purpose. The 41 certificates in `Certs.lean` are
+`CharonDrain.lean` is one crate written for the purpose. The 47 certificates in `Certs.lean` are
 psync's real output for the tests, the driver fixture and `graph_suite`. Nothing yet ties any of
 them to compiled code. This section says why, and how it will be done.
 
@@ -215,25 +337,23 @@ Every node mixes three kinds of places:
 - **`x/i` and `e`.** They are psync's own encoding of exit order and effect order. They are justified by
   `replay_correct` and `recording_slot`, not by any callee's footprint.
 
-| Certificates | Functions | Can the current pipeline extract them? | What the real code does that the certificate does not say |
+| Certificates | Functions | Can the current pipeline extract them? | Hidden state the certificate now lists |
 |---|---|---|---|
-| c0–c8, c10, c12, c13 | `tests/graph.rs`: `graph_tree`, `chains`, `first_error_wins`, `exit_after_later_level`, `options`, `shadowing_and_mut`, `early_return`, `awaited_arguments`, `effects_keep_order`, `Aggregated::run`, `await_inside_a_binding`, `crossing` | No: `async fn` (coroutines). `io` also uses `poll_fn` closures, loops and generics | `io` writes thread-local counters (`ACTIVE`, `PEAK`, `TICKS`) that no node names. `PEAK` really differs: the tests assert 1 in order and up to 4 concurrently. `logged` (c3) writes a `RefCell` |
-| c9, c11 | `fresh_pool`, `reads_then_one_write` | No: `async fn` | the same `io` counters |
-| c14, c15, c16 | `tests/sync.rs`: `three_downloads`, `first_error_wins`, `panic_after_error` | No: `thread::sleep` and `Mutex::lock` have no body, generics, `?` and `expect` (unwinding) | `slow` pushes onto a `Mutex` log through a shared reference (interior mutability). Two nodes the certificate calls independent both write it, and the log's order differs |
+| c0–c13 | `tests/graph.rs`: `graph_tree`, `chains`, `first_error_wins`, `exit_after_later_level`, `options`, `shadowing_and_mut`, `early_return`, `awaited_arguments`, `effects_keep_order`, `fresh_pool`, `Aggregated::run`, `reads_then_one_write`, `await_inside_a_binding`, `crossing` | No: `async fn` (coroutines). `io` also uses `poll_fn` closures, loops and generics | `io`'s thread-local counters `h/graph/ACTIVE`, `PEAK`, `TICKS` (observed); `logged`'s `RefCell` behind `log` (c3); the `Store` log behind `store` (c11, observed) |
+| c14–c16, c18 | `tests/sync.rs`: `three_downloads`, `first_error_wins`, `panic_after_error`, `speculative_writes` | No: `thread::sleep` and `Mutex::lock` have no body, generics, `?` and `expect` (unwinding) | `slow`'s `Mutex` log behind `log`, `n/log/$state` (observed) |
 | c17 | `returns_future` | No: async blocks | nothing |
-| c18 | `speculative_writes` | No: `Path::exists`, `format!` and `fs::write` have no body, plus closures and `?` | the world places are named in the certificate (`w/fs/…` with a hole) |
-| c19–c27, c30, c31 | fixture: `start`, `login`, `sizes`, `shared`, `snapshot`, `walk_then_read`, `tour`, `release`, `boot`, `keep_both`, `keep_same` | No: `async fn`, plus `dyn` (c23), mutual recursion through `Box::pin` (c24, c25), and other crates' functions (c21) | By design, the fixture hides effects in callees. `start`, `login`, `tour`, `release` and `keep_same` write files their certificates omit. `snapshot` does the same through `dyn`, `shared` through a `RefCell`, and `boot` panics without an `x/0` |
-| c28, c29, c32 | fixture: `stash_both`, `stash_same`, `stash_tail` | Not yet. These are synchronous, and the blockers are small: `fs::write` has no body, `impl AsRef<Path>` is a by-value generic parameter, and `r1?` is an exit (c32) | the file each call writes. No node names it |
-| c33–c40 | `graph_suite`: `Discovery::run`, `put_and_upload_sst`, `checkpoint_sync`, `fetch_extensions_from_blob_store`, `process_show_validators`, `disable`, `fetch_page`, `check_notifications_allowed` | No: `async fn`. c33 and c36 nodes are also the macro's own `join_all_bounded` code | the stubs sleep on the suite's timer, a global queue that every call writes and no node names, and return constants. The world places in their certificates are more than the stubs touch |
+| c19–c27, c29, c31 | fixture: `start`, `login`, `sizes`, `shared`, `snapshot`, `walk_then_read`, `tour`, `release`, `boot`, `stash_same`, `keep_same` | No: `async fn`, plus `dyn` (c23), mutual recursion through `Box::pin` (c24, c25), and other crates' functions (c21) | the planted files and the panic, and `shared`'s `RefCell`: refuted, except `sizes` and `walk_then_read` |
+| c28, c30, c32 | fixture: `stash_both`, `keep_both`, `stash_tail` | Not yet for c28 and c32: synchronous, and the blockers are small (`fs::write` has no body, `impl AsRef<Path>` is a by-value generic parameter, `r1?` is an exit). c30: `async fn` | each call's own file, `w/fs/t/a.json/` and so on: they never meet |
+| c33–c38 | fixture: `counted`, `journaled`, `nested`, `appended`, `hit_and_miss`, `probed` | Not yet: atomics, `Mutex` and `thread_local!` have no body | `h/app/HITS`, `h/app/JOURNAL`, `h/app/DEPTH`, `n/log/$state`, `h/app/MISSES`, `h/app/PROBES` (observed): c33–c36 refuted |
+| c39–c46 | `graph_suite`: `Discovery::run`, `put_and_upload_sst`, `checkpoint_sync`, `fetch_extensions_from_blob_store`, `process_show_validators`, `disable`, `fetch_page`, `check_notifications_allowed` | No: `async fn`. c39 and c42 nodes are also the macro's own `join_all_bounded` code | the suite's timer, `h/graph_suite/runtime/TIMERS` and `SEQ` (observed). The world places are more than the stubs touch |
 
-None of the 41 fits the current fragment. For most of them the obstacle is not only extraction.
-The real statements write state that no node names, so `hind` is false for them in the strict
-sense, and a working pipeline must reject them. Several of these differences are deliberate: the
-tests' counters and logs exist to observe concurrency, and the fixture plants hidden effects. Counted strictly, `hind` is false for 34 of the 41. That is 25 whose callees write the tests'
-counters, the `Mutex` log or `graph_suite`'s timer queue (c0–c16, c33–c40), and the 9 planted
-fixture cases (c19, c20, c22, c23, c25–c27, c29, c31). It is expected to hold for the other 7
-(c17, c18, c21, c24, c28, c30, c32). There, the certificate omits or misnames real effects, but
-they never meet. The next step is to prove those 7 against compiled code.
+None of the 47 fits the current fragment, so none is tied to compiled code yet. What changed is
+the other half of `hind`: before, 34 of the 41 certificates omitted real writes, so `hind` was
+false for them in the strict sense, and nothing said so. Now every certificate lists the state
+the driver found, and Lean decides each one with it (see [What this changed](#what-this-changed)):
+the planted fixture cases are refuted, and the tests that measure concurrency are proved
+equivalent on everything but the observed state. What remains for each is extraction: showing,
+from compiled code, that the places are complete.
 
 ### The route
 
@@ -244,11 +364,13 @@ they never meet. The next step is to prove those 7 against compiled code.
    (`fs::write(p, d)` writes `*p`) and `AsRef::as_ref` as the identity on the reference. Model
    `r1?` as recording its outcome in its own slot (`recording_slot`). Lean then decides
    `hindB` for `PsyncCerts.c28` and `c32` (expected: true, so `cert_schedule_sound` applies), and
-   refutes it for `c29` (both calls write `a.json`).
-2. **Interior mutability as places.** A `Cell`, `RefCell`, `Mutex` or thread-local is a place, and
-   a write through `&` to it is a write. With this, c14–c16 and `shared` are rejected for the right
-   reason. Proving the tests' schedules anyway needs a statement of what is observed: the
-   results, without the counters. That is an explicit hypothesis, like `World.lean`'s spec.
+   refutes it for `c29` (both calls write `a.json`). Since the facts, `check` already refutes
+   c29 by itself: its certificate names `a.json` in both nodes.
+2. **Interior mutability as places.** Done on the certificate side
+   ([Hidden state](#hidden-state-statics-thread-locals-and-cells)): statics, thread-locals and
+   cells behind references are places, c22 (`shared`) and c33–c36 are refuted, and the tests that
+   measure concurrency are proved with their observed state hidden (`Cert.hiding`). Extracting
+   it needs models of `Cell::set`, `Mutex::lock` and `LocalKey::with` as writes to such places.
 3. **Coroutines.** The Phase I functions need an extractor that handles `async fn`. Either
    Charon's support for coroutines, or `psync-driver`, which already reads the coroutines'
    MIR for `cargo psync check`, exporting bodies in the fragment. A statement `let a = f().await`
@@ -262,11 +384,15 @@ models of functions without a body (`fs::write`, `Mutex::lock`), and the gaps of
 ## What a certificate does not cover
 
 - **That the places describe the statements.** This is the hypothesis `hind` of `check_sound`.
-  For a fragment of MIR it is proved: `verify/Footprint.lean` (above). For the 41 generated
-  certificates it is not yet proved for any of them (see the table above). For real Rust, psync
-  computes the places from tokens, and from compiler facts under `cargo psync build`, and
-  [`cargo psync check`](./check.md) compares them with MIR. The gap between real MIR and the
+  For a fragment of MIR it is proved: `verify/Footprint.lean` (above). For the 47 generated
+  certificates it is not yet proved for any of them (see the table above). Their places come from
+  the tokens and from the driver's facts about the compiled callees, including hidden state, so
+  what they still omit is what the driver cannot see
+  ([What the facts do not see](#what-the-facts-do-not-see)). The gap between real MIR and the
   fragment is what stays assumed.
+- **Observed state.** Where a certificate hides observed places, its theorem is about everything
+  else. That the hidden state is only measured, and never feeds a result, is the programmer's
+  claim when they write `#[psync::observed]` or `observe(..)`.
 - **Prefetched loops.** Certificates cover regions. A loop's prefix is checked by the macro's
   refusal rules, and certifying it is the next step.
 - **Exit replay.** `replay_correct` in `Schedule.lean` proves the rule in general. Certificates do

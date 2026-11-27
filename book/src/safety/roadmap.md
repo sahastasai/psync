@@ -216,8 +216,12 @@ and that the rule is unsound for a server whose reads change state
 proven sound, accepts or rejects it; CI checks all of the repository's schedules
 ([Certified schedules](./certificates.md)). The checker's hypothesis, that footprints are right,
 is proved for a fragment of MIR with cross-function summaries (`verify/Footprint.lean`), and
-`hindB` decides it for a generated certificate against compiled statements, though none of the 41
-generated certificates is tied to compiled code yet ([the route](./certificates.md#the-route)). Next:
+`hindB` decides it for a generated certificate against compiled statements, though none of the 47
+generated certificates is tied to compiled code yet ([the route](./certificates.md#the-route)).
+The certificates' places include what the driver finds the callees do, hidden state included
+(statics, thread-locals, cells and locks behind references): 34 are proved, 27 of them with state
+marked observed hidden, and the 13 planted unsafe ones in the driver fixture are refuted
+([Hidden state](./certificates.md#hidden-state-statics-thread-locals-and-cells)). Next:
 specifications for HTTP, the Kubernetes API and S3, checked against server logs, then
 certificates for prefetched loops and exits.
 
@@ -268,5 +272,5 @@ tokio) is open.
 | 4. HTTP semantics | coarse service conflicts | small |
 | 7. processes and cwd | over-conservative processes; cwd hazard | small |
 | 5. staged writes, 6. cancellation | wasted work, writes waiting on exits | medium to large |
-| 8. compiler driver (built: `cargo psync check`, `build`, `fix`; per-argument effects for synchronous helpers; synchronous levels checked) | the token-level foundation | per-argument effects also through `async fn` coroutines; exit positions in the checker; control dependence, data edges and the macro's joins per async body (`cargo psync pdg`); next: loop summaries in the PDG; paths computed by `join` in MIR; async closures |
-| 9. Lean model (scheduling built: `verify/Schedule.lean`) | the token-level foundation | exit replay, the server model, certified schedules and footprint soundness (with real compiler output through Charon) built; `hind` decided against compiled statements (`hindB`), but none of the 41 generated certificates tied to compiled code yet |
+| 8. compiler driver (built: `cargo psync check`, `build`, `fix`; per-argument effects for synchronous helpers; synchronous levels checked) | the token-level foundation | per-argument effects also through `async fn` coroutines; exit positions in the checker; control dependence, data edges and the macro's joins per async body (`cargo psync pdg`); hidden state (statics, thread-locals, cells behind references) in summaries and facts, `shared-state` findings; next: loop summaries in the PDG; paths computed by `join` in MIR; async closures |
+| 9. Lean model (scheduling built: `verify/Schedule.lean`) | the token-level foundation | exit replay, the server model, certified schedules and footprint soundness (with real compiler output through Charon) built; `hind` decided against compiled statements (`hindB`); certificates list the driver's facts, hidden state included (34 of 47 proved, 27 of them but for observed state; 13 planted ones refuted), but none of them tied to compiled code yet |

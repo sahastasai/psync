@@ -11,7 +11,8 @@ fn slow<T>(log: &Mutex<Vec<&'static str>>, name: &'static str, ms: u64, value: T
     value
 }
 
-#[psync::graph]
+// `log` records when each call ran: the test reads the schedule from it, so it is observed state.
+#[psync::graph(observe(log))]
 fn three_downloads(log: &Mutex<Vec<&'static str>>) -> (u32, u32, u32) {
     #[psync::par]
     let a = slow(log, "a", 100, 1);
@@ -36,7 +37,8 @@ fn independent_blocking_statements_overlap() {
     assert!(pos("a") < pos("c"), "{log:?}");
 }
 
-#[psync::graph]
+// `log` records when each call ran: the test reads the schedule from it, so it is observed state.
+#[psync::graph(observe(log))]
 fn first_error_wins(log: &Mutex<Vec<&'static str>>) -> Result<u32, &'static str> {
     #[psync::par]
     let a: u32 = slow(log, "a", 100, Err("first"))?;
@@ -52,7 +54,8 @@ fn errors_are_replayed_in_program_order() {
     assert_eq!(first_error_wins(&log), Err("first"));
 }
 
-#[psync::graph]
+// `log` records when each call ran: the test reads the schedule from it, so it is observed state.
+#[psync::graph(observe(log))]
 fn panic_after_error(log: &Mutex<Vec<&'static str>>, fail: bool) -> Result<u32, &'static str> {
     #[psync::par]
     let a: u32 = slow(log, "a", 50, if fail { Err("early") } else { Ok(1) })?;
@@ -146,7 +149,8 @@ fn guarded_writes(
     Ok(())
 }
 
-#[psync::graph]
+// `log` records when each call ran: the test reads the schedule from it, so it is observed state.
+#[psync::graph(observe(log))]
 fn speculative_writes(
     dir: &str,
     log: &Mutex<Vec<&'static str>>,

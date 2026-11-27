@@ -834,7 +834,8 @@ fn writes_to_one_service_keep_their_order() {
     assert_eq!(*store.log.borrow(), ["delete pod", "create pod"]);
 }
 
-#[graph]
+// The store's log is the test's view of what reached the server, in the order psync sends it.
+#[graph(observe(store))]
 async fn reads_then_one_write(store: &Store) -> Result<u32, Error> {
     let a = store.get("a").await?;
     let b = store.get("bb").await?;

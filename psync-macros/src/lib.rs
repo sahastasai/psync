@@ -11,6 +11,9 @@ use proc_macro::TokenStream;
 /// - `strict` treats awaited calls psync cannot classify as writes to an unknown resource;
 /// - `speculate` lets writes run before earlier exits everywhere in the function;
 /// - `effects(read(a, ..), write(b, ..), ordered(c, ..))` names more verbs for the effect analysis;
+/// - `observe(x, ..)`: the hidden state behind the binding `x` (a `Mutex` log, a counter) is
+///   measured on purpose; certificates list it and hide it, and `cargo psync check` does not
+///   report it (`#[psync::observed]` does the same for a `static`);
 /// - `yield_every = N` makes every loop of async code yield to the executor every `N` iterations
 ///   (preemption points for cooperative executors);
 /// - `crate = path` names the psync crate in generated code.

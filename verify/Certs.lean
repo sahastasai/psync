@@ -8,246 +8,382 @@ open PsyncCert
 /-- tests/graph.rs: `graph_tree`, region 0 -/
 def c0 : Cert where
   nodes := [
-    { reads := [[0, 1], [0, 2], [3, 1], [3, 2]], writes := [[0, 4]] },
-    { reads := [[0, 1], [0, 2], [3, 1], [3, 2]], writes := [[0, 5]] },
-    { reads := [[0, 1], [0, 2], [3, 1], [3, 2]], writes := [[0, 6]] },
-    { reads := [[0, 1], [0, 2], [3, 1], [3, 2]], writes := [[0, 7]] },
-    { reads := [[0, 1], [0, 4], [0, 5], [0, 2], [3, 1], [3, 4], [3, 5], [3, 2]], writes := [[0, 8]] },
-    { reads := [[0, 1], [0, 6], [0, 7], [0, 2], [3, 1], [3, 6], [3, 7], [3, 2]], writes := [[0, 9]] },
-    { reads := [[0, 1], [0, 8], [0, 9], [0, 2], [3, 1], [3, 8], [3, 9], [3, 2]], writes := [[0, 10]] }]
+    { reads := [[0, 1], [0, 2], [3, 1], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 9], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 11]] },
+    { reads := [[0, 1], [0, 2], [3, 1], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 12], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 13]] },
+    { reads := [[0, 1], [0, 2], [3, 1], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 14], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 15]] },
+    { reads := [[0, 1], [0, 2], [3, 1], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 16], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 17]] },
+    { reads := [[0, 1], [0, 9], [0, 12], [0, 2], [3, 1], [3, 9], [3, 12], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 18], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 19]] },
+    { reads := [[0, 1], [0, 14], [0, 16], [0, 2], [3, 1], [3, 14], [3, 16], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 20], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 21]] },
+    { reads := [[0, 1], [0, 18], [0, 20], [0, 2], [3, 1], [3, 18], [3, 20], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 22], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 23]] }]
   levels := [[[0], [1], [2], [3]], [[4], [5]], [[6]]]
 
-/-- $$\operatorname{check}(\mathtt{c0}) = \mathsf{true}$$
+/-- The places of `c0` that hold state measured on purpose: h/graph/ACTIVE, h/graph/PEAK, h/graph/TICKS. -/
+def c0_observed : List Place := [[4, 5, 6], [4, 5, 7], [4, 5, 8]]
 
-The schedule psync generated for `graph_tree` (tests/graph.rs, region 0): 7 statements in 3 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 7 statements in program order. -/
-theorem c0_ok : check c0 = true := by decide
+/-- $$\operatorname{check}(\mathrm{hiding}(\mathtt{c0})) = \mathsf{true}$$
+
+The schedule psync generated for `graph_tree` (tests/graph.rs, region 0): 7 statements in 3 level(s). Every concurrent execution of it equals running the 7 statements in program order, on everything but the observed state. -/
+theorem c0_ok : check (c0.hiding c0_observed) = true := by decide
+
+/-- $$\operatorname{check}(\mathtt{c0}) = \mathsf{false}$$
+
+With the observed state counted, the schedule is not equivalent: it changes that state as sequential code would not. -/
+theorem c0_strict : check c0 = false := by decide
 
 /-- tests/graph.rs: `chains`, region 0 -/
 def c1 : Cert where
   nodes := [
-    { reads := [[0, 1], [0, 2], [3, 1], [3, 2]], writes := [[0, 11]] },
-    { reads := [[0, 1], [0, 2], [3, 1], [3, 2]], writes := [[0, 12]] },
-    { reads := [[0, 1], [0, 11], [0, 2], [3, 1], [3, 11], [3, 2]], writes := [[0, 13]] },
-    { reads := [[0, 1], [0, 12], [0, 2], [3, 1], [3, 12], [3, 2]], writes := [[0, 14]] }]
+    { reads := [[0, 1], [0, 2], [3, 1], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 24], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 11]] },
+    { reads := [[0, 1], [0, 2], [3, 1], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 25], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 13]] },
+    { reads := [[0, 1], [0, 24], [0, 2], [3, 1], [3, 24], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 26], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 15]] },
+    { reads := [[0, 1], [0, 25], [0, 2], [3, 1], [3, 25], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 27], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 17]] }]
   levels := [[[0, 2], [1, 3]]]
 
-/-- $$\operatorname{check}(\mathtt{c1}) = \mathsf{true}$$
+/-- The places of `c1` that hold state measured on purpose: h/graph/ACTIVE, h/graph/PEAK, h/graph/TICKS. -/
+def c1_observed : List Place := [[4, 5, 6], [4, 5, 7], [4, 5, 8]]
 
-The schedule psync generated for `chains` (tests/graph.rs, region 0): 4 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 4 statements in program order. -/
-theorem c1_ok : check c1 = true := by decide
+/-- $$\operatorname{check}(\mathrm{hiding}(\mathtt{c1})) = \mathsf{true}$$
+
+The schedule psync generated for `chains` (tests/graph.rs, region 0): 4 statements in 1 level(s). Every concurrent execution of it equals running the 4 statements in program order, on everything but the observed state. -/
+theorem c1_ok : check (c1.hiding c1_observed) = true := by decide
+
+/-- $$\operatorname{check}(\mathtt{c1}) = \mathsf{false}$$
+
+With the observed state counted, the schedule is not equivalent: it changes that state as sequential code would not. -/
+theorem c1_strict : check c1 = false := by decide
 
 /-- tests/graph.rs: `first_error_wins`, region 0 -/
 def c2 : Cert where
   nodes := [
-    { reads := [[0, 15], [0, 16], [0, 17], [0, 1], [0, 18], [0, 2], [3, 15], [3, 16], [3, 17], [3, 1], [3, 18], [3, 2]], writes := [[0, 19], [19, 20]] },
-    { reads := [[0, 15], [0, 16], [0, 17], [0, 1], [0, 18], [0, 2], [3, 15], [3, 16], [3, 17], [3, 1], [3, 18], [3, 2]], writes := [[0, 21], [19, 22]] },
-    { reads := [[0, 15], [0, 16], [0, 17], [0, 1], [0, 18], [0, 2], [3, 15], [3, 16], [3, 17], [3, 1], [3, 18], [3, 2]], writes := [[19, 23]] }]
+    { reads := [[0, 28], [0, 29], [0, 30], [0, 1], [0, 31], [0, 2], [3, 28], [3, 29], [3, 30], [3, 1], [3, 31], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 10], [10, 11], [4, 5, 6], [4, 5, 7], [4, 5, 8]] },
+    { reads := [[0, 28], [0, 29], [0, 30], [0, 1], [0, 31], [0, 2], [3, 28], [3, 29], [3, 30], [3, 1], [3, 31], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 32], [10, 13], [4, 5, 6], [4, 5, 7], [4, 5, 8]] },
+    { reads := [[0, 28], [0, 29], [0, 30], [0, 1], [0, 31], [0, 2], [3, 28], [3, 29], [3, 30], [3, 1], [3, 31], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[10, 15], [4, 5, 6], [4, 5, 7], [4, 5, 8]] }]
   levels := [[[0], [1], [2]]]
 
-/-- $$\operatorname{check}(\mathtt{c2}) = \mathsf{true}$$
+/-- The places of `c2` that hold state measured on purpose: h/graph/ACTIVE, h/graph/PEAK, h/graph/TICKS. -/
+def c2_observed : List Place := [[4, 5, 6], [4, 5, 7], [4, 5, 8]]
 
-The schedule psync generated for `first_error_wins` (tests/graph.rs, region 0): 3 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 3 statements in program order. -/
-theorem c2_ok : check c2 = true := by decide
+/-- $$\operatorname{check}(\mathrm{hiding}(\mathtt{c2})) = \mathsf{true}$$
+
+The schedule psync generated for `first_error_wins` (tests/graph.rs, region 0): 3 statements in 1 level(s). Every concurrent execution of it equals running the 3 statements in program order, on everything but the observed state. -/
+theorem c2_ok : check (c2.hiding c2_observed) = true := by decide
+
+/-- $$\operatorname{check}(\mathtt{c2}) = \mathsf{false}$$
+
+With the observed state counted, the schedule is not equivalent: it changes that state as sequential code would not. -/
+theorem c2_strict : check c2 = false := by decide
 
 /-- tests/graph.rs: `exit_after_later_level`, region 0 -/
 def c3 : Cert where
   nodes := [
-    { reads := [[0, 1], [0, 2], [3, 1], [3, 2]], writes := [[0, 4]] },
-    { reads := [[0, 1], [0, 2], [3, 1], [3, 2]], writes := [[0, 5]] },
-    { reads := [[0, 4], [0, 5], [0, 18], [0, 24], [0, 25], [3, 4], [3, 5], [3, 18], [3, 24], [3, 25]], writes := [[19, 23]] },
-    { reads := [[0, 15], [0, 16], [0, 17], [0, 1], [0, 18], [0, 2], [3, 15], [3, 16], [3, 17], [3, 1], [3, 18], [3, 2]], writes := [[0, 6], [19, 26]] }]
+    { reads := [[0, 1], [0, 2], [3, 1], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 9], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 11]] },
+    { reads := [[0, 1], [0, 2], [3, 1], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 12], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 13]] },
+    { reads := [[0, 9], [0, 12], [0, 31], [0, 33], [0, 34], [3, 9], [3, 12], [3, 31], [3, 33], [3, 34], [4, 35], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 11], [10, 13]], writes := [[10, 15], [0, 33, 36], [4, 5, 6], [4, 5, 7], [4, 5, 8]] },
+    { reads := [[0, 28], [0, 29], [0, 30], [0, 1], [0, 31], [0, 2], [3, 28], [3, 29], [3, 30], [3, 1], [3, 31], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 14], [10, 17], [4, 5, 6], [4, 5, 7], [4, 5, 8]] }]
   levels := [[[0], [1], [3]], [[2]]]
 
-/-- $$\operatorname{check}(\mathtt{c3}) = \mathsf{true}$$
+/-- The places of `c3` that hold state measured on purpose: h/graph/ACTIVE, h/graph/PEAK, h/graph/TICKS. -/
+def c3_observed : List Place := [[4, 5, 6], [4, 5, 7], [4, 5, 8]]
 
-The schedule psync generated for `exit_after_later_level` (tests/graph.rs, region 0): 4 statements in 2 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 4 statements in program order. -/
-theorem c3_ok : check c3 = true := by decide
+/-- $$\operatorname{check}(\mathrm{hiding}(\mathtt{c3})) = \mathsf{true}$$
+
+The schedule psync generated for `exit_after_later_level` (tests/graph.rs, region 0): 4 statements in 2 level(s). Every concurrent execution of it equals running the 4 statements in program order, on everything but the observed state. -/
+theorem c3_ok : check (c3.hiding c3_observed) = true := by decide
+
+/-- $$\operatorname{check}(\mathtt{c3}) = \mathsf{false}$$
+
+With the observed state counted, the schedule is not equivalent: it changes that state as sequential code would not. -/
+theorem c3_strict : check c3 = false := by decide
 
 /-- tests/graph.rs: `options`, region 0 -/
 def c4 : Cert where
   nodes := [
-    { reads := [[0, 1], [0, 4], [0, 2], [3, 1], [3, 4], [3, 2]], writes := [[0, 4], [19, 20]] },
-    { reads := [[0, 1], [0, 5], [0, 2], [3, 1], [3, 5], [3, 2]], writes := [[0, 5], [19, 22]] }]
+    { reads := [[0, 1], [0, 9], [0, 2], [3, 1], [3, 9], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 9], [10, 11], [4, 5, 6], [4, 5, 7], [4, 5, 8]] },
+    { reads := [[0, 1], [0, 12], [0, 2], [3, 1], [3, 12], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 12], [10, 13], [4, 5, 6], [4, 5, 7], [4, 5, 8]] }]
   levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c4}) = \mathsf{true}$$
+/-- The places of `c4` that hold state measured on purpose: h/graph/ACTIVE, h/graph/PEAK, h/graph/TICKS. -/
+def c4_observed : List Place := [[4, 5, 6], [4, 5, 7], [4, 5, 8]]
 
-The schedule psync generated for `options` (tests/graph.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c4_ok : check c4 = true := by decide
+/-- $$\operatorname{check}(\mathrm{hiding}(\mathtt{c4})) = \mathsf{true}$$
+
+The schedule psync generated for `options` (tests/graph.rs, region 0): 2 statements in 1 level(s). Every concurrent execution of it equals running the 2 statements in program order, on everything but the observed state. -/
+theorem c4_ok : check (c4.hiding c4_observed) = true := by decide
+
+/-- $$\operatorname{check}(\mathtt{c4}) = \mathsf{false}$$
+
+With the observed state counted, the schedule is not equivalent: it changes that state as sequential code would not. -/
+theorem c4_strict : check c4 = false := by decide
 
 /-- tests/graph.rs: `shadowing_and_mut`, region 0 -/
 def c5 : Cert where
   nodes := [
-    { reads := [[0, 1], [0, 2], [3, 1], [3, 2]], writes := [[0, 19]] },
-    { reads := [[0, 1], [0, 2], [0, 27], [3, 1], [3, 2], [3, 27]], writes := [[0, 28]] },
-    { reads := [[0, 1], [0, 2], [0, 19], [3, 1], [3, 2], [3, 19]], writes := [[0, 19]] },
-    { reads := [[0, 28], [0, 19], [3, 28], [3, 19]], writes := [[3, 28], [8]] }]
+    { reads := [[0, 1], [0, 2], [3, 1], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 10], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 11]] },
+    { reads := [[0, 1], [0, 2], [0, 37], [3, 1], [3, 2], [3, 37], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 38], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 13]] },
+    { reads := [[0, 1], [0, 2], [0, 10], [3, 1], [3, 2], [3, 10], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 10], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 15]] },
+    { reads := [[0, 38], [0, 10], [3, 38], [3, 10]], writes := [[3, 38], [18]] }]
   levels := [[[0], [1]], [[2]], [[3]]]
 
-/-- $$\operatorname{check}(\mathtt{c5}) = \mathsf{true}$$
+/-- The places of `c5` that hold state measured on purpose: h/graph/ACTIVE, h/graph/PEAK, h/graph/TICKS. -/
+def c5_observed : List Place := [[4, 5, 6], [4, 5, 7], [4, 5, 8]]
 
-The schedule psync generated for `shadowing_and_mut` (tests/graph.rs, region 0): 4 statements in 3 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 4 statements in program order. -/
-theorem c5_ok : check c5 = true := by decide
+/-- $$\operatorname{check}(\mathrm{hiding}(\mathtt{c5})) = \mathsf{true}$$
+
+The schedule psync generated for `shadowing_and_mut` (tests/graph.rs, region 0): 4 statements in 3 level(s). Every concurrent execution of it equals running the 4 statements in program order, on everything but the observed state. -/
+theorem c5_ok : check (c5.hiding c5_observed) = true := by decide
+
+/-- $$\operatorname{check}(\mathtt{c5}) = \mathsf{false}$$
+
+With the observed state counted, the schedule is not equivalent: it changes that state as sequential code would not. -/
+theorem c5_strict : check c5 = false := by decide
 
 /-- tests/graph.rs: `early_return`, region 0 -/
 def c6 : Cert where
   nodes := [
-    { reads := [[0, 1], [0, 2], [3, 1], [3, 2]], writes := [[0, 4]] },
-    { reads := [[0, 17], [0, 29], [3, 17], [3, 29]], writes := [[19, 22], [8]] },
-    { reads := [[0, 1], [0, 2], [3, 1], [3, 2]], writes := [[0, 5]] }]
+    { reads := [[0, 1], [0, 2], [3, 1], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 9], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 11]] },
+    { reads := [[0, 30], [0, 39], [3, 30], [3, 39]], writes := [[10, 13], [18]] },
+    { reads := [[0, 1], [0, 2], [3, 1], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 12], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 15]] }]
   levels := [[[0], [1], [2]]]
 
-/-- $$\operatorname{check}(\mathtt{c6}) = \mathsf{true}$$
+/-- The places of `c6` that hold state measured on purpose: h/graph/ACTIVE, h/graph/PEAK, h/graph/TICKS. -/
+def c6_observed : List Place := [[4, 5, 6], [4, 5, 7], [4, 5, 8]]
 
-The schedule psync generated for `early_return` (tests/graph.rs, region 0): 3 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 3 statements in program order. -/
-theorem c6_ok : check c6 = true := by decide
+/-- $$\operatorname{check}(\mathrm{hiding}(\mathtt{c6})) = \mathsf{true}$$
+
+The schedule psync generated for `early_return` (tests/graph.rs, region 0): 3 statements in 1 level(s). Every concurrent execution of it equals running the 3 statements in program order, on everything but the observed state. -/
+theorem c6_ok : check (c6.hiding c6_observed) = true := by decide
+
+/-- $$\operatorname{check}(\mathtt{c6}) = \mathsf{false}$$
+
+With the observed state counted, the schedule is not equivalent: it changes that state as sequential code would not. -/
+theorem c6_strict : check c6 = false := by decide
 
 /-- tests/graph.rs: `awaited_arguments`, region 0 -/
 def c7 : Cert where
   nodes := [
-    { reads := [[0, 30], [3, 30]], writes := [[0, 31]] },
-    { reads := [[0, 1], [0, 2], [0, 32], [3, 1], [3, 2], [3, 32]], writes := [[0, 33]] },
-    { reads := [[0, 33], [0, 31], [3, 33], [3, 31]], writes := [[3, 31], [8]] },
-    { reads := [[0, 1], [0, 2], [0, 32], [3, 1], [3, 2], [3, 32]], writes := [[0, 34]] },
-    { reads := [[0, 34], [0, 31], [3, 34], [3, 31]], writes := [[3, 31], [8]] }]
+    { reads := [[0, 40], [3, 40]], writes := [[0, 41]] },
+    { reads := [[0, 1], [0, 2], [0, 42], [3, 1], [3, 2], [3, 42], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 43], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 13]] },
+    { reads := [[0, 43], [0, 41], [3, 43], [3, 41]], writes := [[3, 41], [18]] },
+    { reads := [[0, 1], [0, 2], [0, 42], [3, 1], [3, 2], [3, 42], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 44], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 17]] },
+    { reads := [[0, 44], [0, 41], [3, 44], [3, 41]], writes := [[3, 41], [18]] }]
   levels := [[[0], [1], [3]], [[2]], [[4]]]
 
-/-- $$\operatorname{check}(\mathtt{c7}) = \mathsf{true}$$
+/-- The places of `c7` that hold state measured on purpose: h/graph/ACTIVE, h/graph/PEAK, h/graph/TICKS. -/
+def c7_observed : List Place := [[4, 5, 6], [4, 5, 7], [4, 5, 8]]
 
-The schedule psync generated for `awaited_arguments` (tests/graph.rs, region 0): 5 statements in 3 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 5 statements in program order. -/
-theorem c7_ok : check c7 = true := by decide
+/-- $$\operatorname{check}(\mathrm{hiding}(\mathtt{c7})) = \mathsf{true}$$
+
+The schedule psync generated for `awaited_arguments` (tests/graph.rs, region 0): 5 statements in 3 level(s). Every concurrent execution of it equals running the 5 statements in program order, on everything but the observed state. -/
+theorem c7_ok : check (c7.hiding c7_observed) = true := by decide
+
+/-- $$\operatorname{check}(\mathtt{c7}) = \mathsf{false}$$
+
+With the observed state counted, the schedule is not equivalent: it changes that state as sequential code would not. -/
+theorem c7_strict : check c7 = false := by decide
 
 /-- tests/graph.rs: `effects_keep_order`, region 0 -/
 def c8 : Cert where
   nodes := [
-    { reads := [[0, 30], [3, 30]], writes := [[0, 24]] },
-    { reads := [[0, 24], [3, 24]], writes := [[3, 24], [8]] },
-    { reads := [[0, 1], [0, 2], [3, 1], [3, 2]], writes := [[0, 4]] },
-    { reads := [[0, 4], [0, 24], [3, 4], [3, 24]], writes := [[3, 24], [8]] },
-    { reads := [[0, 1], [0, 2], [3, 1], [3, 2]], writes := [[0, 5]] },
-    { reads := [[0, 5], [0, 24], [3, 5], [3, 24]], writes := [[3, 24], [8]] }]
+    { reads := [[0, 40], [3, 40]], writes := [[0, 33]] },
+    { reads := [[0, 33], [3, 33]], writes := [[3, 33], [18]] },
+    { reads := [[0, 1], [0, 2], [3, 1], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 9], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 15]] },
+    { reads := [[0, 9], [0, 33], [3, 9], [3, 33]], writes := [[3, 33], [18]] },
+    { reads := [[0, 1], [0, 2], [3, 1], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 12], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 19]] },
+    { reads := [[0, 12], [0, 33], [3, 12], [3, 33]], writes := [[3, 33], [18]] }]
   levels := [[[0, 1], [2], [4]], [[3]], [[5]]]
 
-/-- $$\operatorname{check}(\mathtt{c8}) = \mathsf{true}$$
+/-- The places of `c8` that hold state measured on purpose: h/graph/ACTIVE, h/graph/PEAK, h/graph/TICKS. -/
+def c8_observed : List Place := [[4, 5, 6], [4, 5, 7], [4, 5, 8]]
 
-The schedule psync generated for `effects_keep_order` (tests/graph.rs, region 0): 6 statements in 3 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 6 statements in program order. -/
-theorem c8_ok : check c8 = true := by decide
+/-- $$\operatorname{check}(\mathrm{hiding}(\mathtt{c8})) = \mathsf{true}$$
+
+The schedule psync generated for `effects_keep_order` (tests/graph.rs, region 0): 6 statements in 3 level(s). Every concurrent execution of it equals running the 6 statements in program order, on everything but the observed state. -/
+theorem c8_ok : check (c8.hiding c8_observed) = true := by decide
+
+/-- $$\operatorname{check}(\mathtt{c8}) = \mathsf{false}$$
+
+With the observed state counted, the schedule is not equivalent: it changes that state as sequential code would not. -/
+theorem c8_strict : check c8 = false := by decide
 
 /-- tests/graph.rs: `fresh_pool`, region 0 -/
 def c9 : Cert where
   nodes := [
-    { reads := [[0, 35], [0, 36], [3, 36], [37, 38]], writes := [[0, 4], [19, 20]] },
-    { reads := [[0, 35], [0, 36], [3, 36], [37, 38]], writes := [[0, 5], [19, 22]] }]
+    { reads := [[0, 45], [0, 46], [3, 46], [47, 48], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 9], [10, 11], [4, 5, 6], [4, 5, 7], [4, 5, 8]] },
+    { reads := [[0, 45], [0, 46], [3, 46], [47, 48], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 12], [10, 13], [4, 5, 6], [4, 5, 7], [4, 5, 8]] }]
   levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c9}) = \mathsf{true}$$
+/-- The places of `c9` that hold state measured on purpose: h/graph/ACTIVE, h/graph/PEAK, h/graph/TICKS. -/
+def c9_observed : List Place := [[4, 5, 6], [4, 5, 7], [4, 5, 8]]
 
-The schedule psync generated for `fresh_pool` (tests/graph.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c9_ok : check c9 = true := by decide
+/-- $$\operatorname{check}(\mathrm{hiding}(\mathtt{c9})) = \mathsf{true}$$
+
+The schedule psync generated for `fresh_pool` (tests/graph.rs, region 0): 2 statements in 1 level(s). Every concurrent execution of it equals running the 2 statements in program order, on everything but the observed state. -/
+theorem c9_ok : check (c9.hiding c9_observed) = true := by decide
+
+/-- $$\operatorname{check}(\mathtt{c9}) = \mathsf{false}$$
+
+With the observed state counted, the schedule is not equivalent: it changes that state as sequential code would not. -/
+theorem c9_strict : check c9 = false := by decide
 
 /-- tests/graph.rs: `run`, region 0 -/
 def c10 : Cert where
   nodes := [
-    { reads := [[0, 39], [3, 39, 40]], writes := [[3, 39, 40], [8]] },
-    { reads := [[0, 16], [0, 1], [0, 41], [0, 2], [0, 39], [0, 27], [3, 16], [3, 1], [3, 41], [3, 2], [3, 39, 42], [3, 27]], writes := [[0, 43], [19, 22]] },
-    { reads := [[0, 43], [0, 44], [0, 39], [3, 43], [3, 44], [3, 39, 40]], writes := [[3, 39, 40], [8]] },
-    { reads := [[0, 39], [3, 39, 42]], writes := [[0, 45]] },
-    { reads := [[0, 15], [0, 16], [0, 46], [0, 17], [0, 47], [0, 1], [0, 48], [0, 49], [0, 50], [0, 51], [0, 45], [0, 52], [0, 2], [0, 53], [0, 39], [0, 28], [3, 15], [3, 16], [3, 46], [3, 17], [3, 47], [3, 1], [3, 48], [3, 49], [3, 50], [3, 51], [3, 45], [3, 52], [3, 2], [3, 53], [3, 39, 54], [3, 28]], writes := [[0, 55]] },
-    { reads := [[0, 47], [0, 48], [0, 55], [0, 56], [0, 51], [0, 45], [0, 53], [0, 57], [0, 39], [3, 47], [3, 48], [3, 55], [3, 56], [3, 51], [3, 45], [3, 53], [3, 57], [3, 39, 40]], writes := [[3, 39, 40], [19, 58], [8]] }]
+    { reads := [[0, 49], [3, 49, 50]], writes := [[3, 49, 50], [18]] },
+    { reads := [[0, 29], [0, 1], [0, 51], [0, 2], [0, 49], [0, 37], [3, 29], [3, 1], [3, 51], [3, 2], [3, 49, 52], [3, 37], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 53], [10, 13], [4, 5, 6], [4, 5, 7], [4, 5, 8]] },
+    { reads := [[0, 53], [0, 54], [0, 49], [3, 53], [3, 54], [3, 49, 50]], writes := [[3, 49, 50], [18]] },
+    { reads := [[0, 49], [3, 49, 52]], writes := [[0, 55]] },
+    { reads := [[0, 28], [0, 29], [0, 56], [0, 30], [0, 57], [0, 1], [0, 58], [0, 59], [0, 60], [0, 61], [0, 55], [0, 62], [0, 2], [0, 63], [0, 49], [0, 38], [3, 28], [3, 29], [3, 56], [3, 30], [3, 57], [3, 1], [3, 58], [3, 59], [3, 60], [3, 61], [3, 55], [3, 62], [3, 2], [3, 63], [3, 49, 64], [3, 38], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 65], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 19]] },
+    { reads := [[0, 57], [0, 58], [0, 65], [0, 66], [0, 61], [0, 55], [0, 63], [0, 67], [0, 49], [3, 57], [3, 58], [3, 65], [3, 66], [3, 61], [3, 55], [3, 63], [3, 67], [3, 49, 50]], writes := [[3, 49, 50], [10, 21], [18]] }]
   levels := [[[0], [1], [3, 4]], [[2]], [[5]]]
 
-/-- $$\operatorname{check}(\mathtt{c10}) = \mathsf{true}$$
+/-- The places of `c10` that hold state measured on purpose: h/graph/ACTIVE, h/graph/PEAK, h/graph/TICKS. -/
+def c10_observed : List Place := [[4, 5, 6], [4, 5, 7], [4, 5, 8]]
 
-The schedule psync generated for `run` (tests/graph.rs, region 0): 6 statements in 3 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 6 statements in program order. -/
-theorem c10_ok : check c10 = true := by decide
+/-- $$\operatorname{check}(\mathrm{hiding}(\mathtt{c10})) = \mathsf{true}$$
+
+The schedule psync generated for `run` (tests/graph.rs, region 0): 6 statements in 3 level(s). Every concurrent execution of it equals running the 6 statements in program order, on everything but the observed state. -/
+theorem c10_ok : check (c10.hiding c10_observed) = true := by decide
+
+/-- $$\operatorname{check}(\mathtt{c10}) = \mathsf{false}$$
+
+With the observed state counted, the schedule is not equivalent: it changes that state as sequential code would not. -/
+theorem c10_strict : check c10 = false := by decide
 
 /-- tests/graph.rs: `reads_then_one_write`, region 0 -/
 def c11 : Cert where
   nodes := [
-    { reads := [[0, 59], [3, 59], [37, 38, 59, 60, 4, 61]], writes := [[0, 4], [19, 20]] },
-    { reads := [[0, 59], [3, 59], [37, 38, 59, 60, 5, 5, 61]], writes := [[0, 5], [19, 22]] },
-    { reads := [[0, 59], [3, 59], [19, 20], [19, 22]], writes := [[0, 6], [37, 38, 59, 60, 6, 6, 6, 61], [19, 23]] }]
+    { reads := [[0, 68], [3, 68], [47, 48, 68, 69, 9, 70], [4, 35], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 9], [10, 11], [0, 68, 36], [4, 5, 6], [4, 5, 7], [4, 5, 8]] },
+    { reads := [[0, 68], [3, 68], [47, 48, 68, 69, 12, 12, 70], [4, 35], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 12], [10, 13], [0, 68, 36], [4, 5, 6], [4, 5, 7], [4, 5, 8]] },
+    { reads := [[0, 68], [3, 68], [10, 11], [10, 13], [4, 35], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 14], [47, 48, 68, 69, 14, 14, 14, 70], [10, 15], [0, 68, 36], [4, 5, 6], [4, 5, 7], [4, 5, 8]] }]
   levels := [[[0], [1]], [[2]]]
 
-/-- $$\operatorname{check}(\mathtt{c11}) = \mathsf{true}$$
+/-- The places of `c11` that hold state measured on purpose: n/store/$state, h/graph/ACTIVE, h/graph/PEAK, h/graph/TICKS. -/
+def c11_observed : List Place := [[0, 68, 36], [4, 5, 6], [4, 5, 7], [4, 5, 8]]
 
-The schedule psync generated for `reads_then_one_write` (tests/graph.rs, region 0): 3 statements in 2 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 3 statements in program order. -/
-theorem c11_ok : check c11 = true := by decide
+/-- $$\operatorname{check}(\mathrm{hiding}(\mathtt{c11})) = \mathsf{true}$$
+
+The schedule psync generated for `reads_then_one_write` (tests/graph.rs, region 0): 3 statements in 2 level(s). Every concurrent execution of it equals running the 3 statements in program order, on everything but the observed state. -/
+theorem c11_ok : check (c11.hiding c11_observed) = true := by decide
+
+/-- $$\operatorname{check}(\mathtt{c11}) = \mathsf{false}$$
+
+With the observed state counted, the schedule is not equivalent: it changes that state as sequential code would not. -/
+theorem c11_strict : check c11 = false := by decide
 
 /-- tests/graph.rs: `await_inside_a_binding`, region 0 -/
 def c12 : Cert where
   nodes := [
-    { reads := [[0, 30], [3, 30]], writes := [[0, 62]] },
-    { reads := [[0, 1], [0, 2], [3, 1], [3, 2]], writes := [[0, 4]] },
-    { reads := [[0, 1], [0, 2], [3, 1], [3, 2]], writes := [[0, 63]] },
-    { reads := [[0, 63], [0, 4], [0, 64], [3, 63], [3, 4], [3, 64]], writes := [[0, 65], [8]] },
-    { reads := [[0, 1], [0, 2], [0, 62], [3, 1], [3, 2], [3, 62]], writes := [[0, 66], [3, 62]] },
-    { reads := [[0, 1], [0, 2], [3, 1], [3, 2]], writes := [[0, 67]] },
-    { reads := [[0, 66], [0, 67], [3, 66], [3, 67]], writes := [[0, 68]] },
-    { reads := [[0, 62], [3, 62]], writes := [[3, 62], [8]] }]
+    { reads := [[0, 40], [3, 40]], writes := [[0, 71]] },
+    { reads := [[0, 1], [0, 2], [3, 1], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 9], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 13]] },
+    { reads := [[0, 1], [0, 2], [3, 1], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 72], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 15]] },
+    { reads := [[0, 72], [0, 9], [0, 73], [3, 72], [3, 9], [3, 73]], writes := [[0, 74], [18]] },
+    { reads := [[0, 1], [0, 2], [0, 71], [3, 1], [3, 2], [3, 71], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 75], [3, 71], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 19]] },
+    { reads := [[0, 1], [0, 2], [3, 1], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 76], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 21]] },
+    { reads := [[0, 75], [0, 76], [3, 75], [3, 76]], writes := [[0, 77]] },
+    { reads := [[0, 71], [3, 71]], writes := [[3, 71], [18]] }]
   levels := [[[0, 4], [1], [2], [5]], [[3], [6]], [[7]]]
 
-/-- $$\operatorname{check}(\mathtt{c12}) = \mathsf{true}$$
+/-- The places of `c12` that hold state measured on purpose: h/graph/ACTIVE, h/graph/PEAK, h/graph/TICKS. -/
+def c12_observed : List Place := [[4, 5, 6], [4, 5, 7], [4, 5, 8]]
 
-The schedule psync generated for `await_inside_a_binding` (tests/graph.rs, region 0): 8 statements in 3 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 8 statements in program order. -/
-theorem c12_ok : check c12 = true := by decide
+/-- $$\operatorname{check}(\mathrm{hiding}(\mathtt{c12})) = \mathsf{true}$$
+
+The schedule psync generated for `await_inside_a_binding` (tests/graph.rs, region 0): 8 statements in 3 level(s). Every concurrent execution of it equals running the 8 statements in program order, on everything but the observed state. -/
+theorem c12_ok : check (c12.hiding c12_observed) = true := by decide
+
+/-- $$\operatorname{check}(\mathtt{c12}) = \mathsf{false}$$
+
+With the observed state counted, the schedule is not equivalent: it changes that state as sequential code would not. -/
+theorem c12_strict : check c12 = false := by decide
 
 /-- tests/graph.rs: `crossing`, region 0 -/
 def c13 : Cert where
   nodes := [
-    { reads := [[0, 1], [0, 2], [3, 1], [3, 2]], writes := [[0, 11]] },
-    { reads := [[0, 1], [0, 2], [3, 1], [3, 2]], writes := [[0, 12]] },
-    { reads := [[0, 1], [0, 11], [0, 2], [3, 1], [3, 11], [3, 2]], writes := [[0, 13]] },
-    { reads := [[0, 1], [0, 11], [0, 12], [0, 2], [3, 1], [3, 11], [3, 12], [3, 2]], writes := [[0, 14]] }]
+    { reads := [[0, 1], [0, 2], [3, 1], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 24], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 11]] },
+    { reads := [[0, 1], [0, 2], [3, 1], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 25], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 13]] },
+    { reads := [[0, 1], [0, 24], [0, 2], [3, 1], [3, 24], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 26], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 15]] },
+    { reads := [[0, 1], [0, 24], [0, 25], [0, 2], [3, 1], [3, 24], [3, 25], [3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]], writes := [[0, 27], [4, 5, 6], [4, 5, 7], [4, 5, 8], [10, 17]] }]
   levels := [[[0], [1]], [[2], [3]]]
 
-/-- $$\operatorname{check}(\mathtt{c13}) = \mathsf{true}$$
+/-- The places of `c13` that hold state measured on purpose: h/graph/ACTIVE, h/graph/PEAK, h/graph/TICKS. -/
+def c13_observed : List Place := [[4, 5, 6], [4, 5, 7], [4, 5, 8]]
 
-The schedule psync generated for `crossing` (tests/graph.rs, region 0): 4 statements in 2 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 4 statements in program order. -/
-theorem c13_ok : check c13 = true := by decide
+/-- $$\operatorname{check}(\mathrm{hiding}(\mathtt{c13})) = \mathsf{true}$$
+
+The schedule psync generated for `crossing` (tests/graph.rs, region 0): 4 statements in 2 level(s). Every concurrent execution of it equals running the 4 statements in program order, on everything but the observed state. -/
+theorem c13_ok : check (c13.hiding c13_observed) = true := by decide
+
+/-- $$\operatorname{check}(\mathtt{c13}) = \mathsf{false}$$
+
+With the observed state counted, the schedule is not equivalent: it changes that state as sequential code would not. -/
+theorem c13_strict : check c13 = false := by decide
 
 /-- tests/sync.rs: `three_downloads`, region 0 -/
 def c14 : Cert where
   nodes := [
-    { reads := [[0, 24], [0, 69], [3, 24], [3, 69]], writes := [[0, 4]] },
-    { reads := [[0, 24], [0, 69], [3, 24], [3, 69]], writes := [[0, 5]] },
-    { reads := [[0, 4], [0, 24], [0, 69], [3, 4], [3, 24], [3, 69]], writes := [[0, 6]] }]
+    { reads := [[0, 33], [0, 78], [3, 33], [3, 78], [4, 35]], writes := [[0, 9], [0, 33, 36], [10, 11]] },
+    { reads := [[0, 33], [0, 78], [3, 33], [3, 78], [4, 35]], writes := [[0, 12], [0, 33, 36], [10, 13]] },
+    { reads := [[0, 9], [0, 33], [0, 78], [3, 9], [3, 33], [3, 78], [4, 35]], writes := [[0, 14], [0, 33, 36], [10, 15]] }]
   levels := [[[0, 2], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c14}) = \mathsf{true}$$
+/-- The places of `c14` that hold state measured on purpose: n/log/$state. -/
+def c14_observed : List Place := [[0, 33, 36]]
 
-The schedule psync generated for `three_downloads` (tests/sync.rs, region 0): 3 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 3 statements in program order. -/
-theorem c14_ok : check c14 = true := by decide
+/-- $$\operatorname{check}(\mathrm{hiding}(\mathtt{c14})) = \mathsf{true}$$
+
+The schedule psync generated for `three_downloads` (tests/sync.rs, region 0): 3 statements in 1 level(s). Every concurrent execution of it equals running the 3 statements in program order, on everything but the observed state. -/
+theorem c14_ok : check (c14.hiding c14_observed) = true := by decide
+
+/-- $$\operatorname{check}(\mathtt{c14}) = \mathsf{false}$$
+
+With the observed state counted, the schedule is not equivalent: it changes that state as sequential code would not. -/
+theorem c14_strict : check c14 = false := by decide
 
 /-- tests/sync.rs: `first_error_wins`, region 0 -/
 def c15 : Cert where
   nodes := [
-    { reads := [[0, 15], [0, 24], [0, 69], [3, 15], [3, 24], [3, 69]], writes := [[0, 4], [19, 20]] },
-    { reads := [[0, 15], [0, 24], [0, 69], [3, 15], [3, 24], [3, 69]], writes := [[0, 5], [19, 22]] }]
+    { reads := [[0, 28], [0, 33], [0, 78], [3, 28], [3, 33], [3, 78], [4, 35]], writes := [[0, 9], [10, 11], [0, 33, 36]] },
+    { reads := [[0, 28], [0, 33], [0, 78], [3, 28], [3, 33], [3, 78], [4, 35]], writes := [[0, 12], [10, 13], [0, 33, 36]] }]
   levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c15}) = \mathsf{true}$$
+/-- The places of `c15` that hold state measured on purpose: n/log/$state. -/
+def c15_observed : List Place := [[0, 33, 36]]
 
-The schedule psync generated for `first_error_wins` (tests/sync.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c15_ok : check c15 = true := by decide
+/-- $$\operatorname{check}(\mathrm{hiding}(\mathtt{c15})) = \mathsf{true}$$
+
+The schedule psync generated for `first_error_wins` (tests/sync.rs, region 0): 2 statements in 1 level(s). Every concurrent execution of it equals running the 2 statements in program order, on everything but the observed state. -/
+theorem c15_ok : check (c15.hiding c15_observed) = true := by decide
+
+/-- $$\operatorname{check}(\mathtt{c15}) = \mathsf{false}$$
+
+With the observed state counted, the schedule is not equivalent: it changes that state as sequential code would not. -/
+theorem c15_strict : check c15 = false := by decide
 
 /-- tests/sync.rs: `panic_after_error`, region 0 -/
 def c16 : Cert where
   nodes := [
-    { reads := [[0, 15], [0, 17], [0, 18], [0, 24], [0, 69], [3, 15], [3, 17], [3, 18], [3, 24], [3, 69]], writes := [[0, 4], [19, 20]] },
-    { reads := [[0, 24], [0, 69], [0, 70], [3, 24], [3, 69], [3, 70]], writes := [[0, 5]] }]
+    { reads := [[0, 28], [0, 30], [0, 31], [0, 33], [0, 78], [3, 28], [3, 30], [3, 31], [3, 33], [3, 78], [4, 35]], writes := [[0, 9], [10, 11], [0, 33, 36]] },
+    { reads := [[0, 33], [0, 78], [0, 79], [3, 33], [3, 78], [3, 79], [4, 35]], writes := [[0, 12], [0, 33, 36], [10, 13]] }]
   levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c16}) = \mathsf{true}$$
+/-- The places of `c16` that hold state measured on purpose: n/log/$state. -/
+def c16_observed : List Place := [[0, 33, 36]]
 
-The schedule psync generated for `panic_after_error` (tests/sync.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c16_ok : check c16 = true := by decide
+/-- $$\operatorname{check}(\mathrm{hiding}(\mathtt{c16})) = \mathsf{true}$$
+
+The schedule psync generated for `panic_after_error` (tests/sync.rs, region 0): 2 statements in 1 level(s). Every concurrent execution of it equals running the 2 statements in program order, on everything but the observed state. -/
+theorem c16_ok : check (c16.hiding c16_observed) = true := by decide
+
+/-- $$\operatorname{check}(\mathtt{c16}) = \mathsf{false}$$
+
+With the observed state counted, the schedule is not equivalent: it changes that state as sequential code would not. -/
+theorem c16_strict : check c16 = false := by decide
 
 /-- tests/sync.rs: `returns_future`, region 0 -/
 def c17 : Cert where
   nodes := [
-    { reads := [[0, 19], [3, 19]], writes := [[0, 4]] },
-    { reads := [[0, 19], [3, 19]], writes := [[0, 5]] }]
+    { reads := [[0, 10], [3, 10]], writes := [[0, 9]] },
+    { reads := [[0, 10], [3, 10]], writes := [[0, 12]] }]
   levels := [[[0], [1]]]
 
 /-- $$\operatorname{check}(\mathtt{c17}) = \mathsf{true}$$
@@ -258,45 +394,53 @@ theorem c17_ok : check c17 = true := by decide
 /-- tests/sync.rs: `speculative_writes`, region 0 -/
 def c18 : Cert where
   nodes := [
-    { reads := [[0, 15], [0, 17], [0, 41], [0, 71], [0, 72], [0, 18], [0, 73], [0, 24], [0, 30], [0, 69], [0, 70], [0, 74], [3, 15], [3, 17], [3, 41], [3, 71], [3, 72], [3, 18], [3, 73], [3, 24], [3, 30], [3, 69], [3, 70], [3, 74], [37, 75, 60, 76, 77, 78, 0, 8, 77], [37, 38]], writes := [[37, 75, 60, 76, 77, 78, 0, 8, 77], [37, 75, 60, 76, 77, 78, 0, 8, 77], [19, 20]] },
-    { reads := [[0, 17], [0, 41], [0, 71], [0, 72], [0, 73], [0, 24], [0, 30], [0, 69], [0, 70], [0, 74], [3, 17], [3, 41], [3, 71], [3, 72], [3, 73], [3, 24], [3, 30], [3, 69], [3, 70], [3, 74], [37, 75, 60, 76, 77, 60, 37, 78, 77], [37, 38]], writes := [[37, 75, 60, 76, 77, 60, 37, 78, 77], [37, 75, 60, 76, 77, 60, 37, 78, 77], [19, 22]] }]
+    { reads := [[0, 28], [0, 30], [0, 51], [0, 80], [0, 81], [0, 31], [0, 82], [0, 33], [0, 40], [0, 78], [0, 79], [0, 83], [3, 28], [3, 30], [3, 51], [3, 80], [3, 81], [3, 31], [3, 82], [3, 33], [3, 40], [3, 78], [3, 79], [3, 83], [47, 84, 69, 85, 86, 87, 0, 18, 86], [47, 48], [4, 35]], writes := [[47, 84, 69, 85, 86, 87, 0, 18, 86], [47, 84, 69, 85, 86, 87, 0, 18, 86], [10, 11], [0, 33, 36]] },
+    { reads := [[0, 30], [0, 51], [0, 80], [0, 81], [0, 82], [0, 33], [0, 40], [0, 78], [0, 79], [0, 83], [3, 30], [3, 51], [3, 80], [3, 81], [3, 82], [3, 33], [3, 40], [3, 78], [3, 79], [3, 83], [47, 84, 69, 85, 86, 69, 47, 87, 86], [47, 48], [4, 35]], writes := [[47, 84, 69, 85, 86, 69, 47, 87, 86], [47, 84, 69, 85, 86, 69, 47, 87, 86], [10, 13], [0, 33, 36]] }]
   levels := [[[0], [1]]]
-  holes := [76]
+  holes := [85]
 
-/-- $$\operatorname{check}(\mathtt{c18}) = \mathsf{true}$$
+/-- The places of `c18` that hold state measured on purpose: n/log/$state. -/
+def c18_observed : List Place := [[0, 33, 36]]
 
-The schedule psync generated for `speculative_writes` (tests/sync.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c18_ok : check c18 = true := by decide
+/-- $$\operatorname{check}(\mathrm{hiding}(\mathtt{c18})) = \mathsf{true}$$
+
+The schedule psync generated for `speculative_writes` (tests/sync.rs, region 0): 2 statements in 1 level(s). Every concurrent execution of it equals running the 2 statements in program order, on everything but the observed state. -/
+theorem c18_ok : check (c18.hiding c18_observed) = true := by decide
+
+/-- $$\operatorname{check}(\mathtt{c18}) = \mathsf{false}$$
+
+With the observed state counted, the schedule is not equivalent: it changes that state as sequential code would not. -/
+theorem c18_strict : check c18 = false := by decide
 
 /-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `start`, region 0 -/
 def c19 : Cert where
   nodes := [
-    { reads := [[0, 79], [3, 79]], writes := [[19, 20]] },
-    { reads := [[0, 80], [3, 80], [37, 38]], writes := [[0, 81], [19, 22]] }]
+    { reads := [[0, 88], [3, 88]], writes := [[10, 11], [47, 84, 69, 14, 9, 14, 4, 18, 89, 90, 91, 87, 0, 86]] },
+    { reads := [[0, 92], [3, 92], [47, 48], [47, 84, 69, 14, 9, 14, 4, 18, 89, 90, 91, 87, 0, 86]], writes := [[0, 91], [10, 13]] }]
   levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c19}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c19}) = \mathsf{false}$$
 
-The schedule psync generated for `start` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c19_ok : check c19 = true := by decide
+The schedule psync generated for `start` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0) is **not** safe: with what the compiler found its calls do, n0 (writes x/0, w/fs/t/c/a/c/h/e/./j/s/o/n//; reads n/warm, p/warm) and n1 (writes n/s, x/1; reads n/load, p/load, w/svc, w/fs/t/c/a/c/h/e/./j/s/o/n//). This file is expected to hold such schedules (`--expect-unsafe`); `cargo psync check` reports them. -/
+theorem c19_rejected : check c19 = false := by decide
 
 /-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `login`, region 0 -/
 def c20 : Cert where
   nodes := [
-    { reads := [[0, 81], [3, 81], [37, 38, 81]], writes := [[19, 20]] },
-    { reads := [[0, 81], [3, 81], [37, 38, 81]], writes := [[0, 60]] }]
+    { reads := [[0, 91], [3, 91], [47, 48, 91]], writes := [[10, 11]] },
+    { reads := [[0, 91], [3, 91], [47, 48, 91], [10, 11]], writes := [[0, 69], [47, 84, 69, 69, 87, 93, 18, 0, 86]] }]
   levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c20}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c20}) = \mathsf{false}$$
 
-The schedule psync generated for `login` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c20_ok : check c20 = true := by decide
+The schedule psync generated for `login` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0) is **not** safe: with what the compiler found its calls do, n0 (writes x/0; reads n/s, p/s, w/svc/s) and n1 (writes n/t, w/fs/t/t/o/k/e/n//; reads n/s, p/s, w/svc/s, x/0). This file is expected to hold such schedules (`--expect-unsafe`); `cargo psync check` reports them. -/
+theorem c20_rejected : check c20 = false := by decide
 
 /-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `sizes`, region 0 -/
 def c21 : Cert where
   nodes := [
-    { reads := [[0, 82], [3, 82], [37, 38]], writes := [[0, 4], [19, 20]] },
-    { reads := [[0, 82], [3, 82], [37, 38]], writes := [[0, 5], [19, 22]] }]
+    { reads := [[0, 94], [3, 94], [47, 48], [47, 84, 69, 9, 89, 69, 10, 69, 86]], writes := [[0, 9], [10, 11]] },
+    { reads := [[0, 94], [3, 94], [47, 48], [47, 84, 69, 12, 89, 69, 10, 69, 86]], writes := [[0, 12], [10, 13]] }]
   levels := [[[0], [1]]]
 
 /-- $$\operatorname{check}(\mathtt{c21}) = \mathsf{true}$$
@@ -307,32 +451,32 @@ theorem c21_ok : check c21 = true := by decide
 /-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `shared`, region 0 -/
 def c22 : Cert where
   nodes := [
-    { reads := [[0, 83], [0, 24], [3, 83], [3, 24]], writes := [[0, 4]] },
-    { reads := [[0, 83], [0, 24], [3, 83], [3, 24]], writes := [[0, 5]] }]
+    { reads := [[0, 95], [0, 33], [3, 95], [3, 33], [4, 35]], writes := [[0, 9], [0, 33, 36]] },
+    { reads := [[0, 95], [0, 33], [3, 95], [3, 33], [4, 35]], writes := [[0, 12], [0, 33, 36]] }]
   levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c22}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c22}) = \mathsf{false}$$
 
-The schedule psync generated for `shared` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c22_ok : check c22 = true := by decide
+The schedule psync generated for `shared` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0) is **not** safe: with what the compiler found its calls do, n0 (writes n/a, n/log/\$state; reads n/bump, n/log, p/bump, p/log, h/\$ref) and n1 (writes n/b, n/log/\$state; reads n/bump, n/log, p/bump, p/log, h/\$ref). This file is expected to hold such schedules (`--expect-unsafe`); `cargo psync check` reports them. -/
+theorem c22_rejected : check c22 = false := by decide
 
 /-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `snapshot`, region 0 -/
 def c23 : Cert where
   nodes := [
-    { reads := [[0, 59], [3, 59]], writes := [[19, 20]] },
-    { reads := [[0, 84], [3, 84], [37, 38]], writes := [[0, 0], [19, 22]] }]
+    { reads := [[0, 68], [3, 68]], writes := [[10, 11], [47, 84, 69, 91, 69, 87, 63, 18, 89, 16, 12, 86]] },
+    { reads := [[0, 96], [3, 96], [47, 48], [47, 84, 69, 91, 69, 87, 63, 18, 89, 16, 12, 86]], writes := [[0, 0], [10, 13]] }]
   levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c23}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c23}) = \mathsf{false}$$
 
-The schedule psync generated for `snapshot` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c23_ok : check c23 = true := by decide
+The schedule psync generated for `snapshot` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0) is **not** safe: with what the compiler found its calls do, n0 (writes x/0, w/fs/t/s/t/o/r/e/./d/b//; reads n/store, p/store) and n1 (writes n/n, x/1; reads n/inspect_db, p/inspect_db, w/svc, w/fs/t/s/t/o/r/e/./d/b//). This file is expected to hold such schedules (`--expect-unsafe`); `cargo psync check` reports them. -/
+theorem c23_rejected : check c23 = false := by decide
 
 /-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `walk_then_read`, region 0 -/
 def c24 : Cert where
   nodes := [
-    { reads := [[0, 85], [3, 85]], writes := [[19, 20]] },
-    { reads := [[0, 86], [3, 86], [37, 38]], writes := [[0, 4], [19, 22]] }]
+    { reads := [[0, 97], [3, 97]], writes := [[10, 11], [47, 84, 69, 47, 9, 98, 93, 89, 98, 87, 54, 86]] },
+    { reads := [[0, 99], [3, 99], [47, 48], [47, 84, 69, 0, 87, 69, 18, 91, 89, 69, 10, 69, 86]], writes := [[0, 9], [10, 13]] }]
   levels := [[[0], [1]]]
 
 /-- $$\operatorname{check}(\mathtt{c24}) = \mathsf{true}$$
@@ -343,44 +487,44 @@ theorem c24_ok : check c24 = true := by decide
 /-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `tour`, region 0 -/
 def c25 : Cert where
   nodes := [
-    { reads := [[0, 87], [3, 87]], writes := [[19, 20]] },
-    { reads := [[0, 88], [3, 88], [37, 38]], writes := [[0, 0], [19, 22]] }]
+    { reads := [[0, 100], [3, 100]], writes := [[10, 11], [47, 84, 69, 47, 9, 98, 93, 89, 98, 87, 54, 86]] },
+    { reads := [[0, 101], [3, 101], [47, 48], [47, 84, 69, 47, 9, 98, 93, 89, 98, 87, 54, 86]], writes := [[0, 0], [10, 13]] }]
   levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c25}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c25}) = \mathsf{false}$$
 
-The schedule psync generated for `tour` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c25_ok : check c25 = true := by decide
+The schedule psync generated for `tour` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0) is **not** safe: with what the compiler found its calls do, n0 (writes x/0, w/fs/t/w/a/l/k/./l/o/g//; reads n/visit, p/visit) and n1 (writes n/n, x/1; reads n/read_log, p/read_log, w/svc, w/fs/t/w/a/l/k/./l/o/g//). This file is expected to hold such schedules (`--expect-unsafe`); `cargo psync check` reports them. -/
+theorem c25_rejected : check c25 = false := by decide
 
 /-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `release`, region 0 -/
 def c26 : Cert where
   nodes := [
-    { reads := [[0, 89], [3, 89]], writes := [[19, 20]] },
-    { reads := [[0, 90], [3, 90], [37, 38]], writes := [[0, 0], [19, 22]] }]
+    { reads := [[0, 102], [3, 102], [47, 84, 69, 16, 63, 9, 20, 69, 89, 4, 69, 103, 98, 86]], writes := [[10, 11], [47, 84, 69, 91, 104, 69, 18, 89, 4, 69, 103, 98, 86]] },
+    { reads := [[0, 105], [3, 105], [47, 48], [47, 84, 69, 91, 104, 69, 18, 89, 4, 69, 103, 98, 86]], writes := [[0, 0], [10, 13]] }]
   levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c26}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c26}) = \mathsf{false}$$
 
-The schedule psync generated for `release` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c26_ok : check c26 = true := by decide
+The schedule psync generated for `release` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0) is **not** safe: with what the compiler found its calls do, n0 (writes x/0, w/fs/t/s/i/t/e/./h/t/m/l//; reads n/promote, p/promote, w/fs/t/d/r/a/f/t/./h/t/m/l//) and n1 (writes n/n, x/1; reads n/read_site, p/read_site, w/svc, w/fs/t/s/i/t/e/./h/t/m/l//). This file is expected to hold such schedules (`--expect-unsafe`); `cargo psync check` reports them. -/
+theorem c26_rejected : check c26 = false := by decide
 
 /-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `boot`, region 0 -/
 def c27 : Cert where
   nodes := [
-    { reads := [[0, 91], [3, 91]], writes := [[0, 0]] },
-    { reads := [[0, 92], [3, 92]], writes := [[19, 22]] }]
+    { reads := [[0, 106], [3, 106], [47, 84, 69, 9, 3, 3, 89, 69, 87, 103, 98, 86]], writes := [[0, 0], [10, 11]] },
+    { reads := [[0, 107], [3, 107], [10, 11]], writes := [[10, 13], [47, 84, 69, 63, 108, 0, 89, 91, 69, 9, 103, 3, 86]] }]
   levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c27}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c27}) = \mathsf{false}$$
 
-The schedule psync generated for `boot` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c27_ok : check c27 = true := by decide
+The schedule psync generated for `boot` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0) is **not** safe: with what the compiler found its calls do, n0 (writes n/n, x/0; reads n/parse_config, p/parse_config, w/fs/t/a/p/p/./t/o/m/l//) and n1 (writes x/1, w/fs/t/r/u/n/./s/t/a/m/p//; reads n/stamp_run, p/stamp_run, x/0). This file is expected to hold such schedules (`--expect-unsafe`); `cargo psync check` reports them. -/
+theorem c27_rejected : check c27 = false := by decide
 
 /-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `stash_both`, region 0 -/
 def c28 : Cert where
   nodes := [
-    { reads := [[0, 93], [3, 93]], writes := [[0, 94]] },
-    { reads := [[0, 93], [3, 93]], writes := [[0, 95]] }]
+    { reads := [[0, 109], [3, 109]], writes := [[0, 110], [47, 84, 69, 9, 89, 90, 91, 87, 0, 86]] },
+    { reads := [[0, 109], [3, 109]], writes := [[0, 111], [47, 84, 69, 12, 89, 90, 91, 87, 0, 86]] }]
   levels := [[[0], [1]]]
 
 /-- $$\operatorname{check}(\mathtt{c28}) = \mathsf{true}$$
@@ -391,20 +535,20 @@ theorem c28_ok : check c28 = true := by decide
 /-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `stash_same`, region 0 -/
 def c29 : Cert where
   nodes := [
-    { reads := [[0, 93], [3, 93]], writes := [[0, 94]] },
-    { reads := [[0, 93], [3, 93]], writes := [[0, 95]] }]
+    { reads := [[0, 109], [3, 109]], writes := [[0, 110], [47, 84, 69, 9, 89, 90, 91, 87, 0, 86]] },
+    { reads := [[0, 109], [3, 109]], writes := [[0, 111], [47, 84, 69, 9, 89, 90, 91, 87, 0, 86]] }]
   levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c29}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c29}) = \mathsf{false}$$
 
-The schedule psync generated for `stash_same` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c29_ok : check c29 = true := by decide
+The schedule psync generated for `stash_same` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0) is **not** safe: with what the compiler found its calls do, n0 (writes n/r1, w/fs/t/a/./j/s/o/n//; reads n/stash, p/stash) and n1 (writes n/r2, w/fs/t/a/./j/s/o/n//; reads n/stash, p/stash). This file is expected to hold such schedules (`--expect-unsafe`); `cargo psync check` reports them. -/
+theorem c29_rejected : check c29 = false := by decide
 
 /-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `keep_both`, region 0 -/
 def c30 : Cert where
   nodes := [
-    { reads := [[0, 96], [3, 96]], writes := [[0, 4]] },
-    { reads := [[0, 96], [3, 96]], writes := [[0, 5]] }]
+    { reads := [[0, 112], [3, 112]], writes := [[0, 9], [47, 84, 69, 10, 89, 90, 91, 87, 0, 86]] },
+    { reads := [[0, 112], [3, 112]], writes := [[0, 12], [47, 84, 69, 32, 89, 90, 91, 87, 0, 86]] }]
   levels := [[[0], [1]]]
 
 /-- $$\operatorname{check}(\mathtt{c30}) = \mathsf{true}$$
@@ -415,21 +559,21 @@ theorem c30_ok : check c30 = true := by decide
 /-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `keep_same`, region 0 -/
 def c31 : Cert where
   nodes := [
-    { reads := [[0, 96], [3, 96]], writes := [[0, 4]] },
-    { reads := [[0, 96], [3, 96]], writes := [[0, 5]] }]
+    { reads := [[0, 112], [3, 112]], writes := [[0, 9], [47, 84, 69, 10, 89, 90, 91, 87, 0, 86]] },
+    { reads := [[0, 112], [3, 112]], writes := [[0, 12], [47, 84, 69, 10, 89, 90, 91, 87, 0, 86]] }]
   levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c31}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c31}) = \mathsf{false}$$
 
-The schedule psync generated for `keep_same` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c31_ok : check c31 = true := by decide
+The schedule psync generated for `keep_same` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0) is **not** safe: with what the compiler found its calls do, n0 (writes n/a, w/fs/t/x/./j/s/o/n//; reads n/keep, p/keep) and n1 (writes n/b, w/fs/t/x/./j/s/o/n//; reads n/keep, p/keep). This file is expected to hold such schedules (`--expect-unsafe`); `cargo psync check` reports them. -/
+theorem c31_rejected : check c31 = false := by decide
 
 /-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `stash_tail`, region 0 -/
 def c32 : Cert where
   nodes := [
-    { reads := [[0, 93], [3, 93]], writes := [[0, 94]] },
-    { reads := [[0, 93], [3, 93]], writes := [[0, 95]] },
-    { reads := [[0, 94], [3, 94]], writes := [[19, 23], [8]] }]
+    { reads := [[0, 109], [3, 109]], writes := [[0, 110], [47, 84, 69, 14, 89, 90, 91, 87, 0, 86]] },
+    { reads := [[0, 109], [3, 109]], writes := [[0, 111], [47, 84, 69, 16, 89, 90, 91, 87, 0, 86]] },
+    { reads := [[0, 110], [3, 110]], writes := [[10, 15], [18]] }]
   levels := [[[0, 2], [1]]]
 
 /-- $$\operatorname{check}(\mathtt{c32}) = \mathsf{true}$$
@@ -437,124 +581,268 @@ def c32 : Cert where
 The schedule psync generated for `stash_tail` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 3 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 3 statements in program order. -/
 theorem c32_ok : check c32 = true := by decide
 
-/-- examples/graph_suite/chains.rs: `run`, region 0 -/
+/-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `counted`, region 0 -/
 def c33 : Cert where
   nodes := [
-    { reads := [[0, 97], [3, 97, 40]], writes := [[3, 97, 40], [8]] },
-    { reads := [[0, 97], [3, 97, 42], [37, 38, 97, 42]], writes := [[0, 98], [19, 22]] },
-    { reads := [[0, 15], [0, 46], [0, 17], [0, 47], [0, 99], [0, 41], [0, 100], [0, 101], [0, 102], [0, 103], [0, 104], [0, 105], [0, 106], [0, 107], [0, 49], [0, 98], [0, 108], [0, 50], [0, 97], [0, 44], [0, 109], [0, 110], [0, 111], [0, 53], [0, 57], [0, 28], [3, 15], [3, 46], [3, 17], [3, 47], [3, 99], [3, 41], [3, 100], [3, 101], [3, 102], [3, 103], [3, 104], [3, 105], [3, 106], [3, 107], [3, 49], [3, 98], [3, 108], [3, 50], [3, 97, 42], [3, 97, 40], [3, 97, 112], [3, 44], [3, 109], [3, 110], [3, 111], [3, 53], [3, 57], [3, 28], [37, 38, 97, 42]], writes := [[3, 97, 40], [19, 23], [8]] },
-    { reads := [[0, 113], [3, 113]], writes := [[0, 114]] },
-    { reads := [[0, 15], [0, 46], [0, 17], [0, 47], [0, 115], [0, 49], [0, 50], [0, 116], [0, 114], [0, 97], [0, 53], [0, 28], [3, 15], [3, 46], [3, 17], [3, 47], [3, 115], [3, 49], [3, 50], [3, 116], [3, 114], [3, 97, 42], [3, 97, 112], [3, 53], [3, 28], [37, 38, 97, 42]], writes := [[0, 117]] },
-    { reads := [[0, 47], [0, 115], [0, 117], [0, 118], [0, 116], [0, 114], [0, 97], [0, 53], [0, 57], [3, 47], [3, 115], [3, 117], [3, 118], [3, 116], [3, 114], [3, 97, 40], [3, 53], [3, 57]], writes := [[3, 97, 40], [19, 58], [8]] }]
-  levels := [[[0], [1], [3, 4]], [[2]], [[5]]]
+    { reads := [[0, 113], [3, 113]], writes := [[0, 9], [4, 114, 115]] },
+    { reads := [[0, 113], [3, 113]], writes := [[0, 12], [4, 114, 115]] }]
+  levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c33}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c33}) = \mathsf{false}$$
 
-The schedule psync generated for `run` (examples/graph_suite/chains.rs, region 0): 6 statements in 3 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 6 statements in program order. -/
-theorem c33_ok : check c33 = true := by decide
+The schedule psync generated for `counted` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0) is **not** safe: with what the compiler found its calls do, n0 (writes n/a, h/app/HITS; reads n/hit, p/hit) and n1 (writes n/b, h/app/HITS; reads n/hit, p/hit). This file is expected to hold such schedules (`--expect-unsafe`); `cargo psync check` reports them. -/
+theorem c33_rejected : check c33 = false := by decide
 
-/-- examples/graph_suite/late_start.rs: `put_and_upload_sst`, region 0 -/
+/-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `journaled`, region 0 -/
 def c34 : Cert where
   nodes := [
-    { reads := [[0, 119], [0, 120], [3, 119], [3, 120]], writes := [[0, 121], [19, 20]] },
-    { reads := [[0, 119], [0, 120], [3, 119], [3, 120]], writes := [[0, 122], [37, 38, 119], [19, 22]] },
-    { reads := [[0, 119], [0, 120], [0, 121], [3, 119], [3, 120], [3, 121]], writes := [[0, 123], [37, 38, 119], [19, 23]] }]
-  levels := [[[0], [1]], [[2]]]
+    { reads := [[0, 116], [3, 116]], writes := [[0, 9], [4, 114, 117]] },
+    { reads := [[0, 116], [3, 116]], writes := [[0, 12], [4, 114, 117]] }]
+  levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c34}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c34}) = \mathsf{false}$$
 
-The schedule psync generated for `put_and_upload_sst` (examples/graph_suite/late_start.rs, region 0): 3 statements in 2 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 3 statements in program order. -/
-theorem c34_ok : check c34 = true := by decide
+The schedule psync generated for `journaled` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0) is **not** safe: with what the compiler found its calls do, n0 (writes n/a, h/app/JOURNAL; reads n/note, p/note) and n1 (writes n/b, h/app/JOURNAL; reads n/note, p/note). This file is expected to hold such schedules (`--expect-unsafe`); `cargo psync check` reports them. -/
+theorem c34_rejected : check c34 = false := by decide
 
-/-- examples/graph_suite/late_start.rs: `checkpoint_sync`, region 0 -/
+/-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `nested`, region 0 -/
 def c35 : Cert where
   nodes := [
-    { reads := [[0, 124], [3, 124], [37, 38, 124, 60, 9, 125, 0, 4, 126, 125, 127, 8, 7, 61]], writes := [[0, 128], [19, 20]] },
-    { reads := [[0, 124], [0, 128], [3, 124], [3, 128], [37, 38, 124]], writes := [[0, 129], [19, 22]] },
-    { reads := [[0, 129], [0, 124], [3, 129], [3, 124], [37, 38, 124]], writes := [[0, 130], [19, 23]] },
-    { reads := [[0, 131], [3, 131]], writes := [[0, 132], [19, 26]] }]
-  levels := [[[0, 1, 2], [3]]]
+    { reads := [[0, 118], [3, 118]], writes := [[0, 9], [4, 114, 119]] },
+    { reads := [[0, 118], [3, 118]], writes := [[0, 12], [4, 114, 119]] }]
+  levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c35}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c35}) = \mathsf{false}$$
 
-The schedule psync generated for `checkpoint_sync` (examples/graph_suite/late_start.rs, region 0): 4 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 4 statements in program order. -/
-theorem c35_ok : check c35 = true := by decide
+The schedule psync generated for `nested` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0) is **not** safe: with what the compiler found its calls do, n0 (writes n/a, h/app/DEPTH; reads n/enter, p/enter) and n1 (writes n/b, h/app/DEPTH; reads n/enter, p/enter). This file is expected to hold such schedules (`--expect-unsafe`); `cargo psync check` reports them. -/
+theorem c35_rejected : check c35 = false := by decide
 
-/-- examples/graph_suite/late_start.rs: `fetch_extensions_from_blob_store`, region 0 -/
+/-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `appended`, region 0 -/
 def c36 : Cert where
   nodes := [
-    { reads := [[0, 133], [3, 133], [37, 38, 133, 60, 8, 19, 60, 8, 0, 81, 125, 78, 0, 81, 77, 61]], writes := [[0, 134], [19, 20]] },
-    { reads := [[0, 30], [3, 30]], writes := [[0, 135]] },
-    { reads := [[0, 15], [0, 46], [0, 17], [0, 47], [0, 99], [0, 41], [0, 136], [0, 101], [0, 102], [0, 105], [0, 106], [0, 107], [0, 49], [0, 133], [0, 50], [0, 109], [0, 110], [0, 111], [0, 134], [0, 137], [0, 135], [0, 53], [0, 57], [0, 28], [3, 15], [3, 46], [3, 17], [3, 47], [3, 99], [3, 41], [3, 136], [3, 101], [3, 102], [3, 105], [3, 106], [3, 107], [3, 49], [3, 133], [3, 50], [3, 109], [3, 110], [3, 111], [3, 134], [3, 137], [3, 135], [3, 53], [3, 57], [3, 28], [37, 38, 133]], writes := [[3, 135], [19, 23], [8]] },
-    { reads := [[0, 138], [3, 138], [37, 38, 138]], writes := [[0, 139], [19, 26]] }]
-  levels := [[[0], [1], [3]], [[2]]]
+    { reads := [[0, 33], [0, 120], [3, 33], [3, 120], [4, 35]], writes := [[0, 9], [0, 33, 36]] },
+    { reads := [[0, 33], [0, 120], [3, 33], [3, 120], [4, 35]], writes := [[0, 12], [0, 33, 36]] }]
+  levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c36}) = \mathsf{true}$$
+/-- $$\operatorname{check}(\mathtt{c36}) = \mathsf{false}$$
 
-The schedule psync generated for `fetch_extensions_from_blob_store` (examples/graph_suite/late_start.rs, region 0): 4 statements in 2 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 4 statements in program order. -/
-theorem c36_ok : check c36 = true := by decide
+The schedule psync generated for `appended` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0) is **not** safe: with what the compiler found its calls do, n0 (writes n/a, n/log/\$state; reads n/log, n/tally, p/log, p/tally, h/\$ref) and n1 (writes n/b, n/log/\$state; reads n/log, n/tally, p/log, p/tally, h/\$ref). This file is expected to hold such schedules (`--expect-unsafe`); `cargo psync check` reports them. -/
+theorem c36_rejected : check c36 = false := by decide
 
-/-- examples/graph_suite/sequential_awaits.rs: `process_show_validators`, region 0 -/
+/-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `hit_and_miss`, region 0 -/
 def c37 : Cert where
   nodes := [
-    { reads := [[0, 140], [3, 140], [37, 38, 140]], writes := [[0, 141], [19, 20]] },
-    { reads := [[0, 140], [3, 140], [37, 38, 140]], writes := [[0, 142], [19, 22]] },
-    { reads := [[0, 140], [3, 140], [37, 38, 140]], writes := [[0, 143], [19, 23]] },
-    { reads := [[0, 140], [3, 140], [37, 38, 140]], writes := [[0, 144], [19, 26]] }]
-  levels := [[[0], [1], [2], [3]]]
+    { reads := [[0, 113], [3, 113]], writes := [[0, 9], [4, 114, 115]] },
+    { reads := [[0, 121], [3, 121]], writes := [[0, 12], [4, 114, 122]] }]
+  levels := [[[0], [1]]]
 
 /-- $$\operatorname{check}(\mathtt{c37}) = \mathsf{true}$$
 
-The schedule psync generated for `process_show_validators` (examples/graph_suite/sequential_awaits.rs, region 0): 4 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 4 statements in program order. -/
+The schedule psync generated for `hit_and_miss` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
 theorem c37_ok : check c37 = true := by decide
 
-/-- examples/graph_suite/sequential_awaits.rs: `disable`, region 0 -/
+/-- psync-check/tests/fixtures/hidden/app/src/lib.rs: `probed`, region 0 -/
 def c38 : Cert where
   nodes := [
-    { reads := [[0, 42], [3, 42], [37, 38, 42, 60, 145, 146, 81, 8, 6, 53, 8, 60, 41, 81, 60, 78, 53, 4, 44, 8, 146, 7, 8, 9, 4, 147, 126, 60, 41, 148, 8, 21, 61]], writes := [[0, 149], [19, 20]] },
-    { reads := [[0, 42], [3, 42]], writes := [[37, 38, 42, 60, 145, 146, 81, 8, 6, 53, 8, 60, 41, 81, 60, 78, 53, 4, 44, 8, 146, 7, 8, 9, 4, 147, 126, 60, 41, 148, 8, 21, 61], [19, 22]] },
-    { reads := [[0, 15], [0, 46], [0, 17], [0, 47], [0, 136], [0, 49], [0, 50], [0, 42], [0, 149], [0, 73], [0, 150], [0, 53], [0, 28], [3, 15], [3, 46], [3, 17], [3, 47], [3, 136], [3, 49], [3, 50], [3, 42], [3, 149], [3, 73], [3, 150], [3, 53], [3, 28]], writes := [[0, 151], [37, 38, 42, 60, 145, 146, 81, 8, 6, 53, 8, 60, 41, 81, 60, 78, 53, 4, 44, 8, 146, 148, 8, 21, 146, 152, 61]] },
-    { reads := [[0, 47], [0, 136], [0, 151], [0, 153], [0, 53], [0, 57], [3, 47], [3, 136], [3, 151], [3, 153], [3, 53], [3, 57]], writes := [[19, 26], [8]] },
-    { reads := [[0, 42], [3, 42]], writes := [[37, 38, 42, 60, 145, 146, 145, 8, 44, 78, 126, 145, 41, 5, 4, 6, 148, 147, 3, 146, 28, 22, 61], [19, 154]] },
-    { reads := [[0, 42], [3, 42]], writes := [[37, 38, 42, 60, 145, 146, 78, 53, 44, 146, 145, 4, 60, 53, 125, 19, 146, 6, 147, 81, 60, 78, 145, 146, 5, 4, 6, 148, 147, 3, 41, 7, 125, 81, 4, 5, 126, 8, 7, 61], [19, 58]] },
-    { reads := [[0, 42], [3, 42]], writes := [[37, 38, 42, 60, 145, 146, 6, 53, 78, 81, 81, 41, 81, 125, 44, 0, 125, 0, 44, 146, 145, 4, 81, 60, 8, 53, 61], [19, 155]] },
-    { reads := [[0, 42], [3, 42]], writes := [[37, 38, 42, 60, 145, 146, 6, 53, 78, 81, 81, 41, 81, 125, 44, 0, 125, 0, 44, 146, 81, 8, 126, 9, 41, 81, 125, 44, 0, 125, 0, 44, 61], [19, 156]] },
-    { reads := [[0, 42], [3, 42]], writes := [[37, 38, 42, 60, 145, 146, 6, 53, 78, 81, 81, 41, 81, 125, 44, 0, 125, 0, 44, 146, 147, 81, 8, 53, 41, 81, 125, 44, 0, 125, 0, 44, 61], [19, 157]] },
-    { reads := [[0, 42], [3, 42]], writes := [[37, 38, 42, 60, 145, 146, 145, 8, 44, 78, 126, 145, 41, 5, 4, 6, 148, 147, 3, 146, 28, 22, 146, 148, 8, 21, 61], [19, 158]] }]
-  levels := [[[0], [4], [5], [6], [7], [8], [9]], [[1], [2, 3]]]
-  holes := [152]
-
-/-- $$\operatorname{check}(\mathtt{c38}) = \mathsf{true}$$
-
-The schedule psync generated for `disable` (examples/graph_suite/sequential_awaits.rs, region 0): 10 statements in 2 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 10 statements in program order. -/
-theorem c38_ok : check c38 = true := by decide
-
-/-- examples/graph_suite/sequential_awaits.rs: `fetch_page`, region 0 -/
-def c39 : Cert where
-  nodes := [
-    { reads := [[0, 138], [3, 138], [37, 38, 138, 60, 147, 81, 8, 53, 81, 61]], writes := [[0, 159], [19, 20]] },
-    { reads := [[0, 138], [0, 160], [0, 161], [3, 138], [3, 160], [3, 161]], writes := [[0, 162], [19, 22]] }]
+    { reads := [[0, 123], [3, 123], [47, 48]], writes := [[0, 9], [4, 114, 124]] },
+    { reads := [[0, 123], [3, 123], [47, 48]], writes := [[0, 12], [4, 114, 124]] }]
   levels := [[[0], [1]]]
 
-/-- $$\operatorname{check}(\mathtt{c39}) = \mathsf{true}$$
+/-- The places of `c38` that hold state measured on purpose: h/app/PROBES. -/
+def c38_observed : List Place := [[4, 114, 124]]
 
-The schedule psync generated for `fetch_page` (examples/graph_suite/sequential_awaits.rs, region 0): 2 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 2 statements in program order. -/
-theorem c39_ok : check c39 = true := by decide
+/-- $$\operatorname{check}(\mathrm{hiding}(\mathtt{c38})) = \mathsf{true}$$
 
-/-- examples/graph_suite/sequential_awaits.rs: `check_notifications_allowed`, region 0 -/
+The schedule psync generated for `probed` (psync-check/tests/fixtures/hidden/app/src/lib.rs, region 0): 2 statements in 1 level(s). Every concurrent execution of it equals running the 2 statements in program order, on everything but the observed state. -/
+theorem c38_ok : check (c38.hiding c38_observed) = true := by decide
+
+/-- $$\operatorname{check}(\mathtt{c38}) = \mathsf{false}$$
+
+With the observed state counted, the schedule is not equivalent: it changes that state as sequential code would not. -/
+theorem c38_strict : check c38 = false := by decide
+
+/-- examples/graph_suite/chains.rs: `run`, region 0 -/
+def c39 : Cert where
+  nodes := [
+    { reads := [[0, 125], [3, 125, 50]], writes := [[3, 125, 50], [18]] },
+    { reads := [[0, 125], [3, 125, 52], [47, 48, 125, 52]], writes := [[0, 126], [10, 13], [4, 127, 128, 129, 130], [4, 127, 128, 131]] },
+    { reads := [[0, 28], [0, 56], [0, 30], [0, 57], [0, 132], [0, 51], [0, 133], [0, 134], [0, 135], [0, 136], [0, 137], [0, 138], [0, 139], [0, 140], [0, 59], [0, 126], [0, 141], [0, 60], [0, 125], [0, 54], [0, 142], [0, 143], [0, 144], [0, 63], [0, 67], [0, 38], [3, 28], [3, 56], [3, 30], [3, 57], [3, 132], [3, 51], [3, 133], [3, 134], [3, 135], [3, 136], [3, 137], [3, 138], [3, 139], [3, 140], [3, 59], [3, 126], [3, 141], [3, 60], [3, 125, 52], [3, 125, 50], [3, 125, 145], [3, 54], [3, 142], [3, 143], [3, 144], [3, 63], [3, 67], [3, 38], [47, 48, 125, 52]], writes := [[3, 125, 50], [10, 15], [18], [4, 127, 128, 129, 130], [4, 127, 128, 131]] },
+    { reads := [[0, 146], [3, 146]], writes := [[0, 147]] },
+    { reads := [[0, 28], [0, 56], [0, 30], [0, 57], [0, 148], [0, 59], [0, 60], [0, 149], [0, 147], [0, 125], [0, 63], [0, 38], [3, 28], [3, 56], [3, 30], [3, 57], [3, 148], [3, 59], [3, 60], [3, 149], [3, 147], [3, 125, 52], [3, 125, 145], [3, 63], [3, 38], [47, 48, 125, 52], [0, 150], [3, 150]], writes := [[0, 151], [0, 152], [4, 127, 128, 129, 130], [4, 127, 128, 131], [10, 19]] },
+    { reads := [[0, 57], [0, 148], [0, 151], [0, 153], [0, 149], [0, 147], [0, 125], [0, 63], [0, 67], [3, 57], [3, 148], [3, 151], [3, 153], [3, 149], [3, 147], [3, 125, 50], [3, 63], [3, 67], [0, 150], [0, 152], [0, 154], [3, 150], [3, 152], [3, 154]], writes := [[3, 125, 50], [10, 21], [18]] }]
+  levels := [[[0], [1], [3, 4]], [[2]], [[5]]]
+
+/-- The places of `c39` that hold state measured on purpose: h/graph_suite/runtime/sleep_ms/SEQ, h/graph_suite/runtime/TIMERS. -/
+def c39_observed : List Place := [[4, 127, 128, 129, 130], [4, 127, 128, 131]]
+
+/-- $$\operatorname{check}(\mathrm{hiding}(\mathtt{c39})) = \mathsf{true}$$
+
+The schedule psync generated for `run` (examples/graph_suite/chains.rs, region 0): 6 statements in 3 level(s). Every concurrent execution of it equals running the 6 statements in program order, on everything but the observed state. -/
+theorem c39_ok : check (c39.hiding c39_observed) = true := by decide
+
+/-- $$\operatorname{check}(\mathtt{c39}) = \mathsf{false}$$
+
+With the observed state counted, the schedule is not equivalent: it changes that state as sequential code would not. -/
+theorem c39_strict : check c39 = false := by decide
+
+/-- examples/graph_suite/late_start.rs: `put_and_upload_sst`, region 0 -/
 def c40 : Cert where
   nodes := [
-    { reads := [[0, 163], [0, 35], [0, 164], [0, 165], [3, 163], [3, 164], [3, 165], [37, 38]], writes := [[19, 20]] },
-    { reads := [[0, 163], [0, 35], [0, 164], [0, 165], [3, 163], [3, 164], [3, 165], [37, 38]], writes := [[19, 22]] },
-    { reads := [[0, 163], [0, 35], [0, 164], [0, 165], [3, 163], [3, 164], [3, 165], [37, 38]], writes := [[19, 23]] },
-    { reads := [[0, 163], [0, 35], [0, 164], [0, 165], [3, 163], [3, 164], [3, 165], [37, 38]], writes := [[19, 26]] },
-    { reads := [[0, 163], [0, 35], [0, 166], [0, 165], [3, 163], [3, 166], [3, 165], [37, 38]], writes := [[0, 167]] },
-    { reads := [[0, 163], [0, 35], [0, 166], [0, 165], [3, 163], [3, 166], [3, 165], [37, 38]], writes := [[0, 168]] }]
+    { reads := [[0, 155], [0, 156], [3, 155], [3, 156]], writes := [[0, 157], [10, 11], [4, 127, 128, 129, 130], [4, 127, 128, 131]] },
+    { reads := [[0, 155], [0, 156], [3, 155], [3, 156]], writes := [[0, 158], [47, 48, 155], [10, 13], [4, 127, 128, 129, 130], [4, 127, 128, 131]] },
+    { reads := [[0, 155], [0, 156], [0, 157], [3, 155], [3, 156], [3, 157]], writes := [[0, 159], [47, 48, 155], [10, 15], [4, 127, 128, 129, 130], [4, 127, 128, 131]] }]
+  levels := [[[0], [1]], [[2]]]
+
+/-- The places of `c40` that hold state measured on purpose: h/graph_suite/runtime/sleep_ms/SEQ, h/graph_suite/runtime/TIMERS. -/
+def c40_observed : List Place := [[4, 127, 128, 129, 130], [4, 127, 128, 131]]
+
+/-- $$\operatorname{check}(\mathrm{hiding}(\mathtt{c40})) = \mathsf{true}$$
+
+The schedule psync generated for `put_and_upload_sst` (examples/graph_suite/late_start.rs, region 0): 3 statements in 2 level(s). Every concurrent execution of it equals running the 3 statements in program order, on everything but the observed state. -/
+theorem c40_ok : check (c40.hiding c40_observed) = true := by decide
+
+/-- $$\operatorname{check}(\mathtt{c40}) = \mathsf{false}$$
+
+With the observed state counted, the schedule is not equivalent: it changes that state as sequential code would not. -/
+theorem c40_strict : check c40 = false := by decide
+
+/-- examples/graph_suite/late_start.rs: `checkpoint_sync`, region 0 -/
+def c41 : Cert where
+  nodes := [
+    { reads := [[0, 160], [3, 160], [47, 48, 160, 69, 20, 104, 0, 9, 98, 104, 161, 18, 16, 70]], writes := [[0, 162], [10, 11], [4, 127, 128, 129, 130], [4, 127, 128, 131]] },
+    { reads := [[0, 160], [0, 162], [3, 160], [3, 162], [47, 48, 160]], writes := [[0, 163], [10, 13], [4, 127, 128, 129, 130], [4, 127, 128, 131]] },
+    { reads := [[0, 163], [0, 160], [3, 163], [3, 160], [47, 48, 160]], writes := [[0, 164], [10, 15], [4, 127, 128, 129, 130], [4, 127, 128, 131]] },
+    { reads := [[0, 165], [3, 165]], writes := [[0, 166], [10, 17], [4, 127, 128, 129, 130], [4, 127, 128, 131]] }]
+  levels := [[[0, 1, 2], [3]]]
+
+/-- The places of `c41` that hold state measured on purpose: h/graph_suite/runtime/sleep_ms/SEQ, h/graph_suite/runtime/TIMERS. -/
+def c41_observed : List Place := [[4, 127, 128, 129, 130], [4, 127, 128, 131]]
+
+/-- $$\operatorname{check}(\mathrm{hiding}(\mathtt{c41})) = \mathsf{true}$$
+
+The schedule psync generated for `checkpoint_sync` (examples/graph_suite/late_start.rs, region 0): 4 statements in 1 level(s). Every concurrent execution of it equals running the 4 statements in program order, on everything but the observed state. -/
+theorem c41_ok : check (c41.hiding c41_observed) = true := by decide
+
+/-- $$\operatorname{check}(\mathtt{c41}) = \mathsf{false}$$
+
+With the observed state counted, the schedule is not equivalent: it changes that state as sequential code would not. -/
+theorem c41_strict : check c41 = false := by decide
+
+/-- examples/graph_suite/late_start.rs: `fetch_extensions_from_blob_store`, region 0 -/
+def c42 : Cert where
+  nodes := [
+    { reads := [[0, 167], [3, 167], [47, 48, 167, 69, 18, 10, 69, 18, 0, 91, 104, 87, 0, 91, 86, 70]], writes := [[0, 168], [10, 11], [4, 127, 128, 129, 130], [4, 127, 128, 131]] },
+    { reads := [[0, 40], [3, 40]], writes := [[0, 169]] },
+    { reads := [[0, 28], [0, 56], [0, 30], [0, 57], [0, 132], [0, 51], [0, 170], [0, 134], [0, 135], [0, 138], [0, 139], [0, 140], [0, 59], [0, 167], [0, 60], [0, 142], [0, 143], [0, 144], [0, 168], [0, 171], [0, 169], [0, 63], [0, 67], [0, 38], [3, 28], [3, 56], [3, 30], [3, 57], [3, 132], [3, 51], [3, 170], [3, 134], [3, 135], [3, 138], [3, 139], [3, 140], [3, 59], [3, 167], [3, 60], [3, 142], [3, 143], [3, 144], [3, 168], [3, 171], [3, 169], [3, 63], [3, 67], [3, 38], [47, 48, 167]], writes := [[3, 169], [10, 15], [18], [4, 127, 128, 129, 130], [4, 127, 128, 131]] },
+    { reads := [[0, 172], [3, 172], [47, 48, 172]], writes := [[0, 173], [10, 17], [4, 127, 128, 129, 130], [4, 127, 128, 131]] }]
+  levels := [[[0], [1], [3]], [[2]]]
+
+/-- The places of `c42` that hold state measured on purpose: h/graph_suite/runtime/sleep_ms/SEQ, h/graph_suite/runtime/TIMERS. -/
+def c42_observed : List Place := [[4, 127, 128, 129, 130], [4, 127, 128, 131]]
+
+/-- $$\operatorname{check}(\mathrm{hiding}(\mathtt{c42})) = \mathsf{true}$$
+
+The schedule psync generated for `fetch_extensions_from_blob_store` (examples/graph_suite/late_start.rs, region 0): 4 statements in 2 level(s). Every concurrent execution of it equals running the 4 statements in program order, on everything but the observed state. -/
+theorem c42_ok : check (c42.hiding c42_observed) = true := by decide
+
+/-- $$\operatorname{check}(\mathtt{c42}) = \mathsf{false}$$
+
+With the observed state counted, the schedule is not equivalent: it changes that state as sequential code would not. -/
+theorem c42_strict : check c42 = false := by decide
+
+/-- examples/graph_suite/sequential_awaits.rs: `process_show_validators`, region 0 -/
+def c43 : Cert where
+  nodes := [
+    { reads := [[0, 174], [3, 174], [47, 48, 174]], writes := [[0, 175], [10, 11], [4, 127, 128, 129, 130], [4, 127, 128, 131]] },
+    { reads := [[0, 174], [3, 174], [47, 48, 174]], writes := [[0, 176], [10, 13], [4, 127, 128, 129, 130], [4, 127, 128, 131]] },
+    { reads := [[0, 174], [3, 174], [47, 48, 174]], writes := [[0, 177], [10, 15], [4, 127, 128, 129, 130], [4, 127, 128, 131]] },
+    { reads := [[0, 174], [3, 174], [47, 48, 174]], writes := [[0, 178], [10, 17], [4, 127, 128, 129, 130], [4, 127, 128, 131]] }]
+  levels := [[[0], [1], [2], [3]]]
+
+/-- The places of `c43` that hold state measured on purpose: h/graph_suite/runtime/sleep_ms/SEQ, h/graph_suite/runtime/TIMERS. -/
+def c43_observed : List Place := [[4, 127, 128, 129, 130], [4, 127, 128, 131]]
+
+/-- $$\operatorname{check}(\mathrm{hiding}(\mathtt{c43})) = \mathsf{true}$$
+
+The schedule psync generated for `process_show_validators` (examples/graph_suite/sequential_awaits.rs, region 0): 4 statements in 1 level(s). Every concurrent execution of it equals running the 4 statements in program order, on everything but the observed state. -/
+theorem c43_ok : check (c43.hiding c43_observed) = true := by decide
+
+/-- $$\operatorname{check}(\mathtt{c43}) = \mathsf{false}$$
+
+With the observed state counted, the schedule is not equivalent: it changes that state as sequential code would not. -/
+theorem c43_strict : check c43 = false := by decide
+
+/-- examples/graph_suite/sequential_awaits.rs: `disable`, region 0 -/
+def c44 : Cert where
+  nodes := [
+    { reads := [[0, 52], [3, 52], [47, 48, 52, 69, 103, 89, 91, 18, 14, 63, 18, 69, 51, 91, 69, 87, 63, 9, 54, 18, 89, 16, 18, 20, 9, 108, 98, 69, 51, 93, 18, 32, 70]], writes := [[0, 179], [10, 11], [4, 127, 128, 129, 130], [4, 127, 128, 131]] },
+    { reads := [[0, 52], [3, 52]], writes := [[47, 48, 52, 69, 103, 89, 91, 18, 14, 63, 18, 69, 51, 91, 69, 87, 63, 9, 54, 18, 89, 16, 18, 20, 9, 108, 98, 69, 51, 93, 18, 32, 70], [10, 13], [4, 127, 128, 129, 130], [4, 127, 128, 131]] },
+    { reads := [[0, 28], [0, 56], [0, 30], [0, 57], [0, 170], [0, 59], [0, 60], [0, 52], [0, 179], [0, 82], [0, 180], [0, 63], [0, 38], [3, 28], [3, 56], [3, 30], [3, 57], [3, 170], [3, 59], [3, 60], [3, 52], [3, 179], [3, 82], [3, 180], [3, 63], [3, 38]], writes := [[0, 181], [47, 48, 52, 69, 103, 89, 91, 18, 14, 63, 18, 69, 51, 91, 69, 87, 63, 9, 54, 18, 89, 93, 18, 32, 89, 182, 70], [4, 127, 128, 129, 130], [4, 127, 128, 131], [10, 15]] },
+    { reads := [[0, 57], [0, 170], [0, 181], [0, 183], [0, 63], [0, 67], [3, 57], [3, 170], [3, 181], [3, 183], [3, 63], [3, 67]], writes := [[10, 17], [18]] },
+    { reads := [[0, 52], [3, 52]], writes := [[47, 48, 52, 69, 103, 89, 103, 18, 54, 87, 98, 103, 51, 12, 9, 14, 93, 108, 3, 89, 38, 13, 70], [10, 19], [4, 127, 128, 129, 130], [4, 127, 128, 131]] },
+    { reads := [[0, 52], [3, 52]], writes := [[47, 48, 52, 69, 103, 89, 87, 63, 54, 89, 103, 9, 69, 63, 104, 10, 89, 14, 108, 91, 69, 87, 103, 89, 12, 9, 14, 93, 108, 3, 51, 16, 104, 91, 9, 12, 98, 18, 16, 70], [10, 21], [4, 127, 128, 129, 130], [4, 127, 128, 131]] },
+    { reads := [[0, 52], [3, 52]], writes := [[47, 48, 52, 69, 103, 89, 14, 63, 87, 91, 91, 51, 91, 104, 54, 0, 104, 0, 54, 89, 103, 9, 91, 69, 18, 63, 70], [10, 23], [4, 127, 128, 129, 130], [4, 127, 128, 131]] },
+    { reads := [[0, 52], [3, 52]], writes := [[47, 48, 52, 69, 103, 89, 14, 63, 87, 91, 91, 51, 91, 104, 54, 0, 104, 0, 54, 89, 91, 18, 98, 20, 51, 91, 104, 54, 0, 104, 0, 54, 70], [10, 184], [4, 127, 128, 129, 130], [4, 127, 128, 131]] },
+    { reads := [[0, 52], [3, 52]], writes := [[47, 48, 52, 69, 103, 89, 14, 63, 87, 91, 91, 51, 91, 104, 54, 0, 104, 0, 54, 89, 108, 91, 18, 63, 51, 91, 104, 54, 0, 104, 0, 54, 70], [10, 185], [4, 127, 128, 129, 130], [4, 127, 128, 131]] },
+    { reads := [[0, 52], [3, 52]], writes := [[47, 48, 52, 69, 103, 89, 103, 18, 54, 87, 98, 103, 51, 12, 9, 14, 93, 108, 3, 89, 38, 13, 89, 93, 18, 32, 70], [10, 186], [4, 127, 128, 129, 130], [4, 127, 128, 131]] }]
+  levels := [[[0], [4], [5], [6], [7], [8], [9]], [[1], [2, 3]]]
+  holes := [182]
+
+/-- The places of `c44` that hold state measured on purpose: h/graph_suite/runtime/sleep_ms/SEQ, h/graph_suite/runtime/TIMERS. -/
+def c44_observed : List Place := [[4, 127, 128, 129, 130], [4, 127, 128, 131]]
+
+/-- $$\operatorname{check}(\mathrm{hiding}(\mathtt{c44})) = \mathsf{true}$$
+
+The schedule psync generated for `disable` (examples/graph_suite/sequential_awaits.rs, region 0): 10 statements in 2 level(s). Every concurrent execution of it equals running the 10 statements in program order, on everything but the observed state. -/
+theorem c44_ok : check (c44.hiding c44_observed) = true := by decide
+
+/-- $$\operatorname{check}(\mathtt{c44}) = \mathsf{false}$$
+
+With the observed state counted, the schedule is not equivalent: it changes that state as sequential code would not. -/
+theorem c44_strict : check c44 = false := by decide
+
+/-- examples/graph_suite/sequential_awaits.rs: `fetch_page`, region 0 -/
+def c45 : Cert where
+  nodes := [
+    { reads := [[0, 172], [3, 172], [47, 48, 172, 69, 108, 91, 18, 63, 91, 70]], writes := [[0, 187], [10, 11], [4, 127, 128, 129, 130], [4, 127, 128, 131]] },
+    { reads := [[0, 172], [0, 188], [0, 189], [3, 172], [3, 188], [3, 189]], writes := [[0, 190], [10, 13], [4, 127, 128, 129, 130], [4, 127, 128, 131]] }]
+  levels := [[[0], [1]]]
+
+/-- The places of `c45` that hold state measured on purpose: h/graph_suite/runtime/sleep_ms/SEQ, h/graph_suite/runtime/TIMERS. -/
+def c45_observed : List Place := [[4, 127, 128, 129, 130], [4, 127, 128, 131]]
+
+/-- $$\operatorname{check}(\mathrm{hiding}(\mathtt{c45})) = \mathsf{true}$$
+
+The schedule psync generated for `fetch_page` (examples/graph_suite/sequential_awaits.rs, region 0): 2 statements in 1 level(s). Every concurrent execution of it equals running the 2 statements in program order, on everything but the observed state. -/
+theorem c45_ok : check (c45.hiding c45_observed) = true := by decide
+
+/-- $$\operatorname{check}(\mathtt{c45}) = \mathsf{false}$$
+
+With the observed state counted, the schedule is not equivalent: it changes that state as sequential code would not. -/
+theorem c45_strict : check c45 = false := by decide
+
+/-- examples/graph_suite/sequential_awaits.rs: `check_notifications_allowed`, region 0 -/
+def c46 : Cert where
+  nodes := [
+    { reads := [[0, 191], [0, 45], [0, 192], [0, 193], [3, 191], [3, 192], [3, 193], [47, 48]], writes := [[10, 11], [4, 127, 128, 129, 130], [4, 127, 128, 131]] },
+    { reads := [[0, 191], [0, 45], [0, 192], [0, 193], [3, 191], [3, 192], [3, 193], [47, 48]], writes := [[10, 13], [4, 127, 128, 129, 130], [4, 127, 128, 131]] },
+    { reads := [[0, 191], [0, 45], [0, 192], [0, 193], [3, 191], [3, 192], [3, 193], [47, 48]], writes := [[10, 15], [4, 127, 128, 129, 130], [4, 127, 128, 131]] },
+    { reads := [[0, 191], [0, 45], [0, 192], [0, 193], [3, 191], [3, 192], [3, 193], [47, 48]], writes := [[10, 17], [4, 127, 128, 129, 130], [4, 127, 128, 131]] },
+    { reads := [[0, 191], [0, 45], [0, 194], [0, 193], [3, 191], [3, 194], [3, 193], [47, 48]], writes := [[0, 195], [4, 127, 128, 129, 130], [4, 127, 128, 131], [10, 19]] },
+    { reads := [[0, 191], [0, 45], [0, 194], [0, 193], [3, 191], [3, 194], [3, 193], [47, 48]], writes := [[0, 196], [4, 127, 128, 129, 130], [4, 127, 128, 131], [10, 21]] }]
   levels := [[[0], [1], [2], [3], [4], [5]]]
 
-/-- $$\operatorname{check}(\mathtt{c40}) = \mathsf{true}$$
+/-- The places of `c46` that hold state measured on purpose: h/graph_suite/runtime/sleep_ms/SEQ, h/graph_suite/runtime/TIMERS. -/
+def c46_observed : List Place := [[4, 127, 128, 129, 130], [4, 127, 128, 131]]
 
-The schedule psync generated for `check_notifications_allowed` (examples/graph_suite/sequential_awaits.rs, region 0): 6 statements in 1 level(s). By `PsyncCert.check_sound`, every concurrent execution of it equals running the 6 statements in program order. -/
-theorem c40_ok : check c40 = true := by decide
+/-- $$\operatorname{check}(\mathrm{hiding}(\mathtt{c46})) = \mathsf{true}$$
+
+The schedule psync generated for `check_notifications_allowed` (examples/graph_suite/sequential_awaits.rs, region 0): 6 statements in 1 level(s). Every concurrent execution of it equals running the 6 statements in program order, on everything but the observed state. -/
+theorem c46_ok : check (c46.hiding c46_observed) = true := by decide
+
+/-- $$\operatorname{check}(\mathtt{c46}) = \mathsf{false}$$
+
+With the observed state counted, the schedule is not equivalent: it changes that state as sequential code would not. -/
+theorem c46_strict : check c46 = false := by decide
 
 end PsyncCerts

@@ -7,15 +7,17 @@
 #
 #   scripts/cert-facts.sh            # needs rustup; builds psync-check with its pinned nightly
 #
-# PSYNC_FACTS_DIR (default target/cert-facts) holds the builds.
+# PSYNC_FACTS_DIR (default target/cert-facts) holds the checked crates' builds, PSYNC_CHECK_TARGET
+# (default psync-check/target, where its own `cargo test` builds) the driver.
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 work=${PSYNC_FACTS_DIR:-$root/target/cert-facts}
 toolchain=$(sed -n 's/^channel = "\(.*\)"/\1/p' "$root/psync-check/rust-toolchain.toml")
 export RUSTUP_TOOLCHAIN=$toolchain
 mkdir -p "$work"
-(cd "$root/psync-check" && cargo build --quiet --target-dir "$work/check")
-bin=$work/check/debug
+check_target=${PSYNC_CHECK_TARGET:-$root/psync-check/target}
+(cd "$root/psync-check" && cargo build --quiet --target-dir "$check_target")
+bin=$check_target/debug
 
 # `cargo psync check` in a crate; prints the facts file it wrote.
 facts() {
