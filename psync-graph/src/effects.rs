@@ -55,12 +55,46 @@ pub(crate) enum Domain {
     Service(Option<String>),
     /// An unclassified call under `strict`: anything.
     Unknown,
+    /// Hidden state in the program's memory: a `static`, a `thread_local!`, or a cell, lock or
+    /// atomic behind a reference. Only the compiler's facts name it ([`crate::facts`]).
+    State(State),
+}
+
+/// Hidden state, as the compiler's facts name it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct State {
+    pub at: StateAt,
+    /// Measured on purpose (`#[psync::observed]` on the static, or `observe(..)`): listed in
+    /// certificates, never a conflict.
+    pub observed: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum StateAt {
+    /// A `static` or `thread_local!`, by path (`graph::PEAK`).
+    Static(String),
+    /// The state behind a reference held by this binding of the function (`log` in
+    /// `slow(log, ..)`).
+    Var(String),
+    /// Behind a reference psync cannot name: any state.
+    Any,
 }
 
 impl Domain {
     fn may_alias(&self, other: &Domain) -> bool {
         use Domain::*;
         match (self, other) {
+            (State(a), State(b)) => {
+                !a.observed
+                    && !b.observed
+                    && match (&a.at, &b.at) {
+                        (StateAt::Any, _) | (_, StateAt::Any) => true,
+                        (x, y) => x == y,
+                    }
+            }
+            // An unknown call may touch anything; a child process cannot touch this memory.
+            (State(s), Unknown) | (Unknown, State(s)) => !s.observed,
+            (State(_), _) | (_, State(_)) => false,
             (Process | Unknown, _) | (_, Process | Unknown) => true,
             (Service(a), Service(b)) => match (a, b) {
                 // A service the compiler named by its type (`type:kube::Api::<K>`) may be behind
@@ -82,6 +116,18 @@ impl Domain {
             Domain::Service(Some(r)) => format!("`{r}`"),
             Domain::Service(None) => "service".into(),
             Domain::Unknown => "unknown".into(),
+            Domain::State(s) => {
+                let what = match &s.at {
+                    StateAt::Static(p) => format!("state `{p}`"),
+                    StateAt::Var(x) => format!("state behind `{x}`"),
+                    StateAt::Any => "hidden state".into(),
+                };
+                if s.observed {
+                    format!("observed {what}")
+                } else {
+                    what
+                }
+            }
         }
     }
 }
@@ -303,6 +349,28 @@ impl Effect {
         self.kind == Kind::Write
     }
 
+    /// State measured on purpose: never a conflict, and not a write that must wait for an exit.
+    pub fn observed(&self) -> bool {
+        matches!(&self.domain, Domain::State(s) if s.observed)
+    }
+
+    /// A write that sequential code would not have done after an earlier exit.
+    pub fn real_write(&self) -> bool {
+        self.writes() && !self.observed()
+    }
+
+    /// More places a certificate lists for this effect: the state behind a binding may also be
+    /// what a reference psync cannot name points to (`h/$ref`, read, overlaps `h`).
+    pub fn extra_reads(&self) -> Vec<Vec<String>> {
+        match &self.domain {
+            Domain::State(State {
+                at: StateAt::Var(_),
+                ..
+            }) => vec![vec!["h".into(), "$ref".into()]],
+            _ => Vec::new(),
+        }
+    }
+
     /// The place this effect touches, for certificates: `w/<domain>/<target..>`. Places overlap
     /// by prefix, so where `conflict` is finer than a prefix (string-prefix and computed targets,
     /// services named by type, ordered writes that conflict on any target), the place is cut
@@ -317,6 +385,17 @@ impl Effect {
             v
         };
         match &self.domain {
+            // Hidden state: `h/<static path>`, `n/<binding>/$state` (overlapping every use of the
+            // binding), or `h` (any).
+            Domain::State(s) => {
+                return match &s.at {
+                    StateAt::Static(p) => std::iter::once("h".to_string())
+                        .chain(p.split("::").map(str::to_string))
+                        .collect(),
+                    StateAt::Var(x) => vec!["n".into(), x.clone(), "$state".into()],
+                    StateAt::Any => vec!["h".into()],
+                };
+            }
             Domain::Process | Domain::Unknown => return place,
             Domain::Fs => place.push("fs".into()),
             Domain::Net => place.push("net".into()),
@@ -412,7 +491,7 @@ pub(crate) fn conflict(a: &Effect, b: &Effect) -> Option<String> {
     }
     let fs = a.domain == Domain::Fs && b.domain == Domain::Fs;
     // A process or unknown call may touch any target; ordered operations conflict on any target.
-    let anything = |d: &Domain| matches!(d, Domain::Process | Domain::Unknown);
+    let anything = |d: &Domain| matches!(d, Domain::Process | Domain::Unknown | Domain::State(_));
     let ordered = a.ordered && b.ordered;
     if !ordered
         && !anything(&a.domain)
@@ -443,6 +522,9 @@ pub struct Config {
     pub writes: Vec<String>,
     /// Extra verbs whose order is observable, from `effects(ordered(..))`.
     pub ordered: Vec<String>,
+    /// `observe(log, PEAK)`: hidden state behind these bindings, or in statics of these names,
+    /// is measured on purpose. Certificates list it; it orders nothing.
+    pub observe: Vec<String>,
 }
 
 /// First words of names that read.
@@ -866,6 +948,22 @@ fn receiver_path(e: &Expr) -> Option<String> {
     }
 }
 
+/// The binding an argument's reference comes from: `log` in `log`, `&log`, `&*log`, `log.clone()`,
+/// `self` in `&self.inner`.
+fn root_binding(e: &Expr) -> Option<String> {
+    match e {
+        Expr::Path(p) if p.qself.is_none() && p.path.segments.len() == 1 => {
+            Some(p.path.segments[0].ident.to_string())
+        }
+        Expr::Reference(r) => root_binding(&r.expr),
+        Expr::Paren(p) => root_binding(&p.expr),
+        Expr::Unary(u) if matches!(u.op, syn::UnOp::Deref(_)) => root_binding(&u.expr),
+        Expr::Field(f) => root_binding(&f.base),
+        Expr::MethodCall(m) if m.args.is_empty() => root_binding(&m.receiver),
+        _ => None,
+    }
+}
+
 /// The effects of a statement or expression, and the awaited calls psync could not classify.
 #[derive(Default)]
 pub(crate) struct Found {
@@ -922,6 +1020,22 @@ impl Finder<'_> {
         };
         for (e, arg) in fact.effects.iter().zip(&fact.on_arg) {
             let mut e = e.clone();
+            if let Domain::State(st) = &mut e.domain {
+                // The state behind argument `j`: behind the binding it is read from.
+                if let (StateAt::Any, Some(j)) = (&st.at, arg)
+                    && let Some(x) = args.get(*j).and_then(|a| root_binding(a))
+                {
+                    st.at = StateAt::Var(x);
+                }
+                let name = match &st.at {
+                    StateAt::Static(p) => p.rsplit("::").next().unwrap_or(p).to_string(),
+                    StateAt::Var(x) => x.clone(),
+                    StateAt::Any => String::new(),
+                };
+                st.observed |= !name.is_empty() && self.config.observe.contains(&name);
+                self.found.effects.push(e);
+                continue;
+            }
             if let Some(j) = arg {
                 e.target = args.get(*j).map_or(Target::Any, |a| target_of(Some(a)));
                 e.source = args.get(*j).map(|a| a.to_token_stream().to_string());

@@ -77,3 +77,22 @@ pub fn par(_attr: TokenStream, item: TokenStream) -> TokenStream {
 pub fn speculate(_attr: TokenStream, item: TokenStream) -> TokenStream {
     item
 }
+
+/// On a `static`, or on a `static` inside `thread_local!`: this state is measured on purpose
+/// (a counter, a log of the schedule, a test clock), so psync's certificates list it but do not
+/// require concurrent statements to leave it as sequential code would, and `cargo psync check`
+/// does not report it as shared state. It leaves a marker the driver reads,
+/// `const __PSYNC_OBSERVED_<NAME>: () = ();`, next to the item.
+///
+/// ```ignore
+/// thread_local! {
+///     #[psync::observed]
+///     static PEAK: Cell<usize> = const { Cell::new(0) };
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn observed(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    psync_graph::observed(item.into())
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
+}

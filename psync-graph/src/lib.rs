@@ -61,7 +61,7 @@
 mod access;
 mod classify;
 mod effects;
-mod facts;
+pub mod facts;
 mod gates;
 
 extern crate proc_macro;
@@ -142,6 +142,17 @@ impl Options {
                             target.push(name.to_string());
                             Ok(())
                         })
+                    })?;
+                }
+                // `observe(log, PEAK)`: hidden state measured on purpose.
+                syn::Meta::List(list) if list.path.is_ident("observe") => {
+                    list.parse_nested_meta(|name| {
+                        let id = name
+                            .path
+                            .get_ident()
+                            .ok_or_else(|| name.error("expected a binding or static name"))?;
+                        options.effects.observe.push(id.to_string());
+                        Ok(())
                     })?;
                 }
                 syn::Meta::NameValue(nv) if nv.path.is_ident("bound") => {
@@ -240,6 +251,9 @@ pub struct RegionReport {
 pub struct CertNode {
     pub reads: Vec<Vec<String>>,
     pub writes: Vec<Vec<String>>,
+    /// Those of its places that hold state measured on purpose (`#[psync::observed]`,
+    /// `observe(..)`): listed, and hidden from the check that the schedule is equivalent.
+    pub observed: Vec<Vec<String>>,
 }
 
 /// One node of a region.
@@ -373,6 +387,17 @@ pub fn transform_fn(function: &mut ItemFn, options: &Options) -> Report {
             in_async: function.sig.asyncness.is_some(),
         }
         .visit_block_mut(&mut function.block);
+    }
+    // `observe(x)`: tells the driver which bindings' state is measured on purpose.
+    for name in options.effects.observe.iter().rev() {
+        let marker = quote::format_ident!("__PSYNC_OBSERVED_{}", name);
+        function.block.stmts.insert(
+            0,
+            syn::parse_quote! {
+                #[allow(dead_code, non_upper_case_globals)]
+                const #marker: () = ();
+            },
+        );
     }
     // Marks the function for `cargo psync`'s driver (which records facts about its calls), and
     // makes cargo rebuild it when the facts change (`option_env!` is tracked).
@@ -1191,4 +1216,38 @@ mod tests {
         );
         assert!(Options::parse(quote!(effects(maybe(x)))).is_err());
     }
+}
+
+/// `#[psync::observed]`: the item unchanged, and a marker `const __PSYNC_OBSERVED_<NAME>` beside
+/// it for `cargo psync`'s driver. The item's tokens are not parsed (inside `thread_local!` they
+/// hold the standard library's internal macros): its name is the identifier after `static` or
+/// `const` (and `mut`).
+pub fn observed(item: TokenStream) -> syn::Result<TokenStream> {
+    use proc_macro2::TokenTree;
+    let tokens: Vec<TokenTree> = item.clone().into_iter().collect();
+    let name = tokens
+        .iter()
+        .enumerate()
+        .find_map(|(i, t)| match t {
+            TokenTree::Ident(k) if k == "static" || k == "const" => {
+                tokens[i + 1..].iter().find_map(|t| match t {
+                    TokenTree::Ident(n) if n != "mut" => Some(n.clone()),
+                    _ => None,
+                })
+            }
+            _ => None,
+        })
+        .ok_or_else(|| {
+            syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "#[psync::observed] goes on a `static` (or one inside `thread_local!`)",
+            )
+        })?;
+    let marker = quote::format_ident!("__PSYNC_OBSERVED_{}", name);
+    Ok(quote! {
+        #item
+        #[doc(hidden)]
+        #[allow(dead_code, non_upper_case_globals)]
+        const #marker: () = ();
+    })
 }

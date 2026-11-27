@@ -17,6 +17,8 @@ use std::{
 #[derive(Default)]
 pub struct ThreadPark;
 
+/// The executor's wake-up flag: scheduling state, observed rather than part of any result.
+#[psync::observed]
 static SIGNAL: LazyLock<(Mutex<bool>, Condvar)> = LazyLock::new(Default::default);
 
 impl Park for ThreadPark {
@@ -77,6 +79,9 @@ impl Ord for WakerSlot {
     }
 }
 
+/// The simulated clock's queue. Every stub's sleep writes it, in an order the schedule decides;
+/// what the stubs return does not depend on it, so it is observed state.
+#[psync::observed]
 static TIMERS: LazyLock<&'static Timers> = LazyLock::new(|| {
     let timers: &'static Timers = Box::leak(Box::new(Timers {
         queue: Mutex::default(),
@@ -104,6 +109,7 @@ pub async fn sleep_ms(ms: u64) {
     std::future::poll_fn(|cx| {
         let at = *deadline.get_or_insert_with(|| {
             let at = Instant::now() + Duration::from_millis(ms);
+            #[psync::observed]
             static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
             let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             TIMERS.queue.lock().unwrap().push(std::cmp::Reverse((

@@ -39,6 +39,15 @@ pub enum Domain {
     Output,
     /// Another crate's API, named by the type or module it belongs to (`kube::Api::<K>`).
     Service(String),
+    /// Hidden state in the program's own memory, changed through a shared reference or a global:
+    /// a `static` or `thread_local!` of a workspace crate, by path (`graph::PEAK`), or, when
+    /// empty, the state behind a reference: the summarized function's parameter `arg`, or, without
+    /// `arg`, a reference the driver could not follow (any state at all).
+    State(String),
+    /// A `static` or `thread_local!` marked `#[psync::observed]`: state the program measures on
+    /// purpose (counters, logs of the schedule, the examples' timer). Listed in facts and
+    /// certificates, never a conflict.
+    Observed(String),
 }
 
 /// How an effect touches its domain.
@@ -85,6 +94,12 @@ impl Effect {
             Domain::Process => "process".to_string(),
             Domain::Output => "standard output".to_string(),
             Domain::Service(s) => format!("`{s}`"),
+            Domain::State(s) if !s.is_empty() => format!("state `{s}`"),
+            Domain::State(_) => match self.arg {
+                Some(j) => format!("state behind parameter {j}"),
+                None => "state behind a reference".to_string(),
+            },
+            Domain::Observed(s) => format!("observed state `{s}`"),
         };
         match &self.target {
             Some(t) => format!("{access} {domain} {t:?}"),
@@ -105,6 +120,12 @@ pub fn conflict(a: &Effect, b: &Effect) -> bool {
         return false;
     }
     let same_domain = match (&a.domain, &b.domain) {
+        // Observed state is measured on purpose: never a conflict.
+        (Domain::Observed(_), _) | (_, Domain::Observed(_)) => return false,
+        // State behind an unknown reference may be any state; a static is only itself.
+        (Domain::State(x), Domain::State(y)) => return x.is_empty() || y.is_empty() || x == y,
+        // A child process cannot touch this process's memory.
+        (Domain::State(_), _) | (_, Domain::State(_)) => return false,
         // A child process cannot change this process's environment, but may touch anything else.
         (Domain::Process, Domain::Env) | (Domain::Env, Domain::Process) => {
             return a.domain == Domain::Env && a.writes() || b.domain == Domain::Env && b.writes();
@@ -284,7 +305,8 @@ pub fn resolve_call(
 /// The facts file the macro reads (`PSYNC_FACTS`): one call site per line,
 /// `site \t name \t panics \t opaque \t effects` (`opaque`: some callee could not be seen through), effects separated by `\x1e`, each
 /// `domain \x1f access \x1f target`. Domains: `fs`, `net`, `env`, `process`, `output`,
-/// `svc:<owner>`; accesses `r`, `w`, `o`. A line-based format keeps the macro free of a JSON
+/// `svc:<owner>`, `state:<static path>` (`state:` alone: the state behind the argument in the
+/// fourth field, or, without one, any state), `observed:<static path>`; accesses `r`, `w`, `o`. A line-based format keeps the macro free of a JSON
 /// dependency.
 pub fn facts_text(crates: &[CrateSummaries], linked: &BTreeMap<String, Resolved>) -> String {
     // One site can be compiled more than once (a crate built with two feature sets): merge the
@@ -319,6 +341,8 @@ pub fn facts_text(crates: &[CrateSummaries], linked: &BTreeMap<String, Resolved>
                         Domain::Process => "process".to_string(),
                         Domain::Output => "output".to_string(),
                         Domain::Service(s) => format!("svc:{s}"),
+                        Domain::State(s) => format!("state:{s}"),
+                        Domain::Observed(s) => format!("observed:{s}"),
                     };
                     let access = match e.access {
                         Access::Read => "r",

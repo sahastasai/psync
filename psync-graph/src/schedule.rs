@@ -47,7 +47,7 @@ pub(crate) fn depends(a: &Node, b: &Node) -> Option<String> {
     // would not have performed it at all.
     if (a.exits || a.panics)
         && !b.speculate
-        && let Some(w) = b.effects.iter().find(|e| e.writes())
+        && let Some(w) = b.effects.iter().find(|e| e.real_write())
     {
         // The call's name; where the effect came from is said with the effect itself.
         let op = w.op.strip_suffix(", per the compiler").unwrap_or(&w.op);
@@ -208,19 +208,26 @@ fn cert_nodes(nodes: &[Node]) -> Vec<crate::CertNode> {
             for p in &n.acc.wpaths {
                 c.writes.push(path(p));
             }
-            if !n.independent {
-                for e in &n.effects {
-                    if e.writes() {
-                        c.writes.push(e.place());
-                    } else {
-                        c.reads.push(e.place());
-                    }
+            for e in &n.effects {
+                // `independent` statements commute on the outside world; hidden state is
+                // listed either way.
+                if n.independent && !matches!(e.domain, crate::effects::Domain::State(_)) {
+                    continue;
+                }
+                if e.writes() {
+                    c.writes.push(e.place());
+                } else {
+                    c.reads.push(e.place());
+                }
+                c.reads.extend(e.extra_reads());
+                if e.observed() {
+                    c.observed.push(e.place());
                 }
             }
             if n.exits || n.panics {
                 c.writes.push(one("x", &[&j.to_string()]));
             }
-            if !n.speculate && n.effects.iter().any(|e| e.writes()) {
+            if !n.speculate && n.effects.iter().any(|e| e.real_write()) {
                 for (i, m) in nodes[..j].iter().enumerate() {
                     if m.exits || m.panics {
                         c.reads.push(one("x", &[&i.to_string()]));

@@ -17,7 +17,7 @@
 //! `option_env!("PSYNC_FACTS_STAMP")`, which makes cargo rebuild annotated crates when the facts
 //! change.
 
-use crate::effects::{Domain, Effect, Kind, Target};
+use crate::effects::{Domain, Effect, Kind, State, StateAt, Target};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
@@ -74,6 +74,20 @@ pub(crate) fn parse(text: &str) -> HashMap<String, Fact> {
                     "env" => (Domain::Env, false),
                     "process" => (Domain::Process, false),
                     "output" => (Domain::Service(Some("type:stdout".into())), true),
+                    // Hidden state: a static or thread-local by path, or (empty) the state behind
+                    // the argument in the fourth field, or any state.
+                    st if st.starts_with("state:") || st.starts_with("observed:") => {
+                        let (observed, path) = match st.strip_prefix("observed:") {
+                            Some(p) => (true, p),
+                            None => (false, &st["state:".len()..]),
+                        };
+                        let at = if path.is_empty() {
+                            StateAt::Any
+                        } else {
+                            StateAt::Static(path.to_string())
+                        };
+                        (Domain::State(State { at, observed }), false)
+                    }
                     svc => (
                         Domain::Service(Some(format!("type:{}", svc.strip_prefix("svc:")?))),
                         false,
@@ -129,12 +143,50 @@ pub(crate) fn parse(text: &str) -> HashMap<String, Fact> {
 /// The fact for the call whose callee name is `ident` (a method name, or the last segment of a
 /// function path) starting at `span`, if the compiler recorded one there.
 pub(crate) fn at(span: proc_macro2::Span, ident: &str) -> Option<&'static Fact> {
+    #[cfg(feature = "cli")]
+    if let Some((table, file)) = CLI.with(|c| c.borrow().clone()) {
+        let start = span.start();
+        let key = format!("{file}:{}:{}", start.line, start.column + 1);
+        return table.0.get(&key).filter(|f| f.name == ident);
+    }
     let table = table();
     if table.is_empty() {
         return None;
     }
     let key = site_key(span)?;
     table.get(&key).filter(|f| f.name == ident)
+}
+
+/// Facts parsed for a command-line tool (`psync-cert`), keyed as in the file.
+#[cfg(feature = "cli")]
+pub struct FactTable(HashMap<String, Fact>);
+
+#[cfg(feature = "cli")]
+impl FactTable {
+    /// Parse facts files (see `psync_check::facts_text`); the table lives as long as the program.
+    pub fn parse(text: &str) -> &'static FactTable {
+        Box::leak(Box::new(FactTable(parse(text))))
+    }
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+#[cfg(feature = "cli")]
+thread_local! {
+    static CLI: std::cell::RefCell<Option<(&'static FactTable, String)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// For a command-line tool: from now on, look up the calls of functions parsed from `file` in
+/// `table`, under keys `file:line:column` (column from 1, as the driver writes them). `None`
+/// turns facts off again.
+#[cfg(feature = "cli")]
+pub fn use_facts(facts: Option<(&'static FactTable, String)>) {
+    CLI.with(|c| *c.borrow_mut() = facts);
 }
 
 /// `/abs/path/file.rs:line:column` of a span's start, as the driver writes it. Only available
@@ -169,6 +221,40 @@ mod tests {
         let f = &parse("/a.rs:1:1\tx\t0\t0\tfs\x1fw\x1f\x1fz\n")["/a.rs:1:1"];
         assert_eq!(f.on_arg, [None]);
         assert!(matches!(f.effects[0].target, Target::Any));
+    }
+
+    /// Hidden state: a static by path, the state behind an argument, observed state.
+    #[test]
+    fn parses_state() {
+        use crate::effects::{State, StateAt};
+        let t = parse(
+            "/a.rs:3:5\tbump\t0\t0\tstate:\x1fw\x1f\x1f0\x1estate:graph::PEAK\x1fw\x1f\x1eobserved:graph::TICKS\x1fr\x1f\n",
+        );
+        let f = &t["/a.rs:3:5"];
+        let at = |i: usize| match &f.effects[i].domain {
+            Domain::State(State { at, observed }) => (at.clone(), *observed),
+            d => panic!("{d:?}"),
+        };
+        assert_eq!(at(0), (StateAt::Any, false));
+        assert_eq!(f.on_arg[0], Some(0));
+        assert_eq!(at(1), (StateAt::Static("graph::PEAK".into()), false));
+        assert_eq!(at(2), (StateAt::Static("graph::TICKS".into()), true));
+        assert!(f.effects[1].writes() && !f.effects[2].writes());
+        // Two writes of one static conflict, of two statics do not, observed state never does.
+        let e = |i: usize| f.effects[i].clone();
+        assert!(crate::effects::conflict(&e(1), &e(1)).is_some());
+        let mut other = e(1);
+        other.domain = Domain::State(State {
+            at: StateAt::Static("graph::ACTIVE".into()),
+            observed: false,
+        });
+        assert!(crate::effects::conflict(&e(1), &other).is_none());
+        assert!(crate::effects::conflict(&e(2), &e(1)).is_none());
+        // Any state may be every static.
+        assert!(crate::effects::conflict(&e(0), &e(1)).is_some());
+        // Places: `h/graph/PEAK`, and `h` for any.
+        assert_eq!(e(1).place(), ["h", "graph", "PEAK"]);
+        assert_eq!(e(0).place(), ["h"]);
     }
 
     #[test]
