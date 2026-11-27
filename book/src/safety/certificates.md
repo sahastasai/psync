@@ -85,7 +85,7 @@ cargo run -p psync-graph --features cli --bin psync-cert -- src/lib.rs > verify/
 cd verify && lake build GeneratedCerts
 ```
 
-`scripts/certify.sh` does this for the repository's own schedules: 40 certificates from the graph tests,
+`scripts/certify.sh` does this for the repository's own schedules: 41 certificates from the graph tests,
 the Phase II tests, the driver fixture and `graph_suite`, checked in a few seconds. The checker is
 the same for synchronous code: a level is a set of chains, whether they run as futures or on
 threads. CI regenerates the certificates,
@@ -182,10 +182,88 @@ What the fragment leaves out, and so stays assumed for real Rust:
 - **That real MIR is faithfully translated into the fragment**, and that psync's emitter writes
   certificate places that cover the summaries it computed.
 
+## The generated certificates against compiled code
+
+`CharonDrain.lean` is one crate written for the purpose. The 41 certificates in `Certs.lean` are
+psync's real output for the tests, the driver fixture and `graph_suite`. Nothing yet ties any of
+them to compiled code. This section says why, and how it will be done.
+
+### Deciding `hind`, not comparing names
+
+A certificate names source bindings and paths (`n/a`, `p/self/groups`, `w/fs/t/…`). Compiled code
+names MIR locals and fields. Translating one naming into the other would be a second trusted
+script. `Footprint.lean` now avoids it: `hindB` takes the certificate as `psync-cert` wrote it and
+a list of compiled statements, one per node, and decides that every pair of nodes the certificate
+calls independent has disjoint real footprints. That is exactly `check_sound`'s hypothesis `hind`
+(`hind_of_hindB`), so `cert_schedule_sound` needs no assumption about footprints: link check,
+`hindB` and `check` by `decide`, and every run of the schedule equals the statements in order.
+`callers_hindB` checks it on `drain`. `callers_shared_hindB` is the red check: a second call that
+shares `s.b` with the first is rejected, though the certificate still calls the nodes independent.
+
+So the claim to prove for each certificate is "its independence is real independence". That is
+weaker than "its places equal the real places", and it is what soundness needs.
+
+### What each certificate's statements do
+
+Every node mixes three kinds of places:
+
+- **client places**, `n/x` and `p/a/b`. They are the statement's own bindings and paths. This is
+  `Footprint.lean`'s job.
+- **world places**, `w/…`. They come from callees: files, services, processes. They belong to
+  `World.lean` and its commutativity specification, or, for files, to a model of the file system
+  as memory indexed by path.
+- **`x/i` and `e`.** They are psync's own encoding of exit order and effect order. They are justified by
+  `replay_correct` and `recording_slot`, not by any callee's footprint.
+
+| Certificates | Functions | Can the current pipeline extract them? | What the real code does that the certificate does not say |
+|---|---|---|---|
+| c0–c8, c10, c12, c13 | `tests/graph.rs`: `graph_tree`, `chains`, `first_error_wins`, `exit_after_later_level`, `options`, `shadowing_and_mut`, `early_return`, `awaited_arguments`, `effects_keep_order`, `Aggregated::run`, `await_inside_a_binding`, `crossing` | No: `async fn` (coroutines). `io` also uses `poll_fn` closures, loops and generics | `io` writes thread-local counters (`ACTIVE`, `PEAK`, `TICKS`) that no node names. `PEAK` really differs: the tests assert 1 in order and up to 4 concurrently. `logged` (c3) writes a `RefCell` |
+| c9, c11 | `fresh_pool`, `reads_then_one_write` | No: `async fn` | the same `io` counters |
+| c14, c15, c16 | `tests/sync.rs`: `three_downloads`, `first_error_wins`, `panic_after_error` | No: `thread::sleep` and `Mutex::lock` have no body, generics, `?` and `expect` (unwinding) | `slow` pushes onto a `Mutex` log through a shared reference (interior mutability). Two nodes the certificate calls independent both write it, and the log's order differs |
+| c17 | `returns_future` | No: async blocks | nothing |
+| c18 | `speculative_writes` | No: `Path::exists`, `format!` and `fs::write` have no body, plus closures and `?` | the world places are named in the certificate (`w/fs/…` with a hole) |
+| c19–c27, c30, c31 | fixture: `start`, `login`, `sizes`, `shared`, `snapshot`, `walk_then_read`, `tour`, `release`, `boot`, `keep_both`, `keep_same` | No: `async fn`, plus `dyn` (c23), mutual recursion through `Box::pin` (c24, c25), and other crates' functions (c21) | By design, the fixture hides effects in callees. `start`, `login`, `tour`, `release` and `keep_same` write files their certificates omit. `snapshot` does the same through `dyn`, `shared` through a `RefCell`, and `boot` panics without an `x/0` |
+| c28, c29, c32 | fixture: `stash_both`, `stash_same`, `stash_tail` | Not yet. These are synchronous, and the blockers are small: `fs::write` has no body, `impl AsRef<Path>` is a by-value generic parameter, and `r1?` is an exit (c32) | the file each call writes. No node names it |
+| c33–c40 | `graph_suite`: `Discovery::run`, `put_and_upload_sst`, `checkpoint_sync`, `fetch_extensions_from_blob_store`, `process_show_validators`, `disable`, `fetch_page`, `check_notifications_allowed` | No: `async fn`. c33 and c36 nodes are also the macro's own `join_all_bounded` code | the stubs sleep on the suite's timer, a global queue that every call writes and no node names, and return constants. The world places in their certificates are more than the stubs touch |
+
+None of the 41 fits the current fragment. For most of them the obstacle is not only extraction.
+The real statements write state that no node names, so `hind` is false for them in the strict
+sense, and a working pipeline must reject them. Several of these differences are deliberate: the
+tests' counters and logs exist to observe concurrency, and the fixture plants hidden effects. Counted strictly, `hind` is false for 34 of the 41. That is 25 whose callees write the tests'
+counters, the `Mutex` log or `graph_suite`'s timer queue (c0–c16, c33–c40), and the 9 planted
+fixture cases (c19, c20, c22, c23, c25–c27, c29, c31). It is expected to hold for the other 7
+(c17, c18, c21, c24, c28, c30, c32). There, the certificate omits or misnames real effects, but
+they never meet. The next step is to prove those 7 against compiled code.
+
+### The route
+
+1. **The three synchronous fixture functions** (c28, c29, c32). Compile the fixture as written,
+   with `#[psync::graph]` replaced by a macro that only removes psync's statement attributes, so
+   that Charon sees the program in order. Split the function's LLBC into nodes by source line:
+   `psync-cert` needs to write each node's first and last line. Model a constant path as a reference to a file place
+   (`fs::write(p, d)` writes `*p`) and `AsRef::as_ref` as the identity on the reference. Model
+   `r1?` as recording its outcome in its own slot (`recording_slot`). Lean then decides
+   `hindB` for `PsyncCerts.c28` and `c32` (expected: true, so `cert_schedule_sound` applies), and
+   refutes it for `c29` (both calls write `a.json`).
+2. **Interior mutability as places.** A `Cell`, `RefCell`, `Mutex` or thread-local is a place, and
+   a write through `&` to it is a write. With this, c14–c16 and `shared` are rejected for the right
+   reason. Proving the tests' schedules anyway needs a statement of what is observed: the
+   results, without the counters. That is an explicit hypothesis, like `World.lean`'s spec.
+3. **Coroutines.** The Phase I functions need an extractor that handles `async fn`. Either
+   Charon's support for coroutines, or `psync-driver`, which already reads the coroutines'
+   MIR for `cargo psync check`, exporting bodies in the fragment. A statement `let a = f().await`
+   is then the call of `f`'s coroutine body to completion. Its footprint is `f`'s summary, and the
+   link check stays as it is.
+
+What stays assumed on every step: that the extraction is faithful to the compiled code, the
+models of functions without a body (`fs::write`, `Mutex::lock`), and the gaps of the fragment
+(references stored in memory, `unsafe`, unwinding).
+
 ## What a certificate does not cover
 
 - **That the places describe the statements.** This is the hypothesis `hind` of `check_sound`.
-  For a fragment of MIR it is now proved: `verify/Footprint.lean` (below). For real Rust, psync
+  For a fragment of MIR it is proved: `verify/Footprint.lean` (above). For the 41 generated
+  certificates it is not yet proved for any of them (see the table above). For real Rust, psync
   computes the places from tokens, and from compiler facts under `cargo psync build`, and
   [`cargo psync check`](./check.md) compares them with MIR. The gap between real MIR and the
   fragment is what stays assumed.

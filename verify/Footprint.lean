@@ -485,6 +485,112 @@ theorem mir_schedule_sound (hv : Valid S P) (n : Nat) (c : Cert) (st : Nat → S
     (memSys hv n).runAll ms.flatten m = (memSys hv n).runAll ((List.range c.nodes.length).map st) m :=
   check_sound (memSys hv n) c st (hind_of_cover hcov) hc hx m
 
+/-! ## `hind` decided against real statements
+
+`CoversNode` compares the certificate's places with the statements' places, so both must be in one
+naming. psync's certificates name source bindings and paths (`n/a`, `p/self/groups`), and compiled
+code names MIR locals. Instead of translating names, the check below decides `hind` itself: for
+every pair of nodes the certificate calls independent, the real statements' footprints are
+disjoint. It uses only the certificate's independence relation, so it applies to the certificates
+`psync-cert` generates, as they are. -/
+
+/-- Two places overlap: one contains the other. -/
+def overlapPl (p q : Pl) : Bool := pre p q || pre q p
+
+/-- No place of `ws` overlaps a place of `ts`. -/
+def apartB (ws ts : List Pl) : Bool := ws.all fun p => ts.all fun q => !overlapPl p q
+
+/-- Disjoint footprints, decided: neither writes a place the other touches. -/
+def disjointB (S : Nat → Fp) (a b : Stmt) : Bool :=
+  apartB (fp S a).2 (touched S b) && apartB (fp S b).2 (touched S a)
+
+/-- $$a \mathbin{+\!\!+} t = b \mathbin{+\!\!+} t' \implies \mathrm{lpre}(a, b) \vee \mathrm{lpre}(b, a)$$ -/
+theorem lpre_total : ∀ (a b t t' : List Nat), a ++ t = b ++ t' → lpre a b = true ∨ lpre b a = true
+  | [], _, _, _, _ => Or.inl (by simp [lpre])
+  | _ :: _, [], _, _, _ => Or.inr (by simp [lpre])
+  | x :: xs, y :: ys, t, t', h => by
+    simp only [List.cons_append, List.cons.injEq] at h
+    obtain ⟨rfl, h⟩ := h
+    simpa [lpre] using lpre_total xs ys t t' h
+
+/-- $$p \sqsubseteq l \wedge q \sqsubseteq l \implies \mathrm{overlapPl}(p, q)$$ -/
+theorem overlapPl_of_common {p q l : Pl} (hp : pre p l = true) (hq : pre q l = true) :
+    overlapPl p q = true := by
+  obtain ⟨e1, t1, h1⟩ := (pre_iff _ _).1 hp
+  obtain ⟨e2, t2, h2⟩ := (pre_iff _ _).1 hq
+  have h12 : p.1 = q.1 := e1.trans e2.symm
+  rcases lpre_total p.2 q.2 t1 t2 (h1.symm.trans h2) with h | h
+  · simp [overlapPl, pre, h12, h]
+  · simp [overlapPl, pre, h12, h]
+
+/-- $$\mathrm{apartB}(ws, ts) \implies \neg\,(l \in {\downarrow}ws \wedge l \in {\downarrow}ts)$$ -/
+theorem apart_sound {ws ts : List Pl} (h : apartB ws ts = true) {l : Pl}
+    (hw : under ws l) (ht : under ts l) : False := by
+  obtain ⟨p, hp, hpl⟩ := hw
+  obtain ⟨q, hq, hql⟩ := ht
+  have := List.all_eq_true.1 (List.all_eq_true.1 h p hp) q hq
+  rw [overlapPl_of_common hpl hql] at this
+  exact Bool.false_ne_true this
+
+/-- $$\mathrm{disjointB}_S(a, b) \implies \mathrm{Disjoint}_S(a, b)$$ -/
+theorem disjoint_of_disjointB {S : Nat → Fp} {a b : Stmt} (h : disjointB S a b = true) :
+    Disjoint S a b := by
+  simp only [disjointB, Bool.and_eq_true] at h
+  refine ⟨fun l hw => ⟨fun ht => apart_sound h.1 hw ht,
+    fun hw' => apart_sound h.1 hw (under_touched_of_write hw')⟩,
+    fun l hw ht => apart_sound h.2 hw ht⟩
+
+/-- The certificate's statements as a function: statement `i` of the list, and `nop` past its end. -/
+def stmtAt (stmts : List Stmt) (i : Nat) : Stmt := stmts.getD i .nop
+
+/-- **`hind`, decided.** There is one statement per node, and every pair of nodes the certificate
+calls independent has disjoint real footprints. -/
+def hindB (S : Nat → Fp) (c : Cert) (stmts : List Stmt) : Bool :=
+  stmts.length == c.nodes.length && (List.range stmts.length).all fun i => (List.range stmts.length).all fun j =>
+    !c.ind i j || disjointB S (stmtAt stmts i) (stmtAt stmts j)
+
+/-- $$\mathrm{Disjoint}_S(\mathrm{nop}, b)$$ -/
+theorem disjoint_nop_left (S : Nat → Fp) (b : Stmt) : Disjoint S .nop b :=
+  ⟨fun _ h => by simp [under, fp] at h, fun _ _ h => by simp [under, touched, fp] at h⟩
+
+/-- $$\mathrm{Disjoint}_S(a, \mathrm{nop})$$ -/
+theorem disjoint_nop_right (S : Nat → Fp) (a : Stmt) : Disjoint S a .nop :=
+  ⟨fun _ _ => ⟨fun h => by simp [under, touched, fp] at h, fun h => by simp [under, fp] at h⟩,
+    fun _ h => by simp [under, fp] at h⟩
+
+/-- $$i \ge |st| \implies st_i = \mathrm{nop}$$ -/
+theorem stmtAt_nop {stmts : List Stmt} {i : Nat} (h : ¬ i < stmts.length) : stmtAt stmts i = .nop := by
+  simp [stmtAt, List.getD_eq_getElem?_getD, List.getElem?_eq_none (Nat.le_of_not_lt h)]
+
+/-- $$\mathrm{hindB}_S(c, st) = \mathsf{true} \implies \bigl(\forall i\,j,\ c.\mathrm{ind}(i, j) \Rightarrow \mathrm{Disjoint}_S(st_i, st_j)\bigr)$$ -/
+theorem hind_of_hindB {S : Nat → Fp} {c : Cert} {stmts : List Stmt} (h : hindB S c stmts = true) :
+    ∀ i j, c.ind i j = true → Disjoint S (stmtAt stmts i) (stmtAt stmts j) := by
+  intro i j hij
+  simp only [hindB, Bool.and_eq_true] at h
+  replace h := h.2
+  by_cases hi : i < stmts.length
+  · by_cases hj : j < stmts.length
+    · have := List.all_eq_true.1 (List.all_eq_true.1 h i (List.mem_range.2 hi)) j
+        (List.mem_range.2 hj)
+      rw [hij] at this
+      exact disjoint_of_disjointB (by simpa using this)
+    · rw [stmtAt_nop hj]; exact disjoint_nop_right S _
+  · rw [stmtAt_nop hi]; exact disjoint_nop_left S _
+
+/-- $$\mathrm{Valid}(S, P) \wedge \mathrm{hindB}_S(c, st) \wedge \mathrm{check}(c) \wedge \mathrm{Execs}(st(c.\mathit{levels}), ms) \implies [\![ \mathrm{flatten}(ms) ]\!]_{\mathrm{mem}}(m) = [\![ st_0, \ldots, st_{n-1} ]\!]_{\mathrm{mem}}(m)$$
+
+**A generated certificate, against the compiled statements.** If the summaries pass the link
+check, every pair the certificate calls independent has disjoint real footprints, and `check`
+accepts the certificate, then every run of its schedule ends with the memory of the statements in
+order. -/
+theorem cert_schedule_sound (hv : Valid S P) (n : Nat) (c : Cert) (stmts : List Stmt)
+    (hh : hindB S c stmts = true) (hc : check c = true)
+    {ms : List (List Stmt)} (hx : Execs (c.levels.map (List.map (List.map (stmtAt stmts)))) ms)
+    (m : Mem) :
+    (memSys hv n).runAll ms.flatten m =
+      (memSys hv n).runAll ((List.range c.nodes.length).map (stmtAt stmts)) m :=
+  check_sound (memSys hv n) c (stmtAt stmts) (hind_of_hindB hh) hc hx m
+
 /-! ## The link check, decided -/
 
 /-- A finite program: each function's body and its summary (from its crate's summary file).
@@ -572,5 +678,19 @@ theorem callers_sound (n : Nat) {ms : List (List Stmt)}
     (memSys (prog.valid prog_valid) n).runAll ms.flatten m =
       (memSys (prog.valid prog_valid) n).runAll [callers 0, callers 1] m :=
   mir_schedule_sound (prog.valid prog_valid) n callersCert callers callers_cover callersCert_ok hx m
+
+/-- $$\mathrm{hindB}(\mathtt{callersCert}, [\mathtt{callers}_0, \mathtt{callers}_1]) = \mathsf{true}$$
+
+The same example through `hindB`: the certificate's independence is decided against the calls'
+footprints, without comparing names. -/
+theorem callers_hindB : hindB prog.sum callersCert [callers 0, callers 1] = true := by decide
+
+/-- $$\mathrm{hindB}\bigl(\mathtt{callersCert}, [\mathrm{drain}(s.a, s.b), \mathrm{drain}(s.b, s.d)]\bigr) = \mathsf{false}$$
+
+A second call that shares `s.b` with the first: the certificate still calls the two nodes
+independent, and `hindB` finds the overlap. -/
+theorem callers_shared_hindB :
+    hindB prog.sum callersCert [callers 0, .call 0 fun k => (5, [if k = 0 then 1 else 3])] = false := by
+  decide
 
 end PsyncFootprint

@@ -61,6 +61,8 @@ reference, with per-function summaries.
 | `memSys` | statements with disjoint footprints commute (via `World.upd_comm`) |
 | `hind_of_cover` | a certificate whose nodes cover the footprints: certificate independence implies disjoint footprints |
 | `mir_schedule_sound` | `check_sound` with `hind` discharged: valid summaries, covering certificate, `check` accepts, so every run of the schedule equals the sequential one |
+| `hindB`, `hind_of_hindB`, `cert_schedule_sound` | `hind` decided directly: every pair a certificate calls independent has disjoint real footprints. No translation between the certificate's names and MIR's is needed, so it applies to `psync-cert`'s certificates as written |
+| `callers_hindB`, `callers_shared_hindB` | the `drain` example through `hindB`, and a call sharing `s.b` that the same certificate does not cover, rejected |
 | `Program.valid`, `prog_valid`, `callers_sound` | the link check decided for a finite program; a recursive callee called on two fields, in one level, proved equal to the calls in order |
 
 `Specs.lean` gives HTTP (RFC 9110), S3 and the Kubernetes API as server models and proves
