@@ -13,8 +13,14 @@
    - performs a write before an earlier statement that may exit (`speculative-write`),
    - prefetches loop items whose prefix writes, in a loop that can end early
      (`loop-speculative-write`),
+   - touches the same hidden state from two concurrent chains: a `static` or `thread_local!`
+     reached through any callee, or a cell, lock or atomic behind the same reference
+     (`shared-state`; `#[psync::observed]` and `observe(..)` mark state measured on purpose),
    - and, with `--notes`, where concurrent chains share a `Cell`/`RefCell`/`Mutex`/atomic or both
      print.
+
+The facts it writes (`target/psync/facts.tsv`) are also what `psync-cert --facts` adds to the
+certificates (`scripts/cert-facts.sh`).
 
 ```text
 warning: psync runs this concurrently with other work that has a conflicting effect: this does

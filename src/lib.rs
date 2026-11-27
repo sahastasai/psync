@@ -33,7 +33,7 @@ pub use future::{BoxFuture, LocalBoxFuture, YieldNow, yield_now};
 pub use multi::{MultiExecutor, MultiHandle};
 pub use park::{DefaultPark, Park};
 pub use pool::{DefaultPool, Pool};
-pub use psync_macros::{fresh, graph, independent, par, seq, speculate};
+pub use psync_macros::{fresh, graph, independent, observed, par, seq, speculate};
 pub use task::{Task, TaskHandle};
 
 #[cfg(all(feature = "rp235x", target_os = "none", target_arch = "arm"))]

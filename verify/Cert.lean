@@ -88,6 +88,32 @@ def Cert.node (c : Cert) (i : Nat) : Node := c.nodes.getD i default
 
 def Cert.ind (c : Cert) (i j : Nat) : Bool := indep c.holes (c.node i) (c.node j)
 
+/-- The certificate without the places under any of `obs`: state that the program measures on
+purpose (a test's counter of requests in flight, a log of the schedule, the examples' timer).
+`psync-cert` lists those places in the nodes like any other, and proves `check (c.hiding obs)`.
+By `check_sound`, every run of the schedule then ends as the program run in order does, for any
+meaning of the statements under which the *hidden* certificate's independence is real: a
+meaning whose state leaves the observed places out. That is weaker than `check c`, and it is
+what such a certificate claims. -/
+def Cert.hiding (c : Cert) (obs : List Place) : Cert :=
+  let keep := fun p : Place => !obs.any fun o => o.isPrefixOf p
+  { c with nodes := c.nodes.map fun n => { reads := n.reads.filter keep, writes := n.writes.filter keep } }
+
+/-- $$\mathrm{hiding}(c, []) = c$$ : hiding nothing changes nothing. -/
+theorem Cert.hiding_nil (c : Cert) : c.hiding [] = c := by
+  have hf : ∀ l : List Place, l.filter (fun _ => true) = l :=
+    fun _ => List.filter_eq_self.2 (fun _ _ => rfl)
+  have h : ∀ ns : List Node,
+      ns.map (fun n => ({ reads := n.reads.filter (fun _ => true),
+                          writes := n.writes.filter (fun _ => true) } : Node)) = ns := by
+    intro ns
+    induction ns with
+    | nil => rfl
+    | cons n ns ih =>
+      simp only [List.map_cons, hf] at ih ⊢
+      rw [ih]
+  simp [Cert.hiding, h]
+
 /-! ## The checker -/
 
 /-- The first occurrence of `x` in `L`, splitting `L` around it. -/

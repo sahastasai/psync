@@ -9,9 +9,16 @@ use std::{
     task::Poll,
 };
 
+// The tests measure concurrency on purpose: how many simulated requests are in flight (`ACTIVE`,
+// `PEAK`) and how many polls they took (`TICKS`). psync's schedules change these counters (that is
+// what the tests assert), so they are observed state: certificates list them and prove the
+// schedules equivalent on everything else.
 thread_local! {
+    #[psync::observed]
     static ACTIVE: Cell<usize> = const { Cell::new(0) };
+    #[psync::observed]
     static PEAK: Cell<usize> = const { Cell::new(0) };
+    #[psync::observed]
     static TICKS: Cell<u32> = const { Cell::new(0) };
 }
 
@@ -827,7 +834,8 @@ fn writes_to_one_service_keep_their_order() {
     assert_eq!(*store.log.borrow(), ["delete pod", "create pod"]);
 }
 
-#[graph]
+// The store's log is the test's view of what reached the server, in the order psync sends it.
+#[graph(observe(store))]
 async fn reads_then_one_write(store: &Store) -> Result<u32, Error> {
     let a = store.get("a").await?;
     let b = store.get("bb").await?;

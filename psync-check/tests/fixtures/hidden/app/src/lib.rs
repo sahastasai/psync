@@ -265,3 +265,112 @@ pub async fn chained(path: &str, out: &str) -> std::io::Result<()> {
     std::fs::write(out, s)?;
     Ok(())
 }
+
+// Hidden state: a static atomic, a static `Mutex`, a `thread_local!` and a `Mutex` behind a
+// reference, each touched by two statements that psync runs on two threads. Nothing in the
+// tokens says so; the compiler's facts do, `cargo psync check` reports each pair
+// (`shared-state`), and the certificates name the state (`h/app/HITS`, `n/log/$state`).
+
+static HITS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static MISSES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static JOURNAL: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
+thread_local! {
+    static DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+/// Counted on purpose: certificates list it and hide it, the check does not report it.
+#[psync::observed]
+static PROBES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+fn hit() -> u32 {
+    HITS.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+}
+fn miss() -> u32 {
+    MISSES.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+}
+fn note(v: u32) -> usize {
+    match JOURNAL.lock() {
+        Ok(mut j) => {
+            j.push(v);
+            j.len()
+        }
+        Err(_) => 0,
+    }
+}
+fn enter() -> u32 {
+    DEPTH.with(|d| {
+        d.set(d.get() + 1);
+        d.get()
+    })
+}
+fn tally(log: &std::sync::Mutex<Vec<u32>>, v: u32) -> usize {
+    match log.lock() {
+        Ok(mut l) => {
+            l.push(v);
+            l.len()
+        }
+        Err(_) => 0,
+    }
+}
+fn probe() -> u32 {
+    PROBES.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+}
+
+/// A static atomic, twice: the second count must see the first.
+#[graph]
+pub fn counted() -> u32 {
+    #[psync::par]
+    let a = hit();
+    #[psync::par]
+    let b = hit();
+    a + b
+}
+
+/// A static `Mutex`, twice: the journal's order is the program's.
+#[graph]
+pub fn journaled() -> usize {
+    #[psync::par]
+    let a = note(1);
+    #[psync::par]
+    let b = note(2);
+    a + b
+}
+
+/// A thread-local, twice: on two threads, each call would see its own counter.
+#[graph]
+pub fn nested() -> u32 {
+    #[psync::par]
+    let a = enter();
+    #[psync::par]
+    let b = enter();
+    a + b
+}
+
+/// A `Mutex` behind a reference, twice.
+#[graph]
+pub fn appended(log: &std::sync::Mutex<Vec<u32>>) -> usize {
+    #[psync::par]
+    let a = tally(log, 1);
+    #[psync::par]
+    let b = tally(log, 2);
+    a + b
+}
+
+/// Safe: two different statics.
+#[graph]
+pub fn hit_and_miss() -> u32 {
+    #[psync::par]
+    let a = hit();
+    #[psync::par]
+    let b = miss();
+    a + b
+}
+
+/// Safe but for observed state: two probes of a counter marked `#[psync::observed]`.
+#[graph]
+pub fn probed() -> u32 {
+    #[psync::par]
+    let a = probe();
+    #[psync::par]
+    let b = probe();
+    a.max(b)
+}

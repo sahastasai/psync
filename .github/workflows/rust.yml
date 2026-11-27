@@ -24,7 +24,7 @@ jobs:
       run: cargo test --verbose --no-default-features --features std --test multi --test sync --test targets --lib
     - name: Certificates are up to date with the macro
       run: |
-        cargo run -q -p psync-graph --features cli --bin psync-cert -- tests/graph.rs tests/sync.rs psync-check/tests/fixtures/hidden/app/src/lib.rs examples/graph_suite/*.rs > verify/Certs.lean
+        cargo run -q -p psync-graph --features cli --bin psync-cert -- --facts verify/facts.tsv --expect-unsafe psync-check/tests/fixtures/ tests/graph.rs tests/sync.rs psync-check/tests/fixtures/hidden/app/src/lib.rs examples/graph_suite/*.rs > verify/Certs.lean
         git diff --exit-code verify/Certs.lean
     - name: The book's example reports are what psync prints
       run: ./scripts/check-book-examples.py
@@ -38,6 +38,10 @@ jobs:
     - name: Test the checker on its fixture
       working-directory: psync-check
       run: cargo test --verbose
+    - name: The certificates' compiler facts are up to date
+      run: |
+        ./scripts/cert-facts.sh
+        git diff --exit-code verify/facts.tsv
 
   lean:
     runs-on: ubuntu-latest

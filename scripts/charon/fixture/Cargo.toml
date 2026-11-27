@@ -1,0 +1,16 @@
+[package]
+name = "fixture"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+# The fixture's `#[psync::graph]` functions as written: the macro is replaced by one that rewrites
+# nothing.
+psync = { path = "../as-written" }
+helpers = { path = "../../../psync-check/tests/fixtures/hidden/helpers" }
+
+[workspace]

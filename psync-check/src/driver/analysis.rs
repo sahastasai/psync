@@ -7,7 +7,9 @@ use psync_check::{
 use rustc_hir::def::DefKind;
 use rustc_hir::def_id::{DefId, LOCAL_CRATE, LocalDefId};
 use rustc_middle::mir::{self, AggregateKind, Operand, Rvalue, StatementKind, TerminatorKind};
-use rustc_middle::ty::{self, GenericArgs, Instance, InstanceKind, Ty, TyCtxt, TypingEnv};
+use rustc_middle::ty::{
+    self, GenericArgs, Instance, InstanceKind, Ty, TyCtxt, TypeVisitableExt, TypingEnv,
+};
 use rustc_span::Span;
 use std::collections::BTreeMap;
 use std::collections::{HashMap, HashSet};
@@ -47,9 +49,18 @@ impl Summary {
 
     /// Add a callee's summary. `srcs` says what the call passes as each parameter; without it
     /// (or for a parameter it cannot follow) an effect on a parameter is on anything.
-    fn absorb(&mut self, other: &Summary, span: Span, via: Option<&str>, srcs: Option<&[Src]>) {
+    fn absorb(
+        &mut self,
+        other: &Summary,
+        span: Span,
+        via: Option<&str>,
+        srcs: Option<&[Src]>,
+        idents: Option<&[Ident]>,
+    ) {
         for l in &other.effects {
-            let mut effect = at_call(&l.effect, srcs);
+            let Some(mut effect) = at_call(&l.effect, srcs, idents) else {
+                continue;
+            };
             if let Some(v) = via {
                 effect.via.insert(0, v.to_string());
             }
@@ -87,10 +98,47 @@ pub enum Src {
     Unknown,
 }
 
+/// Where the object behind a pointer lives, for hidden state ([`Domain::State`]).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Ident {
+    /// A `static` or `thread_local!` (path, and whether it is `#[psync::observed]`).
+    Static(String, bool),
+    /// Behind the body's parameter (or a closure's or coroutine's capture) `k`.
+    Param(usize),
+    /// Inside a value this body owns: no other statement can reach it.
+    Fresh,
+    /// Anything.
+    Unknown,
+}
+
 /// `effect` as seen by a caller that passes `srcs`: an effect on parameter `j` becomes one on
-/// what the call passes there.
-fn at_call(effect: &Effect, srcs: Option<&[Src]>) -> Effect {
+/// what the call passes there. The state behind parameter `j` becomes the state behind what the
+/// call passes there (`idents`): a static, the caller's own parameter, nothing (an object the
+/// caller owns), or any state. `None`: the effect does not reach the caller.
+fn at_call(effect: &Effect, srcs: Option<&[Src]>, idents: Option<&[Ident]>) -> Option<Effect> {
     let mut e = effect.clone();
+    if matches!(&e.domain, Domain::State(s) if s.is_empty()) {
+        if let Some(j) = e.arg.take() {
+            match idents.and_then(|i| i.get(j)) {
+                Some(Ident::Param(k)) => e.arg = Some(*k),
+                Some(Ident::Static(p, observed)) => {
+                    e.domain = if *observed {
+                        Domain::Observed(p.clone())
+                    } else {
+                        Domain::State(p.clone())
+                    }
+                }
+                Some(Ident::Fresh) => return None,
+                Some(Ident::Unknown) => {}
+                None => {
+                    if let Some(Src::Param(k)) = srcs.and_then(|s| s.get(j)) {
+                        e.arg = Some(*k);
+                    }
+                }
+            }
+        }
+        return Some(e);
+    }
     if let Some(j) = e.arg.take() {
         match srcs.and_then(|s| s.get(j)) {
             Some(Src::Param(k)) => e.arg = Some(*k),
@@ -98,7 +146,7 @@ fn at_call(effect: &Effect, srcs: Option<&[Src]>) -> Effect {
             _ => {}
         }
     }
-    e
+    Some(e)
 }
 
 /// Standard-library conversions that keep the path or string they are given
@@ -395,6 +443,39 @@ impl Held {
         }
     }
 
+    /// A place as a root and the projections after it (`(*_1).2.0` in a closure: capture 2,
+    /// then `.0`). `None` for a part of the closure or coroutine itself.
+    fn split<'a, 'tcx>(
+        &self,
+        p: &'a mir::Place<'tcx>,
+    ) -> Option<(Root, &'a [mir::PlaceElem<'tcx>])> {
+        use mir::ProjectionElem::{Deref, Downcast, Field};
+        let proj = &p.projection[..];
+        let after_self = if self.coroutine && self.selves.contains(&p.local) {
+            match proj.first() {
+                Some(Deref) => Some(&proj[1..]),
+                _ => return None,
+            }
+        } else if self.nested && !self.coroutine && p.local.as_usize() == 1 {
+            Some(match proj.first() {
+                Some(Deref) => &proj[1..],
+                _ => proj,
+            })
+        } else {
+            None
+        };
+        match after_self {
+            None => Some((Root::Local(p.local), proj)),
+            Some(rest) => match rest {
+                [Field(k, _), tail @ ..] => Some((Root::Upvar(k.as_usize()), tail)),
+                [Downcast(_, v), Field(f, _), tail @ ..] => {
+                    Some((Root::Slot(v.as_usize(), f.as_usize()), tail))
+                }
+                _ => None,
+            },
+        }
+    }
+
     /// The root an assignment to `p` defines (a whole local or slot) or changes (a capture).
     fn target_root(&self, p: &mir::Place<'_>) -> Option<Root> {
         match self.root(p)? {
@@ -457,12 +538,389 @@ impl Held {
     }
 }
 
+/// Methods of cells, locks and atomics that only read the state behind their receiver.
+const STATE_READS: &[&str] = &[
+    "get",
+    "load",
+    "borrow",
+    "try_borrow",
+    "try_borrow_unguarded",
+    "read",
+    "try_read",
+    "is_poisoned",
+    "as_ptr",
+];
+
+fn last_segment(path: &str) -> String {
+    let path = path.split('<').next().unwrap_or(path);
+    path.rsplit("::").next().unwrap_or(path).to_string()
+}
+
+/// Types whose every instance holds state that a shared reference can change.
+fn is_interior_name(n: &str) -> bool {
+    matches!(
+        n,
+        "Cell"
+            | "RefCell"
+            | "OnceCell"
+            | "UnsafeCell"
+            | "Mutex"
+            | "RwLock"
+            | "OnceLock"
+            | "LazyLock"
+            | "LazyCell"
+            | "Condvar"
+            | "Once"
+            | "Barrier"
+    ) || n.starts_with("Atomic")
+}
+
+/// Nothing reachable from a value of `ty`, through references and the standard containers, can
+/// change behind a shared reference. Unknown types (parameters, `dyn`, closures) may.
+fn deep_freeze<'tcx>(tcx: TyCtxt<'tcx>, env: TypingEnv<'tcx>, ty: Ty<'tcx>, depth: usize) -> bool {
+    if depth > 6 {
+        return false;
+    }
+    match ty.kind() {
+        ty::Bool | ty::Char | ty::Int(_) | ty::Uint(_) | ty::Float(_) | ty::Str | ty::Never => true,
+        ty::Ref(_, t, _) | ty::RawPtr(t, _) | ty::Slice(t) | ty::Array(t, _) => {
+            deep_freeze(tcx, env, *t, depth + 1)
+        }
+        ty::Tuple(ts) => ts.iter().all(|t| deep_freeze(tcx, env, t, depth + 1)),
+        ty::Adt(def, args) => {
+            if !ty.is_freeze(tcx, env) {
+                return false;
+            }
+            let name = last_segment(&tcx.def_path_str(def.did()));
+            if matches!(
+                name.as_str(),
+                "Vec" | "String" | "Box" | "Option" | "Result" | "HashMap" | "HashSet"
+                    | "BTreeMap" | "BTreeSet" | "VecDeque" | "PathBuf" | "OsString" | "Arc"
+                    | "Global"
+            ) {
+                return args.types().all(|t| deep_freeze(tcx, env, t, depth + 1));
+            }
+            def.all_fields()
+                .all(|f| deep_freeze(tcx, env, f.ty(tcx, *args).skip_normalization(), depth + 1))
+        }
+        _ => false,
+    }
+}
+
+/// Every constant a body uses.
+fn constants<'a, 'tcx>(body: &'a mir::Body<'tcx>) -> Vec<&'a mir::ConstOperand<'tcx>> {
+    let mut out = Vec::new();
+    for data in body.basic_blocks.iter() {
+        for stmt in &data.statements {
+            if let StatementKind::Assign(a) = &stmt.kind {
+                match &a.1 {
+                    Rvalue::Use(Operand::Constant(c), _) | Rvalue::Cast(_, Operand::Constant(c), _) => {
+                        out.push(&**c)
+                    }
+                    Rvalue::Aggregate(_, ops) => out.extend(ops.iter().filter_map(|o| match o {
+                        Operand::Constant(c) => Some(&**c),
+                        _ => None,
+                    })),
+                    _ => {}
+                }
+            }
+        }
+        if let TerminatorKind::Call { args, .. } = &data.terminator().kind {
+            out.extend(args.iter().filter_map(|a| match &a.node {
+                Operand::Constant(c) => Some(&**c),
+                _ => None,
+            }));
+        }
+    }
+    out
+}
+
+/// Statics and `thread_local!` keys, and which of them are `#[psync::observed]`.
+#[derive(Clone)]
+pub struct Statics<'tcx> {
+    tcx: TyCtxt<'tcx>,
+    /// `(parent, name)` of the items marked observed: the attribute leaves a sibling
+    /// `const __PSYNC_OBSERVED_<NAME>: () = ();`.
+    observed: Rc<HashSet<(DefId, String)>>,
+}
+
+impl<'tcx> Statics<'tcx> {
+    fn new(tcx: TyCtxt<'tcx>) -> Self {
+        let observed = tcx
+            .hir_body_owners()
+            .filter(|o| tcx.def_kind(*o) == DefKind::Const)
+            .filter_map(|o| {
+                let name = tcx.opt_item_name(o.to_def_id())?;
+                let marked = name.as_str().strip_prefix("__PSYNC_OBSERVED_")?.to_string();
+                Some((tcx.parent(o.to_def_id()), marked))
+            })
+            .collect();
+        Self {
+            tcx,
+            observed: Rc::new(observed),
+        }
+    }
+
+    /// `graph::PEAK`: the crate's name and the item's path.
+    fn path(&self, def: DefId) -> String {
+        let tcx = self.tcx;
+        let path = display_path(tcx, def);
+        if def.is_local() {
+            format!("{}::{path}", tcx.crate_name(LOCAL_CRATE))
+        } else {
+            path
+        }
+    }
+
+    fn observed(&self, def: DefId) -> bool {
+        def.is_local()
+            && self.tcx.opt_item_name(def).is_some_and(|n| {
+                self.observed
+                    .contains(&(self.tcx.parent(def), n.as_str().to_string()))
+            })
+    }
+
+    /// The `static` a constant points to, or the `thread_local!` key it is (directly or as a
+    /// promoted `&KEY`). Statics of published crates are left out: their internal state (runtime
+    /// contexts, caches) is assumed not to change what the program computes.
+    fn static_of(&self, c: &mir::ConstOperand<'tcx>, depth: usize) -> Option<DefId> {
+        let tcx = self.tcx;
+        let def = match c.const_ {
+            mir::Const::Val(mir::ConstValue::Scalar(mir::interpret::Scalar::Ptr(ptr, _)), _) => {
+                match tcx.try_get_global_alloc(ptr.provenance.alloc_id()) {
+                    Some(mir::interpret::GlobalAlloc::Static(def)) => def,
+                    _ => return None,
+                }
+            }
+            mir::Const::Unevaluated(uv, ty) => {
+                if let Some(p) = uv.promoted {
+                    if depth > 2 {
+                        return None;
+                    }
+                    let body = &tcx.promoted_mir(uv.def)[p];
+                    return constants(body)
+                        .into_iter()
+                        .find_map(|c| self.static_of(c, depth + 1));
+                }
+                let mut t = ty;
+                while let ty::Ref(_, inner, _) = t.kind() {
+                    t = *inner;
+                }
+                let key = matches!(t.kind(), ty::Adt(d, _) if last_segment(&tcx.def_path_str(d.did())) == "LocalKey");
+                if !(key && tcx.def_kind(uv.def) == DefKind::Const) {
+                    return None;
+                }
+                uv.def
+            }
+            _ => return None,
+        };
+        (!is_registry(tcx, def) && !OPAQUE_STD.contains(&tcx.crate_name(def.krate).as_str()))
+            .then_some(def)
+    }
+}
+
+/// What a root of one body was assigned, for [`Origins`].
+#[derive(Clone)]
+enum Def<'tcx> {
+    /// A copy or move of a place's value (a pointer stored there).
+    Load(mir::Place<'tcx>),
+    /// A borrow of a place, or a raw pointer to it.
+    Ref(mir::Place<'tcx>),
+    /// A constant: a static, a thread-local key, or something else.
+    Const(mir::ConstOperand<'tcx>),
+    /// The result of a standard-library call: a new value (`new`, `default`, ..), or a pointer
+    /// derived from its first argument (`lock`, `unwrap`, `deref`, `borrow_mut`).
+    Std(Option<Operand<'tcx>>, bool),
+    Other,
+}
+
+/// Where the objects that a body's pointers point to live: the body's parameters (or captures),
+/// statics, or values it owns. A pointer loaded from inside an object is named by that object:
+/// what a `&'static Timers` stored in `TIMERS` points to is named `TIMERS`.
+struct Origins<'tcx> {
+    defs: HashMap<Root, Vec<Def<'tcx>>>,
+    arg_count: usize,
+    nested: bool,
+    /// Each root's answer, once known (`None`: being computed, so a cycle: unknown).
+    memo: std::cell::RefCell<HashMap<Root, Option<Ident>>>,
+}
+
+impl<'tcx> Origins<'tcx> {
+    fn new(tcx: TyCtxt<'tcx>, held: &Held, body: &mir::Body<'tcx>) -> Self {
+        let mut defs: HashMap<Root, Vec<Def<'tcx>>> = HashMap::new();
+        let mut put = |place: &mir::Place<'tcx>, def: Def<'tcx>| match held.target_root(place) {
+            Some(r) => defs.entry(r).or_default().push(def),
+            None => defs.entry(held.base(place)).or_default().push(Def::Other),
+        };
+        for data in body.basic_blocks.iter() {
+            for stmt in &data.statements {
+                if let StatementKind::Assign(a) = &stmt.kind {
+                    let (place, rv) = &**a;
+                    let def = match rv {
+                        Rvalue::Use(Operand::Copy(p) | Operand::Move(p), _)
+                        | Rvalue::CopyForDeref(p)
+                        | Rvalue::Cast(_, Operand::Copy(p) | Operand::Move(p), _) => Def::Load(*p),
+                        Rvalue::Use(Operand::Constant(c), _)
+                        | Rvalue::Cast(_, Operand::Constant(c), _) => Def::Const((**c).clone()),
+                        Rvalue::Ref(_, _, p) | Rvalue::RawPtr(_, p) => Def::Ref(*p),
+                        _ => Def::Other,
+                    };
+                    put(place, def);
+                }
+            }
+            if let TerminatorKind::Call {
+                func,
+                args,
+                destination,
+                ..
+            } = &data.terminator().kind
+            {
+                let def = match func.const_fn_def() {
+                    Some((callee, _))
+                        if OPAQUE_STD.contains(&tcx.crate_name(callee.krate).as_str()) =>
+                    {
+                        let name = tcx
+                            .opt_item_name(callee)
+                            .map(|n| n.to_string())
+                            .unwrap_or_default();
+                        let fresh = matches!(
+                            name.as_str(),
+                            "new" | "default" | "from" | "with_capacity" | "new_in" | "pin"
+                                | "new_cyclic"
+                        );
+                        Def::Std(args.first().map(|a| a.node.clone()), fresh)
+                    }
+                    _ => Def::Other,
+                };
+                put(destination, def);
+            }
+        }
+        Self {
+            defs,
+            arg_count: body.arg_count,
+            nested: held.nested,
+            memo: Default::default(),
+        }
+    }
+
+    /// The object an operand's pointer value points into.
+    fn operand(&self, st: &Statics<'tcx>, held: &Held, op: &Operand<'tcx>, depth: usize) -> Ident {
+        match op {
+            Operand::Copy(p) | Operand::Move(p) => self.load(st, held, p, depth),
+            Operand::Constant(c) => self.constant(st, c),
+            _ => Ident::Unknown,
+        }
+    }
+
+    fn constant(&self, st: &Statics<'tcx>, c: &mir::ConstOperand<'tcx>) -> Ident {
+        match st.static_of(c, 0) {
+            Some(def) => Ident::Static(st.path(def), st.observed(def)),
+            None => Ident::Unknown,
+        }
+    }
+
+    /// The pointer stored at `p`: a whole root holds what it was assigned; a pointer read from
+    /// behind another pointer is named by the object it was read from.
+    fn load(&self, st: &Statics<'tcx>, held: &Held, p: &mir::Place<'tcx>, depth: usize) -> Ident {
+        let Some((root, rest)) = held.split(p) else {
+            return Ident::Unknown;
+        };
+        if rest.iter().any(|e| matches!(e, mir::ProjectionElem::Deref)) {
+            self.object(st, held, p, depth)
+        } else {
+            self.value(st, held, root, depth)
+        }
+    }
+
+    /// The object a place lies in: behind a pointer, what the pointer points into; otherwise a
+    /// value this body owns.
+    fn object(&self, st: &Statics<'tcx>, held: &Held, p: &mir::Place<'tcx>, depth: usize) -> Ident {
+        let Some((root, rest)) = held.split(p) else {
+            return Ident::Unknown;
+        };
+        if rest.iter().any(|e| matches!(e, mir::ProjectionElem::Deref)) {
+            self.value(st, held, root, depth)
+        } else {
+            Ident::Fresh
+        }
+    }
+
+    /// What the pointer held by a root points into.
+    fn value(&self, st: &Statics<'tcx>, held: &Held, root: Root, depth: usize) -> Ident {
+        if depth > 32 {
+            return Ident::Unknown;
+        }
+        match self.memo.borrow().get(&root) {
+            Some(Some(known)) => return known.clone(),
+            Some(None) => return Ident::Unknown,
+            None => {}
+        }
+        self.memo.borrow_mut().insert(root, None);
+        let answer = self.compute(st, held, root, depth);
+        self.memo.borrow_mut().insert(root, Some(answer.clone()));
+        answer
+    }
+
+    fn compute(&self, st: &Statics<'tcx>, held: &Held, root: Root, depth: usize) -> Ident {
+        let Some(defs) = self.defs.get(&root) else {
+            return match root {
+                Root::Upvar(k) => Ident::Param(k),
+                Root::Local(l) if !self.nested && (1..=self.arg_count).contains(&l.as_usize()) => {
+                    Ident::Param(l.as_usize() - 1)
+                }
+                _ => Ident::Unknown,
+            };
+        };
+        let mut out: Option<Ident> = None;
+        for def in defs {
+            let i = match def {
+                Def::Load(p) => self.load(st, held, p, depth + 1),
+                Def::Ref(p) => self.object(st, held, p, depth + 1),
+                Def::Const(c) => self.constant(st, c),
+                Def::Std(_, true) => Ident::Fresh,
+                Def::Std(Some(op), false) => {
+                    // `deref_mut(&mut guard)`: through the borrow, to what the guard holds.
+                    let through = match op {
+                        Operand::Copy(p) | Operand::Move(p) => match held.split(p) {
+                            Some((r, [])) => match self.defs.get(&r).map(Vec::as_slice) {
+                                Some([Def::Ref(q)]) => match held.split(q) {
+                                    Some((qr, qrest))
+                                        if !qrest
+                                            .iter()
+                                            .any(|e| matches!(e, mir::ProjectionElem::Deref)) =>
+                                    {
+                                        Some(self.value(st, held, qr, depth + 1))
+                                    }
+                                    _ => None,
+                                },
+                                _ => None,
+                            },
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+                    through.unwrap_or_else(|| self.operand(st, held, op, depth + 1))
+                }
+                Def::Std(None, false) | Def::Other => Ident::Unknown,
+            };
+            match &out {
+                None => out = Some(i),
+                Some(o) if *o == i => {}
+                Some(_) => return Ident::Unknown,
+            }
+        }
+        out.unwrap_or(Ident::Unknown)
+    }
+}
+
 /// A call from one body to a local body: a function, or a closure or coroutine it creates.
 #[derive(Clone, Debug)]
 pub struct Edge {
     callee: DefId,
     /// What the call passes as each of the callee's parameters.
     srcs: Vec<Src>,
+    /// Where the objects behind those parameters live.
+    idents: Vec<Ident>,
     span: Span,
     /// The callee's path, recorded in the effects' call chains (`None` for nested bodies).
     via: Option<String>,
@@ -558,6 +1016,8 @@ pub struct Analyzer<'tcx> {
     library: bool,
     /// Deferred trait methods resolved over the whole build by a previous run's link step.
     linked: BTreeMap<String, Resolved>,
+    /// Statics and thread-locals, for hidden state.
+    statics: Statics<'tcx>,
 }
 
 impl<'tcx> Analyzer<'tcx> {
@@ -574,7 +1034,96 @@ impl<'tcx> Analyzer<'tcx> {
                 .and_then(|p| std::fs::read_to_string(p).ok())
                 .and_then(|t| serde_json::from_str(&t).ok())
                 .unwrap_or_default(),
+            statics: Statics::new(tcx),
         }
+    }
+
+    fn static_of(&self, c: &mir::ConstOperand<'tcx>, depth: usize) -> Option<DefId> {
+        self.statics.static_of(c, depth)
+    }
+    fn static_path(&self, def: DefId) -> String {
+        self.statics.path(def)
+    }
+    fn is_observed(&self, def: DefId) -> bool {
+        self.statics.observed(def)
+    }
+
+    /// The hidden-state effects of a call into the standard library (`name`, resolved), from the
+    /// types of its arguments and where the objects behind them live: a `Cell`, `RefCell`,
+    /// `Mutex`, `RwLock`, atomic, `OnceCell`, lazy value or `thread_local!` key reached through a
+    /// shared reference is read by the methods that only read (`get`, `load`, `borrow`, `read`,
+    /// forcing a lazy value whose contents are immutable) and written by every other one.
+    fn std_state(
+        &self,
+        name: &str,
+        tys: &[Ty<'tcx>],
+        idents: &[Ident],
+        typing_env: TypingEnv<'tcx>,
+        path: &str,
+    ) -> Vec<Effect> {
+        let tcx = self.tcx;
+        let mut out = Vec::new();
+        for (ty, ident) in tys.iter().zip(idents) {
+            let pointee = match ty.kind() {
+                ty::Ref(_, p, rustc_hir::Mutability::Not) | ty::RawPtr(p, _) => *p,
+                _ => continue,
+            };
+            let adt = match pointee.kind() {
+                ty::Adt(def, args) => Some((last_segment(&tcx.def_path_str(def.did())), *args)),
+                _ => None,
+            };
+            let access = match &adt {
+                Some((n, _)) if n == "LocalKey" => {
+                    if matches!(name, "get" | "with_borrow") {
+                        Access::Read
+                    } else {
+                        Access::Write
+                    }
+                }
+                _ => {
+                    let interior = if pointee.has_param() {
+                        adt.as_ref().is_some_and(|(n, _)| is_interior_name(n))
+                    } else {
+                        !pointee.is_freeze(tcx, typing_env)
+                    };
+                    if !interior {
+                        continue;
+                    }
+                    match &adt {
+                        // Forcing a lazy value: a read when what it holds cannot change.
+                        Some((n, args))
+                            if matches!(n.as_str(), "LazyLock" | "LazyCell" | "Lazy")
+                                && matches!(name, "deref" | "force" | "get") =>
+                        {
+                            if args.types().next().is_some_and(|t| {
+                                !t.has_param() && deep_freeze(tcx, typing_env, t, 0)
+                            }) {
+                                Access::Read
+                            } else {
+                                Access::Write
+                            }
+                        }
+                        _ if STATE_READS.contains(&name) => Access::Read,
+                        _ => Access::Write,
+                    }
+                }
+            };
+            let (domain, arg) = match ident {
+                Ident::Static(p, true) => (Domain::Observed(p.clone()), None),
+                Ident::Static(p, false) => (Domain::State(p.clone()), None),
+                Ident::Param(k) => (Domain::State(String::new()), Some(*k)),
+                Ident::Fresh => continue,
+                Ident::Unknown => (Domain::State(String::new()), None),
+            };
+            out.push(Effect {
+                domain,
+                access,
+                target: None,
+                arg,
+                via: vec![path.to_string()],
+            });
+        }
+        out
     }
 
     fn has_body(&self, def_id: DefId) -> bool {
@@ -661,7 +1210,13 @@ impl<'tcx> Analyzer<'tcx> {
                     };
                     let summary = current.get_mut(m).expect("member");
                     let before = summary.size();
-                    summary.absorb(&callee, edge.span, edge.via.as_deref(), Some(&edge.srcs));
+                    summary.absorb(
+                        &callee,
+                        edge.span,
+                        edge.via.as_deref(),
+                        Some(&edge.srcs),
+                        Some(&edge.idents),
+                    );
                     summary.opaque.sort();
                     summary.opaque.dedup();
                     changed |= summary.size() != before;
@@ -687,6 +1242,41 @@ impl<'tcx> Analyzer<'tcx> {
         let mut own = Summary::default();
         let mut calls = Vec::new();
         let held = Held::new(tcx, def_id, body, |op| self.string_constant(op));
+        let origins = Origins::new(tcx, &held, body);
+        let statics = self.statics.clone();
+        // Libraries keep no hidden state (see `Statics::static_of`): nothing to follow.
+        let library = self.library;
+        let ident = |op: &Operand<'tcx>| {
+            if library {
+                Ident::Unknown
+            } else {
+                origins.operand(&statics, &held, op, 0)
+            }
+        };
+        // A `static mut` named anywhere in the body: written (it can be changed without a call).
+        if !self.library {
+            for c in constants(body) {
+                if let Some(def) = self.static_of(c, 0)
+                    && tcx.static_mutability(def) == Some(rustc_hir::Mutability::Mut)
+                {
+                    let (path, observed) = (self.static_path(def), self.is_observed(def));
+                    own.add(
+                        Effect {
+                            domain: if observed {
+                                Domain::Observed(path.clone())
+                            } else {
+                                Domain::State(path.clone())
+                            },
+                            access: Access::Write,
+                            target: None,
+                            arg: None,
+                            via: vec![path],
+                        },
+                        c.span,
+                    );
+                }
+            }
+        }
         for data in body.basic_blocks.iter() {
             for stmt in &data.statements {
                 if let StatementKind::Assign(assign) = &stmt.kind
@@ -697,16 +1287,20 @@ impl<'tcx> Analyzer<'tcx> {
                 {
                     // A closure's or coroutine's captures, in order: what `Param(k)` means in its
                     // body. (An async closure's body is another coroutine: not followed.)
-                    let srcs = match **kind {
-                        AggregateKind::CoroutineClosure(..) => Vec::new(),
-                        _ => operands
-                            .iter()
-                            .map(|op| held.of(op, |c| self.string_constant(c)))
-                            .collect(),
+                    let (srcs, idents) = match **kind {
+                        AggregateKind::CoroutineClosure(..) => (Vec::new(), Vec::new()),
+                        _ => (
+                            operands
+                                .iter()
+                                .map(|op| held.of(op, |c| self.string_constant(c)))
+                                .collect(),
+                            operands.iter().map(ident).collect(),
+                        ),
                     };
                     calls.push(Edge {
                         callee: nested,
                         srcs,
+                        idents,
                         span: stmt.source_info.span,
                         via: None,
                     });
@@ -723,6 +1317,8 @@ impl<'tcx> Analyzer<'tcx> {
                             .map(|a| held.of(a, |c| self.string_constant(c)))
                             .collect();
                         let origin = args.first().and_then(|a| held.origin_of(a));
+                        let idents: Vec<Ident> = args.iter().map(|a| ident(a)).collect();
+                        let tys: Vec<Ty<'tcx>> = args.iter().map(|a| a.ty(body, tcx)).collect();
                         self.call(
                             &mut own,
                             Some(&mut calls),
@@ -733,6 +1329,8 @@ impl<'tcx> Analyzer<'tcx> {
                             &srcs,
                             origin,
                             span,
+                            &tys,
+                            &idents,
                         );
                     }
                     None => own.opaque.push("call through a function pointer".into()),
@@ -760,6 +1358,8 @@ impl<'tcx> Analyzer<'tcx> {
         srcs: &[Src],
         origin: Option<DefId>,
         span: Span,
+        tys: &[Ty<'tcx>],
+        idents: &[Ident],
     ) {
         let tcx = self.tcx;
         let instance = Instance::try_resolve(tcx, typing_env, callee, gargs)
@@ -782,7 +1382,9 @@ impl<'tcx> Analyzer<'tcx> {
             let path = display_path(tcx, callee);
             if let Some(r) = self.linked.get(&key) {
                 for e in &r.effects {
-                    let mut e = at_call(e, None);
+                    let Some(mut e) = at_call(e, None, None) else {
+                        continue;
+                    };
                     e.via.insert(0, path.clone());
                     summary.add(e, span);
                 }
@@ -819,6 +1421,19 @@ impl<'tcx> Analyzer<'tcx> {
             Some(Src::Param(k)) => (None, Some(*k)),
             _ => (None, None),
         };
+        // What the standard library does to the objects behind its arguments: a cell, lock,
+        // atomic or thread-local reached through a shared reference.
+        // (Not in the code `#[psync::graph]` generates around the statements: its own
+        // bookkeeping, such as a synchronous chain's progress counter, is not the program's.)
+        if krate != "psync"
+            && !self.library
+            && OPAQUE_STD.contains(&krate)
+            && !psync_generated(tcx, span)
+        {
+            for e in self.std_state(&name, tys, idents, typing_env, &path) {
+                summary.add(e, span);
+            }
+        }
         let mut add = |domain, access, (target, arg): (Option<String>, Option<usize>)| {
             summary.add(
                 Effect {
@@ -890,12 +1505,13 @@ impl<'tcx> Analyzer<'tcx> {
                 Some(calls) if self.has_body(resolved) => calls.push(Edge {
                     callee: resolved,
                     srcs: srcs.to_vec(),
+                    idents: idents.to_vec(),
                     span,
                     via: Some(path.clone()),
                 }),
                 _ => {
                     let inner = self.summarize(resolved);
-                    summary.absorb(&inner, span, Some(&path), Some(srcs));
+                    summary.absorb(&inner, span, Some(&path), Some(srcs), Some(idents));
                 }
             }
             if !self.has_body(resolved) && !library {
@@ -920,7 +1536,9 @@ impl<'tcx> Analyzer<'tcx> {
             None if summarized && !use_verb => {}
             Some(s) if !use_verb => {
                 for effect in s.effects {
-                    let mut effect = at_call(&effect, Some(srcs));
+                    let Some(mut effect) = at_call(&effect, Some(srcs), Some(idents)) else {
+                        continue;
+                    };
                     effect.via.insert(0, path.clone());
                     summary.add(effect, span);
                 }
@@ -1068,8 +1686,21 @@ impl<'tcx> Analyzer<'tcx> {
                 let mut one = Summary::default();
                 // In terms of the call's own arguments: the macro reads them at the call site.
                 let srcs: Vec<Src> = (0..args.len()).map(Src::Param).collect();
+                // A static named in the call is that static; any other argument is the macro's.
+                let idents: Vec<Ident> = args
+                    .iter()
+                    .enumerate()
+                    .map(|(j, a)| match a {
+                        Operand::Constant(c) => self.static_of(c, 0).map_or(Ident::Param(j), |d| {
+                            Ident::Static(self.static_path(d), self.is_observed(d))
+                        }),
+                        _ => Ident::Param(j),
+                    })
+                    .collect();
+                let tys: Vec<Ty<'tcx>> = args.iter().map(|a| a.ty(body, tcx)).collect();
                 self.call(
                     &mut one, None, typing_env, callee, gargs, &args, &srcs, None, *fn_span,
+                    &tys, &idents,
                 );
                 let name = tcx
                     .opt_item_name(callee)
@@ -1375,6 +2006,7 @@ impl<'tcx> Analyzer<'tcx> {
                     .collect();
                 self.call(
                     &mut one, None, typing_env, callee, gargs, &args, &srcs, None, *fn_span,
+                    &[], &[],
                 );
                 if one.effects.is_empty() && !callee.is_local() {
                     continue;
@@ -2108,23 +2740,35 @@ impl<'a, 'tcx> Checker<'a, 'tcx> {
         for (j, later) in chains.iter().enumerate() {
             for (i, earlier) in chains[..j].iter().enumerate() {
                 // Two chains touch the same resource, at least one writing.
-                if !(earlier.indep || later.indep) {
+                // Hidden state is no outside resource: `independent` does not cover it.
+                {
                     let pair = summaries[i].effects.iter().find_map(|a| {
                         summaries[j]
                             .effects
                             .iter()
-                            .find(|b| conflict(&a.effect, &b.effect))
+                            .find(|b| {
+                                let state = is_state(&a.effect) || is_state(&b.effect);
+                                (state || !(earlier.indep || later.indep))
+                                    && self.chains_conflict(function, earlier, later, &a.effect, &b.effect)
+                            })
                             .map(|b| (a, b))
                     });
                     if let Some((a, b)) = pair {
                         let output = a.effect.domain == Domain::Output;
+                        let state = is_state(&a.effect);
                         self.report(
                             if output {
                                 Severity::Note
                             } else {
                                 Severity::Warning
                             },
-                            if output { "output-order" } else { "conflict" },
+                            if output {
+                                "output-order"
+                            } else if state {
+                                "shared-state"
+                            } else {
+                                "conflict"
+                            },
                             function,
                             b.span,
                             format!(
@@ -2166,7 +2810,7 @@ impl<'a, 'tcx> Checker<'a, 'tcx> {
                     && let Some(w) = summaries[j]
                         .effects
                         .iter()
-                        .find(|l| l.effect.writes() && l.effect.domain != Domain::Output)
+                        .find(|l| self.real_write(function, later, &l.effect))
                 {
                     let how = if panics { "may panic" } else { "exits early" };
                     self.report(
@@ -2195,10 +2839,10 @@ impl<'a, 'tcx> Checker<'a, 'tcx> {
         let writers: Vec<usize> = summaries
             .iter()
             .enumerate()
-            .filter(|(_, s)| {
+            .filter(|(k, s)| {
                 s.effects
                     .iter()
-                    .any(|l| l.effect.writes() && l.effect.domain != Domain::Output)
+                    .any(|l| self.real_write(function, &chains[*k], &l.effect))
             })
             .map(|(k, _)| k)
             .collect();
@@ -2222,15 +2866,74 @@ impl<'a, 'tcx> Checker<'a, 'tcx> {
         }
     }
 
+    /// The variable of the annotated function that a chain's capture `k` holds.
+    fn capture_var(&self, chain: &Chain, k: usize) -> Option<rustc_hir::HirId> {
+        let local = chain.body.as_local()?;
+        let captures = self.analyzer.tcx.closure_captures(local);
+        captures.get(k).map(|c| c.get_root_variable())
+    }
+
+    /// `observe(x)` on the annotated function: the state behind `x` is measured on purpose.
+    fn observed_var(&self, function: DefId, var: rustc_hir::HirId) -> bool {
+        let tcx = self.analyzer.tcx;
+        let name = tcx.hir_name(var).to_string();
+        self.analyzer
+            .statics
+            .observed
+            .contains(&(function, name))
+    }
+
+    /// The state behind chain capture `arg` is measured on purpose.
+    fn observed_effect(&self, function: DefId, chain: &Chain, e: &Effect) -> bool {
+        match (&e.domain, e.arg) {
+            (Domain::Observed(_), _) => true,
+            (Domain::State(s), Some(k)) if s.is_empty() => self
+                .capture_var(chain, k)
+                .is_some_and(|v| self.observed_var(function, v)),
+            _ => false,
+        }
+    }
+
+    /// A write that sequential code would not have done after an earlier exit, or that may stop
+    /// halfway when the future is dropped: not output, not state measured on purpose.
+    fn real_write(&self, function: DefId, chain: &Chain, e: &Effect) -> bool {
+        e.writes() && e.domain != Domain::Output && !self.observed_effect(function, chain, e)
+    }
+
+    /// Whether effects of two chains of one level conflict. The state behind two captures is the
+    /// same only if they hold the same variable of the annotated function.
+    fn chains_conflict(
+        &self,
+        function: DefId,
+        x: &Chain,
+        y: &Chain,
+        a: &Effect,
+        b: &Effect,
+    ) -> bool {
+        if self.observed_effect(function, x, a) || self.observed_effect(function, y, b) {
+            return false;
+        }
+        if let (Domain::State(p), Domain::State(q)) = (&a.domain, &b.domain)
+            && p.is_empty()
+            && q.is_empty()
+            && let (Some(i), Some(j)) = (a.arg, b.arg)
+            && let (Some(u), Some(v)) = (self.capture_var(x, i), self.capture_var(y, j))
+        {
+            return (a.writes() || b.writes()) && u == v;
+        }
+        conflict(a, b)
+    }
+
     fn check_prefix(&mut self, function: DefId, prefix: &Prefix) {
         if !prefix.terminates || prefix.spec {
             return;
         }
         let summary = self.analyzer.summarize(prefix.body);
-        if let Some(w) = summary
-            .effects
-            .iter()
-            .find(|l| l.effect.writes() && l.effect.domain != Domain::Output)
+        if let Some(w) = summary.effects.iter().find(|l| {
+            l.effect.writes()
+                && l.effect.domain != Domain::Output
+                && !matches!(l.effect.domain, Domain::Observed(_))
+        })
         {
             let tcx = self.analyzer.tcx;
             let primary = if w.span.from_expansion() {
@@ -2351,6 +3054,20 @@ impl<'a, 'tcx> Checker<'a, 'tcx> {
             let _ = std::fs::write(file, json);
         }
     }
+}
+
+/// Code that `#[psync::graph]` wrote, not the user: its spans come from the macro's expansion.
+fn psync_generated(tcx: TyCtxt<'_>, span: Span) -> bool {
+    span.from_expansion()
+        && span
+            .ctxt()
+            .outer_expn_data()
+            .macro_def_id
+            .is_some_and(|d| tcx.crate_name(d.krate).as_str() == "psync_macros")
+}
+
+fn is_state(e: &Effect) -> bool {
+    matches!(e.domain, Domain::State(_))
 }
 
 /// The body of an `async` block or async closure passed to a marker.

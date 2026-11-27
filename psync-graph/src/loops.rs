@@ -117,7 +117,7 @@ impl LoopScope {
         if self.terminates
             && !self.speculate
             && !n.speculate
-            && let Some(w) = n.effects.iter().find(|e| e.writes())
+            && let Some(w) = n.effects.iter().find(|e| e.real_write())
         {
             return Some(format!(
                 "would {} for later items before knowing whether an earlier item ends the loop \
@@ -620,7 +620,7 @@ impl Rewriter<'_> {
         );
         let speculate =
             self.scope.effects.speculate || attrs.iter().any(|a| is_psync_attr(a, "speculate"));
-        if !speculate && terminates(body) && fa.iter().any(|e| e.writes()) {
+        if !speculate && terminates(body) && fa.iter().any(|e| e.real_write()) {
             return None;
         }
         let shared = |es: &[Effect]| -> Vec<Effect> {
