@@ -215,7 +215,9 @@ and that the rule is unsound for a server whose reads change state
 **Schedules are certified.** psync writes a certificate per concurrent region, and a Lean checker,
 proven sound, accepts or rejects it; CI checks all of the repository's schedules
 ([Certified schedules](./certificates.md)). The checker's hypothesis, that footprints are right,
-is proved for a fragment of MIR with cross-function summaries (`verify/Footprint.lean`). Next:
+is proved for a fragment of MIR with cross-function summaries (`verify/Footprint.lean`), and
+`hindB` decides it for a generated certificate against compiled statements, though none of the 41
+generated certificates is tied to compiled code yet ([the route](./certificates.md#the-route)). Next:
 specifications for HTTP, the Kubernetes API and S3, checked against server logs, then
 certificates for prefetched loops and exits.
 
@@ -267,4 +269,4 @@ tokio) is open.
 | 7. processes and cwd | over-conservative processes; cwd hazard | small |
 | 5. staged writes, 6. cancellation | wasted work, writes waiting on exits | medium to large |
 | 8. compiler driver (built: `cargo psync check`, `build`, `fix`; per-argument effects for synchronous helpers; synchronous levels checked) | the token-level foundation | per-argument effects also through `async fn` coroutines; exit positions in the checker; control dependence, data edges and the macro's joins per async body (`cargo psync pdg`); next: loop summaries in the PDG; paths computed by `join` in MIR; async closures |
-| 9. Lean model (scheduling built: `verify/Schedule.lean`) | the token-level foundation | exit replay, the server model, certified schedules and footprint soundness (with real compiler output through Charon) built |
+| 9. Lean model (scheduling built: `verify/Schedule.lean`) | the token-level foundation | exit replay, the server model, certified schedules and footprint soundness (with real compiler output through Charon) built; `hind` decided against compiled statements (`hindB`), but none of the 41 generated certificates tied to compiled code yet |
